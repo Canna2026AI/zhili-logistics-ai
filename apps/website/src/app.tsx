@@ -14,8 +14,14 @@ import {
   UserRound,
 } from 'lucide-react';
 import { Button, Dialog, StatusTag } from '@zhili/ui';
+import { websitePort } from './api';
 
 type LegalPage = 'privacy' | 'terms' | 'license';
+const basePath = window.location.pathname.startsWith('/zhili-logistics-ai')
+  ? '/zhili-logistics-ai'
+  : '';
+const appPath = () =>
+  window.location.pathname.replace(basePath, '').replace(/^\//, '').replace(/\/$/, '');
 
 const legalContent: Record<
   LegalPage,
@@ -54,10 +60,10 @@ function Brand() {
   return (
     <a
       className="site-logo"
-      href="/"
+      href={`${basePath}/`}
       onClick={(event) => {
         event.preventDefault();
-        window.history.pushState({}, '', '/');
+        window.history.pushState({}, '', `${basePath}/`);
         window.dispatchEvent(new PopStateEvent('popstate'));
       }}
     >
@@ -316,20 +322,22 @@ function SiteFooter({ navigate }: { navigate: (page: LegalPage) => void }) {
 }
 
 export function App() {
-  const [path, setPath] = useState(window.location.pathname);
+  const [path, setPath] = useState(appPath());
   const [loginOpen, setLoginOpen] = useState(false);
   const [demoOpen, setDemoOpen] = useState(false);
   const [toast, setToast] = useState('');
+  const [account, setAccount] = useState('');
+  const [password, setPassword] = useState('');
   useEffect(() => {
-    const onPop = () => setPath(window.location.pathname);
+    const onPop = () => setPath(appPath());
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
   const navigate = (page: LegalPage) => {
-    window.history.pushState({}, '', `/${page}`);
-    setPath(`/${page}`);
+    window.history.pushState({}, '', `${basePath}/${page}/`);
+    setPath(page);
   };
-  const currentLegal = path.slice(1) as LegalPage;
+  const currentLegal = path as LegalPage;
   useEffect(() => {
     const page = legalContent[currentLegal];
     document.title = page
@@ -352,27 +360,49 @@ export function App() {
     }
     const suffix = page ? `/${currentLegal}` : '/';
     canonical.href = `https://canna2026ai.github.io/zhili-logistics-ai${suffix}`;
+    let structured = document.querySelector<HTMLScriptElement>(
+      'script[type="application/ld+json"]'
+    );
+    if (!structured) {
+      structured = document.createElement('script');
+      structured.type = 'application/ld+json';
+      document.head.append(structured);
+    }
+    structured.textContent = JSON.stringify({
+      '@context': 'https://schema.org',
+      '@type': page ? 'WebPage' : 'SoftwareApplication',
+      name: page ? page.title : '智立科技物流AI系统',
+      applicationCategory: 'BusinessApplication',
+      operatingSystem: 'Web',
+      url: canonical.href,
+    });
   }, [currentLegal]);
   if (legalContent[currentLegal])
     return (
       <LegalView
         page={currentLegal}
         login={() => {
-          window.history.pushState({}, '', '/');
-          setPath('/');
+          window.history.pushState({}, '', `${basePath}/`);
+          setPath('');
           setLoginOpen(true);
         }}
         navigate={navigate}
         goHome={() => {
-          window.history.pushState({}, '', '/');
-          setPath('/');
+          window.history.pushState({}, '', `${basePath}/`);
+          setPath('');
         }}
       />
     );
-  const submitDemo = (event: FormEvent) => {
+  const submitDemo = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setDemoOpen(false);
-    setToast('预约已提交，方案顾问将在 1 个工作日内联系您。');
+    const form = new FormData(event.currentTarget);
+    void websitePort
+      .requestDemo(String(form.get('company')), String(form.get('phone')))
+      .then(() => {
+        setDemoOpen(false);
+        setToast('预约已提交，方案顾问将在 1 个工作日内联系您。');
+      })
+      .catch((error: Error) => setToast(error.message));
   };
   return (
     <div className="site">
@@ -531,20 +561,50 @@ export function App() {
         title="登录智立系统"
         description="选择登录入口；真实身份校验将在后端接入企业会话。"
         onOpenChange={setLoginOpen}
-        footer={<Button onClick={() => setLoginOpen(false)}>密码登录</Button>}
+        footer={
+          <Button
+            disabled={!account.trim() || !password}
+            onClick={() =>
+              void websitePort
+                .login(account.trim(), password)
+                .then(() => {
+                  setLoginOpen(false);
+                  setToast('登录成功，正在进入企业工作台。');
+                })
+                .catch((error: Error) => setToast(error.message))
+            }
+          >
+            密码登录
+          </Button>
+        }
       >
         <div className="site-login-options">
           <label>
             企业账号
-            <input aria-label="企业账号" placeholder="手机号 / 邮箱" />
+            <input
+              aria-label="企业账号"
+              placeholder="手机号 / 邮箱"
+              value={account}
+              onChange={(event) => setAccount(event.target.value)}
+            />
           </label>
           <label>
             密码
-            <input type="password" aria-label="密码" />
+            <input
+              type="password"
+              aria-label="密码"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
           </label>
           <Button
             variant="secondary"
-            onClick={() => setToast('微信扫码登录入口已打开，请使用企业微信完成授权。')}
+            onClick={() =>
+              void websitePort
+                .startWechat()
+                .then(() => setToast('微信扫码登录入口已打开，请使用企业微信完成授权。'))
+                .catch((error: Error) => setToast(error.message))
+            }
           >
             微信扫码登录
           </Button>
@@ -566,11 +626,11 @@ export function App() {
         <form className="site-demo-form" onSubmit={submitDemo}>
           <label>
             企业名称
-            <input aria-label="企业名称" required />
+            <input name="company" aria-label="企业名称" required />
           </label>
           <label>
             联系电话
-            <input aria-label="联系电话" required />
+            <input name="phone" aria-label="联系电话" required />
           </label>
           <label>
             关注能力

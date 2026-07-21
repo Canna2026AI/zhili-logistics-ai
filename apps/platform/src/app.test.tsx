@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
+import { platformPort } from './api';
 
-afterEach(cleanup);
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+  cleanup();
+});
 
 describe('平台控制台', () => {
   it('创建租户后立即进入隔离的租户列表', async () => {
@@ -44,11 +49,50 @@ describe('平台控制台', () => {
     expect(screen.getByRole('button', { name: '以管理员身份进入' })).toBeDisabled();
     await user.type(reason, '协助排查订单同步问题');
     await user.click(screen.getByRole('button', { name: '以管理员身份进入' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('剩余 60 分钟');
+    expect(await screen.findByRole('status')).toHaveTextContent('张伟（系统管理员）');
+    expect(screen.getByRole('status')).toHaveTextContent('协助排查订单同步问题');
+    expect(screen.getByRole('status')).toHaveTextContent('剩余 60:00');
+    expect(screen.getByRole('button', { name: '套餐与模块' })).toBeDisabled();
+    expect(screen.getByRole('region', { name: '代入租户上下文' })).toHaveTextContent(
+      '平台套餐、模块、配额、公告与租户生命周期写操作已隔离'
+    );
+    expect(screen.queryByRole('button', { name: '新建租户' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '代入与审计' }));
     expect(screen.getByRole('table', { name: '审计记录' })).toHaveTextContent(
       '协助排查订单同步问题'
     );
+  });
+
+  it('代入会真实倒计时并在到期后安全返回平台上下文', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '代入 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '以管理员身份进入' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('剩余 60:00');
+    await act(() => vi.advanceTimersByTimeAsync(60 * 60 * 1000));
+    expect(await screen.findByRole('status')).toHaveTextContent('代入会话已过期');
+    expect(screen.getByRole('button', { name: '套餐与模块' })).toBeEnabled();
+    vi.useRealTimers();
+  });
+
+  it('租户可停用恢复，套餐配额和到期可保存新版本', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '停用租户' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('租户已停用');
+    await user.click(screen.getByRole('button', { name: '恢复租户' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('租户已恢复');
+    await user.click(screen.getByRole('button', { name: '配额与用量' }));
+    await user.clear(screen.getByLabelText('运单配额上限'));
+    await user.type(screen.getByLabelText('运单配额上限'), '600000');
+    await user.selectOptions(screen.getByLabelText('租户套餐'), '专业版');
+    await user.clear(screen.getByLabelText('租户到期日'));
+    await user.type(screen.getByLabelText('租户到期日'), '2027-08-31');
+    await user.click(screen.getByRole('button', { name: '保存租户配置' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('ENT-0002');
+    expect(screen.getByText(/320,000 \/ 600,000/)).toBeVisible();
   });
 
   it('可管理套餐模块、公告和运行中心', async () => {
@@ -82,6 +126,23 @@ describe('平台控制台', () => {
     ]) {
       await user.selectOptions(screen.getByLabelText('运行状态'), value);
       expect(screen.getByRole(value === 'failed' ? 'alert' : 'status')).toHaveTextContent(expected);
+      if (value === 'failed' || value === 'forbidden') {
+        expect(screen.queryByRole('table', { name: '运行作业' })).not.toBeInTheDocument();
+      }
     }
+  });
+
+  it('租户创建失败时保留对话框输入且不写列表', async () => {
+    vi.spyOn(platformPort, 'createTenant').mockRejectedValueOnce(new Error('租户服务失败'));
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getAllByRole('button', { name: '新建租户' })[0]);
+    await user.type(screen.getByLabelText('租户名称'), '失败租户');
+    await user.type(screen.getByLabelText('租户 SLUG'), 'failed-tenant');
+    await user.click(screen.getByRole('button', { name: '确认创建租户' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('租户服务失败');
+    expect(screen.getByRole('dialog', { name: '新建租户' })).toBeVisible();
+    expect(screen.getByLabelText('租户名称')).toHaveValue('失败租户');
+    expect(screen.getByRole('table', { name: '租户列表' })).not.toHaveTextContent('失败租户');
   });
 });

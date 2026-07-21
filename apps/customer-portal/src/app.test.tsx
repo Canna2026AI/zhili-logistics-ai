@@ -2,10 +2,15 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
+import { customerPort } from './api';
 
-afterEach(cleanup);
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.clear();
+  cleanup();
+});
 
 describe('客户门户', () => {
   it('工作台提供工单、通知、付款凭证和在线客服入口', () => {
@@ -14,6 +19,16 @@ describe('客户门户', () => {
     expect(screen.getByRole('heading', { name: '通知中心' })).toBeVisible();
     expect(screen.getByRole('button', { name: '提交付款凭证' })).toBeVisible();
     expect(screen.getByRole('button', { name: '在线客服' })).toBeVisible();
+  });
+
+  it('快捷入口编辑通过 API port 持久化布局', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '编辑' }));
+    await user.click(screen.getByRole('button', { name: '隐藏 提交付款凭证' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('快捷入口布局已保存');
+    expect(screen.queryByRole('button', { name: '隐藏 提交付款凭证' })).not.toBeInTheDocument();
+    expect(localStorage.getItem('zhili.customer.shortcuts')).not.toContain('账单与付款');
   });
 
   it('完成查价并把报价带入新建预报', async () => {
@@ -44,11 +59,11 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '提交预报' }));
     expect(await screen.findByRole('status')).toHaveTextContent('预报已提交');
     await user.click(screen.getByRole('button', { name: '我的运单' }));
-    expect(screen.getByRole('table', { name: '我的运单列表' })).toHaveTextContent('S2505120004');
+    expect(screen.getByRole('table', { name: '我的运单列表' })).toHaveTextContent('S2505120006');
     expect(screen.queryByText('华南跨境供应链')).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '查看轨迹 S2505120004' }));
+    await user.click(screen.getByRole('button', { name: '查看轨迹 S2505120006' }));
     expect(screen.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
-    expect(screen.getByText('已收货 · 悉尼仓库')).toBeVisible();
+    expect(screen.getByText('预报已提交 · 等待仓库收货')).toBeVisible();
   });
 
   it('付款需要危险确认，成功后写入付款记录', async () => {
@@ -58,12 +73,68 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '账单与付款' }));
     expect(screen.getByText('预存款 CNY 128,560.00')).toBeVisible();
     expect(screen.getByText('未分配收款 CNY 1,200.00')).toBeVisible();
+    expect(screen.getByRole('table', { name: '付款记录' })).not.toHaveTextContent(
+      'PAY-20260512-01'
+    );
     await user.click(screen.getByRole('button', { name: '支付 ST202605-0008' }));
     const dialog = screen.getByRole('dialog', { name: '确认支付' });
     expect(dialog).toHaveTextContent('CNY 2,320.00');
     await user.click(screen.getByRole('button', { name: '确认支付' }));
     expect(await screen.findByRole('status')).toHaveTextContent('支付订单已创建');
     expect(screen.getByRole('table', { name: '付款记录' })).toHaveTextContent('PAY-20260512-01');
+  });
+
+  it('报价使用 canonical 分项且费用守恒', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '立即查价' }));
+    await user.click(screen.getByRole('button', { name: '获取报价' }));
+    const result = screen.getByRole('region', { name: '报价 Q2505120042' });
+    expect(result).toHaveTextContent('基础运费CNY 4,680.00');
+    expect(result).toHaveTextContent('燃油附加费CNY 514.80');
+    expect(result).toHaveTextContent('偏远附加费CNY 80.00');
+    expect(result).toHaveTextContent('操作费CNY 45.20');
+    expect(result).toHaveTextContent('CNY 5,320.00');
+  });
+
+  it('草稿、批量导入、地址簿、付款凭证、查询和导出都有状态闭环', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      within(screen.getByRole('navigation', { name: '客户门户导航' })).getByRole('button', {
+        name: '新建运单',
+      })
+    );
+    await user.type(screen.getByLabelText('收件人'), 'Draft User');
+    await user.click(screen.getByRole('button', { name: '保存草稿' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('草稿已保存');
+
+    await user.click(screen.getByRole('button', { name: '批量导入' }));
+    await user.upload(screen.getByLabelText('导入文件'), new File(['a,b'], 'orders.csv'));
+    await user.click(screen.getByRole('button', { name: '开始导入' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('导入完成');
+
+    await user.click(screen.getByRole('button', { name: '地址簿' }));
+    await user.type(screen.getByLabelText('地址名称'), '洛杉矶仓');
+    await user.click(screen.getByRole('button', { name: '保存地址' }));
+    expect(screen.getByRole('table', { name: '地址列表' })).toHaveTextContent('洛杉矶仓');
+
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+    await user.upload(
+      screen.getByLabelText('付款凭证'),
+      new File(['proof'], 'proof.png', { type: 'image/png' })
+    );
+    await user.click(screen.getByRole('button', { name: '上传并关联凭证' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('付款凭证已关联'));
+
+    await user.click(screen.getByRole('button', { name: '我的运单' }));
+    await user.type(screen.getByLabelText('搜索运单'), '0004');
+    await user.click(screen.getByRole('button', { name: '查询' }));
+    expect(screen.getByRole('table', { name: '我的运单列表' })).not.toHaveTextContent(
+      'S2505120001'
+    );
+    await user.click(screen.getByRole('button', { name: '导出当前结果' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('导出任务已创建');
   });
 
   it('创建工单可呈现部分成功并能申请 API', async () => {
@@ -88,9 +159,32 @@ describe('客户门户', () => {
     expect(screen.getByRole('alert')).toHaveTextContent('请求失败');
     await user.selectOptions(screen.getByLabelText('演示状态'), 'forbidden');
     expect(screen.getByRole('alert')).toHaveTextContent('缺少 ticket.read 权限');
+    expect(screen.queryByText('CNY 128,560.00')).not.toBeInTheDocument();
+    expect(
+      within(screen.getByRole('navigation', { name: '客户门户导航' })).getByRole('button', {
+        name: '新建运单',
+      })
+    ).toBeDisabled();
     await user.selectOptions(screen.getByLabelText('演示状态'), 'stale');
     expect(screen.getByRole('alert')).toHaveTextContent('页面数据已过期');
     await user.selectOptions(screen.getByLabelText('演示状态'), 'empty');
     expect(screen.getByText(/当前筛选没有数据/)).toBeVisible();
+  });
+
+  it('API 写失败时保留输入且不伪造运单', async () => {
+    vi.spyOn(customerPort, 'createOrder').mockRejectedValueOnce(new Error('网关失败，请重试'));
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      within(screen.getByRole('navigation', { name: '客户门户导航' })).getByRole('button', {
+        name: '新建运单',
+      })
+    );
+    await user.type(screen.getByLabelText('收件人'), '保留的收件人');
+    await user.type(screen.getByLabelText('目的地'), 'US-LAX');
+    await user.click(screen.getByRole('button', { name: '提交预报' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('网关失败');
+    expect(screen.getByLabelText('收件人')).toHaveValue('保留的收件人');
+    expect(localStorage.getItem('zhili.customer.waybills')).not.toContain('S2505120006');
   });
 });

@@ -1,5 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
+import { platformPort } from './api';
 
 type Page = '租户管理' | '套餐与模块' | '配额与用量' | '平台公告' | '代入与审计' | '运行中心';
 type RuntimeState = 'normal' | 'loading' | 'empty' | 'failed' | 'forbidden' | 'stale' | 'partial';
@@ -14,6 +15,13 @@ type Tenant = {
   expires: string;
   days: number;
   health: '健康' | '警告' | '异常';
+  status: 'ACTIVE' | 'SUSPENDED';
+  version: number;
+};
+type Impersonation = {
+  tenant: Tenant;
+  reason: string;
+  expiresAt: number;
 };
 
 const tenantSeed: Tenant[] = [
@@ -28,6 +36,8 @@ const tenantSeed: Tenant[] = [
     expires: '2026-08-31',
     days: 184,
     health: '健康',
+    status: 'ACTIVE',
+    version: 1,
   },
   {
     id: '2',
@@ -40,6 +50,8 @@ const tenantSeed: Tenant[] = [
     expires: '2026-07-15',
     days: 137,
     health: '健康',
+    status: 'ACTIVE',
+    version: 1,
   },
   {
     id: '3',
@@ -52,6 +64,8 @@ const tenantSeed: Tenant[] = [
     expires: '2026-06-20',
     days: 112,
     health: '警告',
+    status: 'ACTIVE',
+    version: 1,
   },
   {
     id: '4',
@@ -64,6 +78,8 @@ const tenantSeed: Tenant[] = [
     expires: '2026-01-10',
     days: 16,
     health: '异常',
+    status: 'ACTIVE',
+    version: 1,
   },
   {
     id: '5',
@@ -76,8 +92,27 @@ const tenantSeed: Tenant[] = [
     expires: '2026-09-05',
     days: 189,
     health: '健康',
+    status: 'ACTIVE',
+    version: 1,
   },
 ];
+const readTenants = () => {
+  try {
+    return JSON.parse(localStorage.getItem('zhili.platform.tenants') ?? '') as Tenant[];
+  } catch {
+    return tenantSeed;
+  }
+};
+const readSession = () => {
+  try {
+    const session = JSON.parse(
+      localStorage.getItem('zhili.platform.impersonation') ?? ''
+    ) as Impersonation;
+    return session.expiresAt > Date.now() ? session : null;
+  } catch {
+    return null;
+  }
+};
 
 const pages: Page[] = [
   '租户管理',
@@ -119,7 +154,13 @@ function Header({
   );
 }
 
-function TenantDetail({ tenant }: { tenant: Tenant }) {
+function TenantDetail({
+  tenant,
+  changeStatus,
+}: {
+  tenant: Tenant;
+  changeStatus: (status: 'ACTIVE' | 'SUSPENDED') => void;
+}) {
   return (
     <div className="platform-detail">
       <div className="platform-identity">
@@ -128,7 +169,9 @@ function TenantDetail({ tenant }: { tenant: Tenant }) {
           <strong>{tenant.name}</strong>
           <small>{tenant.slug}</small>
         </div>
-        <StatusTag tone="success">正常</StatusTag>
+        <StatusTag tone={tenant.status === 'ACTIVE' ? 'success' : 'danger'}>
+          {tenant.status === 'ACTIVE' ? '正常' : '已停用'}
+        </StatusTag>
       </div>
       <dl className="platform-kv">
         <div>
@@ -142,6 +185,12 @@ function TenantDetail({ tenant }: { tenant: Tenant }) {
           </dd>
         </div>
       </dl>
+      <Button
+        variant={tenant.status === 'ACTIVE' ? 'danger' : 'secondary'}
+        onClick={() => changeStatus(tenant.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE')}
+      >
+        {tenant.status === 'ACTIVE' ? '停用租户' : '恢复租户'}
+      </Button>
       <section>
         <h3>模块授权</h3>
         {modules.map((module) => (
@@ -192,6 +241,13 @@ function TenantsPage({
   onDetail: (tenant: Tenant) => void;
   onImpersonate: (tenant: Tenant) => void;
 }) {
+  const [planFilter, setPlanFilter] = useState('全部版本');
+  const [healthFilter, setHealthFilter] = useState('健康状态');
+  const visible = tenants.filter(
+    (tenant) =>
+      (planFilter === '全部版本' || tenant.plan === planFilter) &&
+      (healthFilter === '健康状态' || tenant.health === healthFilter)
+  );
   return (
     <>
       <Header
@@ -221,15 +277,36 @@ function TenantsPage({
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
-        <select aria-label="套餐筛选">
+        <select
+          aria-label="套餐筛选"
+          value={planFilter}
+          onChange={(event) => setPlanFilter(event.target.value)}
+        >
           <option>全部版本</option>
           <option>企业版</option>
+          <option>专业版</option>
+          <option>基础版</option>
         </select>
-        <select aria-label="健康筛选">
+        <select
+          aria-label="健康筛选"
+          value={healthFilter}
+          onChange={(event) => setHealthFilter(event.target.value)}
+        >
           <option>健康状态</option>
+          <option>健康</option>
+          <option>警告</option>
           <option>异常</option>
         </select>
-        <Button variant="secondary">重置</Button>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            setSearch('');
+            setPlanFilter('全部版本');
+            setHealthFilter('健康状态');
+          }}
+        >
+          重置
+        </Button>
       </div>
       <div className="platform-table-wrap">
         <table className="platform-table" aria-label="租户列表">
@@ -247,7 +324,7 @@ function TenantsPage({
             </tr>
           </thead>
           <tbody>
-            {tenants.map((tenant) => (
+            {visible.map((tenant) => (
               <tr key={tenant.id}>
                 <td>
                   <button
@@ -320,25 +397,57 @@ function QuotaCell({ value, percent }: { value: string; percent: number }) {
 
 function ModulesPage({ notify }: { notify: (text: string) => void }) {
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(modules.map((item) => [item, true]))
+    (() => {
+      try {
+        return JSON.parse(localStorage.getItem('zhili.platform.modules') ?? '') as Record<
+          string,
+          boolean
+        >;
+      } catch {
+        return Object.fromEntries(modules.map((item) => [item, true]));
+      }
+    })()
   );
+  const [plan, setPlan] = useState('企业版');
+  const [plans, setPlans] = useState(['企业版', '专业版', '基础版']);
   return (
     <>
       <Header
         title="套餐与模块"
         description="按套餐定义默认能力，租户覆盖会记录版本和操作者。"
-        action={<Button>新建套餐</Button>}
+        action={
+          <Button
+            onClick={() => {
+              void platformPort
+                .saveEntitlements('plan-draft', { kind: 'PLAN_DRAFT', name: '定制版' })
+                .then(() => {
+                  if (!plans.includes('定制版')) setPlans((items) => [...items, '定制版']);
+                  setPlan('定制版');
+                  notify('新套餐草稿“定制版”已创建。');
+                })
+                .catch((error: Error) => notify(error.message));
+            }}
+          >
+            新建套餐
+          </Button>
+        }
       />
       <section className="platform-plan-grid">
         <aside>
-          <button data-active>企业版</button>
-          <button>专业版</button>
-          <button>基础版</button>
+          {plans.map((item) => (
+            <button
+              key={item}
+              data-active={plan === item || undefined}
+              onClick={() => setPlan(item)}
+            >
+              {item}
+            </button>
+          ))}
         </aside>
         <div className="platform-panel">
           <div className="platform-panel-head">
             <div>
-              <h2>企业版模块授权</h2>
+              <h2>{plan}模块授权</h2>
               <p>版本 PLAN-ENT-2026.05 · 已发布</p>
             </div>
             <StatusTag tone="success">生效中</StatusTag>
@@ -355,8 +464,18 @@ function ModulesPage({ notify }: { notify: (text: string) => void }) {
                 aria-label={module}
                 checked={enabled[module]}
                 onChange={() => {
-                  setEnabled((current) => ({ ...current, [module]: !current[module] }));
-                  notify('模块授权已保存，变更版本 PLAN-ENT-2026.06。');
+                  const next = !enabled[module];
+                  void platformPort
+                    .saveEntitlements('1', { plan, module, enabled: next })
+                    .then(() => {
+                      setEnabled((current) => {
+                        const updated = { ...current, [module]: next };
+                        localStorage.setItem('zhili.platform.modules', JSON.stringify(updated));
+                        return updated;
+                      });
+                      notify('模块授权已保存，变更版本 PLAN-ENT-2026.06。');
+                    })
+                    .catch((error: Error) => notify(error.message));
                 }}
               />
             </label>
@@ -367,13 +486,73 @@ function ModulesPage({ notify }: { notify: (text: string) => void }) {
   );
 }
 
-function UsagePage() {
+function UsagePage({ notify }: { notify: (text: string) => void }) {
+  const saved = (() => {
+    try {
+      return JSON.parse(localStorage.getItem('zhili.platform.entitlements') ?? '') as {
+        plan: string;
+        limit: string;
+        expires: string;
+      };
+    } catch {
+      return { plan: '企业版', limit: '500000', expires: '2026-08-31' };
+    }
+  })();
+  const [plan, setPlan] = useState(saved.plan);
+  const [limit, setLimit] = useState(saved.limit);
+  const [expires, setExpires] = useState(saved.expires);
+  const [savedLimit, setSavedLimit] = useState(Number(saved.limit).toLocaleString('en-US'));
   return (
     <>
       <Header title="配额与用量" description="运单、API、用户与存储配额均按租户隔离。" />
       <section className="platform-panel platform-usage">
         <h2>上海智立科技有限公司</h2>
-        <Quota label="运单配额" value="320,000 / 500,000" percent={64} />
+        <form
+          className="platform-create-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void platformPort
+              .saveEntitlements('1', { plan, waybillLimit: Number(limit), expires })
+              .then((version) => {
+                localStorage.setItem(
+                  'zhili.platform.entitlements',
+                  JSON.stringify({ plan, limit, expires })
+                );
+                setSavedLimit(Number(limit).toLocaleString('en-US'));
+                notify(`租户配置已保存，版本 ENT-${String(version).padStart(4, '0')}。`);
+              })
+              .catch((error: Error) => notify(error.message));
+          }}
+        >
+          <label>
+            租户套餐
+            <select aria-label="租户套餐" value={plan} onChange={(e) => setPlan(e.target.value)}>
+              <option>基础版</option>
+              <option>专业版</option>
+              <option>企业版</option>
+            </select>
+          </label>
+          <label>
+            运单配额上限
+            <input
+              aria-label="运单配额上限"
+              value={limit}
+              onChange={(event) => setLimit(event.target.value)}
+              inputMode="numeric"
+            />
+          </label>
+          <label>
+            租户到期日
+            <input
+              aria-label="租户到期日"
+              type="date"
+              value={expires}
+              onChange={(event) => setExpires(event.target.value)}
+            />
+          </label>
+          <Button type="submit">保存租户配置</Button>
+        </form>
+        <Quota label="运单配额" value={`320,000 / ${savedLimit}`} percent={64} />
         <Quota label="API 用量" value="2.45M / 10M" percent={24} />
         <Quota label="活跃用户" value="86 / 120" percent={72} />
         <Quota label="存储用量" value="182 GB / 500 GB" percent={36} />
@@ -383,9 +562,17 @@ function UsagePage() {
   );
 }
 
-function AnnouncementsPage() {
+function AnnouncementsPage({ notify }: { notify: (text: string) => void }) {
   const [title, setTitle] = useState('');
-  const [announcements, setAnnouncements] = useState(['2026 年 5 月例行维护通知']);
+  const [announcements, setAnnouncements] = useState<string[]>(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem('zhili.platform.announcements') ?? '["2026 年 5 月例行维护通知"]'
+      ) as string[];
+    } catch {
+      return ['2026 年 5 月例行维护通知'];
+    }
+  });
   return (
     <>
       <Header title="平台公告" description="面向全部或指定租户发布维护、升级与合规通知。" />
@@ -394,10 +581,20 @@ function AnnouncementsPage() {
           className="platform-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (title.trim()) {
-              setAnnouncements((items) => [title.trim(), ...items]);
-              setTitle('');
-            }
+            if (!title.trim()) return;
+            const next = title.trim();
+            void platformPort
+              .publishAnnouncement(next)
+              .then(() => {
+                setAnnouncements((items) => {
+                  const updated = [next, ...items];
+                  localStorage.setItem('zhili.platform.announcements', JSON.stringify(updated));
+                  return updated;
+                });
+                setTitle('');
+                notify('平台公告已发布。');
+              })
+              .catch((error: Error) => notify(error.message));
           }}
         >
           <label>
@@ -500,7 +697,7 @@ function RuntimeNotice({ state }: { state: RuntimeState }) {
   );
 }
 
-function RuntimePage() {
+function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
   const [state, setState] = useState<RuntimeState>('normal');
   return (
     <>
@@ -527,83 +724,113 @@ function RuntimePage() {
         }
       />
       <RuntimeNotice state={state} />
-      <section className="platform-runtime-stats">
-        {[
-          ['API 网关', '99.98%', '健康'],
-          ['作业队列', '42', '正常'],
-          ['连接器', '7 / 8', '警告'],
-          ['失败作业', '2 / 384', '需处理'],
-        ].map(([label, value, status]) => (
-          <div key={label}>
-            <span>{label}</span>
-            <strong>{value}</strong>
-            <small>{status}</small>
+      {state === 'stale' ? (
+        <Button disabled={readOnly} onClick={() => setState('normal')}>
+          刷新运行快照
+        </Button>
+      ) : state === 'partial' ? (
+        <Button disabled={readOnly} onClick={() => setState('normal')}>
+          仅重试 2 个失败项
+        </Button>
+      ) : state === 'failed' ? (
+        <Button disabled={readOnly} onClick={() => setState('normal')}>
+          重试请求
+        </Button>
+      ) : null}
+      {state === 'normal' || state === 'partial' ? (
+        <>
+          <section className="platform-runtime-stats">
+            {[
+              ['API 网关', '99.98%', '健康'],
+              ['作业队列', '42', '正常'],
+              ['连接器', '7 / 8', '警告'],
+              ['失败作业', '2 / 384', '需处理'],
+            ].map(([label, value, status]) => (
+              <div key={label}>
+                <span>{label}</span>
+                <strong>{value}</strong>
+                <small>{status}</small>
+              </div>
+            ))}
+          </section>
+          <div className="platform-table-wrap">
+            <table className="platform-table" aria-label="运行作业">
+              <thead>
+                <tr>
+                  <th>服务</th>
+                  <th>最近运行</th>
+                  <th>成功</th>
+                  <th>失败</th>
+                  <th>耗时 P95</th>
+                  <th>状态</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>支付回调</td>
+                  <td>2026-05-12 10:21</td>
+                  <td>382</td>
+                  <td>2</td>
+                  <td>480ms</td>
+                  <td>
+                    <StatusTag tone="warning">部分失败：2 / 384</StatusTag>
+                  </td>
+                </tr>
+                {state === 'normal' ? (
+                  <>
+                    <tr>
+                      <td>UPS 轨迹同步</td>
+                      <td>2026-05-12 10:20</td>
+                      <td>1,248</td>
+                      <td>0</td>
+                      <td>1.2s</td>
+                      <td>
+                        <StatusTag tone="success">健康</StatusTag>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td>DHL 下单</td>
+                      <td>2026-05-12 10:19</td>
+                      <td>684</td>
+                      <td>0</td>
+                      <td>860ms</td>
+                      <td>
+                        <StatusTag tone="success">健康</StatusTag>
+                      </td>
+                    </tr>
+                  </>
+                ) : null}
+              </tbody>
+            </table>
           </div>
-        ))}
-      </section>
-      <div className="platform-table-wrap">
-        <table className="platform-table" aria-label="运行作业">
-          <thead>
-            <tr>
-              <th>服务</th>
-              <th>最近运行</th>
-              <th>成功</th>
-              <th>失败</th>
-              <th>耗时 P95</th>
-              <th>状态</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>支付回调</td>
-              <td>2026-05-12 10:21</td>
-              <td>382</td>
-              <td>2</td>
-              <td>480ms</td>
-              <td>
-                <StatusTag tone="warning">部分失败：2 / 384</StatusTag>
-              </td>
-            </tr>
-            <tr>
-              <td>UPS 轨迹同步</td>
-              <td>2026-05-12 10:20</td>
-              <td>1,248</td>
-              <td>0</td>
-              <td>1.2s</td>
-              <td>
-                <StatusTag tone="success">健康</StatusTag>
-              </td>
-            </tr>
-            <tr>
-              <td>DHL 下单</td>
-              <td>2026-05-12 10:19</td>
-              <td>684</td>
-              <td>0</td>
-              <td>860ms</td>
-              <td>
-                <StatusTag tone="success">健康</StatusTag>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+        </>
+      ) : null}
     </>
   );
 }
 
 export function App() {
   const [page, setPage] = useState<Page>('租户管理');
-  const [tenantRows, setTenantRows] = useState<Tenant[]>(tenantSeed);
+  const [tenantRows, setTenantRows] = useState<Tenant[]>(readTenants);
   const [search, setSearch] = useState('');
   const [detail, setDetail] = useState<Tenant | null>(null);
   const [impersonate, setImpersonate] = useState<Tenant | null>(null);
   const [reason, setReason] = useState('协助排查订单同步问题');
   const [auditReason, setAuditReason] = useState('');
   const [toast, setToast] = useState('');
-  const [session, setSession] = useState<Tenant | null>(null);
+  const [session, setSession] = useState<Impersonation | null>(readSession);
+  const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
+  useEffect(
+    () => localStorage.setItem('zhili.platform.tenants', JSON.stringify(tenantRows)),
+    [tenantRows]
+  );
+  useEffect(() => {
+    if (session) localStorage.setItem('zhili.platform.impersonation', JSON.stringify(session));
+    else localStorage.removeItem('zhili.platform.impersonation');
+  }, [session]);
   const filtered = useMemo(
     () =>
       tenantRows.filter((tenant) =>
@@ -611,27 +838,48 @@ export function App() {
       ),
     [search, tenantRows]
   );
-  const createTenant = () => {
+  useEffect(() => {
+    if (!session) return;
+    const update = () => {
+      const remaining = Math.max(0, Math.ceil((session.expiresAt - Date.now()) / 1000));
+      setRemainingSeconds(remaining);
+      if (remaining === 0) {
+        setSession(null);
+        setToast('代入会话已过期，已安全返回平台上下文；未提交草稿已保留。');
+      }
+    };
+    update();
+    const timer = window.setInterval(update, 1000);
+    return () => window.clearInterval(timer);
+  }, [session]);
+  const createTenant = async () => {
     if (!newTenantName.trim() || !newTenantSlug.trim()) return;
-    setTenantRows((current) => [
-      ...current,
-      {
-        id: String(current.length + 1),
-        name: newTenantName.trim(),
-        slug: newTenantSlug.trim(),
-        plan: '专业版',
-        users: 1,
-        waybill: '0 / 200,000',
-        api: '0 / 5M',
-        expires: '2027-07-22',
-        days: 365,
-        health: '健康',
-      },
-    ]);
-    setCreateOpen(false);
-    setNewTenantName('');
-    setNewTenantSlug('');
-    setToast('租户已创建，默认套餐、模块和数据边界已初始化。');
+    try {
+      const created = await platformPort.createTenant(newTenantName.trim(), newTenantSlug.trim());
+      setTenantRows((current) => [
+        ...current,
+        {
+          id: created.id,
+          name: newTenantName.trim(),
+          slug: newTenantSlug.trim(),
+          plan: '专业版',
+          users: 1,
+          waybill: '0 / 200,000',
+          api: '0 / 5M',
+          expires: '2027-07-22',
+          days: 365,
+          health: '健康',
+          status: 'ACTIVE',
+          version: created.version,
+        },
+      ]);
+      setCreateOpen(false);
+      setNewTenantName('');
+      setNewTenantSlug('');
+      setToast('租户已创建，默认套餐、模块和数据边界已初始化。');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '租户创建失败。');
+    }
   };
   const go = (next: Page) => setPage(next);
   let content: ReactNode;
@@ -650,10 +898,10 @@ export function App() {
       />
     );
   else if (page === '套餐与模块') content = <ModulesPage notify={setToast} />;
-  else if (page === '配额与用量') content = <UsagePage />;
-  else if (page === '平台公告') content = <AnnouncementsPage />;
+  else if (page === '配额与用量') content = <UsagePage notify={setToast} />;
+  else if (page === '平台公告') content = <AnnouncementsPage notify={setToast} />;
   else if (page === '代入与审计') content = <AuditPage auditReason={auditReason} />;
-  else content = <RuntimePage />;
+  else content = <RuntimePage readOnly={Boolean(session)} />;
 
   return (
     <div className="platform-shell">
@@ -664,13 +912,23 @@ export function App() {
         <nav aria-label="平台导航">
           <h2>平台运营</h2>
           {pages.slice(0, 3).map((item) => (
-            <button key={item} data-active={page === item || undefined} onClick={() => go(item)}>
+            <button
+              key={item}
+              disabled={Boolean(session)}
+              data-active={page === item || undefined}
+              onClick={() => go(item)}
+            >
               {item}
             </button>
           ))}
           <h2>治理</h2>
           {pages.slice(3).map((item) => (
-            <button key={item} data-active={page === item || undefined} onClick={() => go(item)}>
+            <button
+              key={item}
+              disabled={Boolean(session) && item !== '代入与审计' && item !== '运行中心'}
+              data-active={page === item || undefined}
+              onClick={() => go(item)}
+            >
               {item}
             </button>
           ))}
@@ -695,12 +953,35 @@ export function App() {
         </header>
         {session ? (
           <div className="platform-session" role="status">
-            <strong>正在代入：{session.name}</strong>
-            <span>以管理员身份 · 剩余 60 分钟 · 所有操作都会审计</span>
-            <button onClick={() => setSession(null)}>立即退出</button>
+            <strong>正在代入：{session.tenant.name}</strong>
+            <span>
+              张伟（系统管理员） · 原因：{session.reason} · 剩余{' '}
+              {String(Math.floor(remainingSeconds / 60)).padStart(2, '0')}:
+              {String(remainingSeconds % 60).padStart(2, '0')} · 所有操作都会审计
+            </span>
+            <button
+              onClick={() =>
+                void platformPort
+                  .endImpersonation()
+                  .then(() => setSession(null))
+                  .catch((error: Error) => setToast(error.message))
+              }
+            >
+              立即退出
+            </button>
           </div>
         ) : null}
-        <main>{content}</main>
+        <main>
+          {session && page !== '代入与审计' && page !== '运行中心' ? (
+            <section className="platform-panel" aria-label="代入租户上下文">
+              <h1>{session.tenant.name} · 租户管理员视图</h1>
+              <p>平台套餐、模块、配额、公告与租户生命周期写操作已隔离。</p>
+              <p>可前往“代入与审计”查看记录，或立即退出返回平台上下文。</p>
+            </section>
+          ) : (
+            content
+          )}
+        </main>
       </div>
       {toast ? (
         <div className="platform-toast" role="status">
@@ -715,7 +996,22 @@ export function App() {
         title="租户详情"
         onOpenChange={(open) => !open && setDetail(null)}
       >
-        {detail ? <TenantDetail tenant={detail} /> : null}
+        {detail ? (
+          <TenantDetail
+            tenant={detail}
+            changeStatus={(status) =>
+              void platformPort
+                .changeTenantStatus(detail.id, status)
+                .then(() => {
+                  const next = { ...detail, status, version: detail.version + 1 };
+                  setDetail(next);
+                  setTenantRows((rows) => rows.map((row) => (row.id === next.id ? next : row)));
+                  setToast(status === 'ACTIVE' ? '租户已恢复。' : '租户已停用。');
+                })
+                .catch((error: Error) => setToast(error.message))
+            }
+          />
+        ) : null}
       </Drawer>
       <Dialog
         open={createOpen}
@@ -729,7 +1025,7 @@ export function App() {
             </Button>
             <Button
               disabled={!newTenantName.trim() || !newTenantSlug.trim()}
-              onClick={createTenant}
+              onClick={() => void createTenant()}
             >
               确认创建租户
             </Button>
@@ -777,9 +1073,21 @@ export function App() {
               disabled={!reason.trim()}
               onClick={() => {
                 if (!impersonate || !reason.trim()) return;
-                setAuditReason(reason.trim());
-                setSession(impersonate);
-                setImpersonate(null);
+                const target = impersonate;
+                const why = reason.trim();
+                void platformPort
+                  .startImpersonation(target.id, why)
+                  .then((created) => {
+                    setAuditReason(why);
+                    setRemainingSeconds(60 * 60);
+                    setSession({
+                      tenant: target,
+                      reason: why,
+                      expiresAt: new Date(created.expiresAt).getTime(),
+                    });
+                    setImpersonate(null);
+                  })
+                  .catch((error: Error) => setToast(error.message));
               }}
             >
               以管理员身份进入

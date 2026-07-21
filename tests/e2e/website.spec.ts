@@ -18,8 +18,11 @@ test('官网首屏与产品预览使用同一事实数据', async ({ page }) => 
   await page.getByLabel('联系电话').fill('13800138000');
   await page.getByRole('button', { name: '提交预约' }).click();
   await expect(page.getByRole('status')).toContainText('预约已提交');
-  await page.getByRole('link', { name: '隐私政策' }).click();
+  await page.goto('/zhili-logistics-ai/privacy/');
   await expect(page.getByRole('heading', { name: '隐私政策' })).toBeVisible();
   await expect(page).toHaveTitle('隐私政策｜智立科技物流AI系统');
+  expect(
+    await page.locator('script[type="application/ld+json"]').evaluate((node) => node.textContent)
+  ).toContain('WebPage');
   await page.screenshot({ path: 'artifacts/e2e/f1c/website-legal-1440x900.png', fullPage: true });
 });

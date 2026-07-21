@@ -21,7 +21,7 @@ test('平台端代入必须展示审计影响与原因', async ({ page }) => {
     '协助排查订单同步问题'
   );
   await dialog.getByRole('button', { name: '以管理员身份进入' }).click();
-  await expect(page.getByRole('status')).toContainText('剩余 60 分钟');
+  await expect(page.getByRole('status')).toContainText(/剩余 (60:00|59:\d{2})/);
   await page.getByRole('button', { name: '运行中心' }).click();
   await page.getByLabel('运行状态').selectOption('partial');
   await expect(page.getByText(/部分作业执行失败/)).toBeVisible();

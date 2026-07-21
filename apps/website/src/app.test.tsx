@@ -2,10 +2,12 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
+import { websitePort } from './api';
 
 afterEach(() => {
+  vi.restoreAllMocks();
   window.history.replaceState({}, '', '/');
   cleanup();
 });
@@ -44,6 +46,16 @@ describe('官网', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('预约已提交');
   });
 
+  it('密码登录会校验输入并通过 API port 建立会话', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '登录' }));
+    await user.type(screen.getByLabelText('企业账号'), 'admin@zhili.test');
+    await user.type(screen.getByLabelText('密码'), 'correct-password');
+    await user.click(screen.getByRole('button', { name: '密码登录' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('登录成功');
+  });
+
   it('公开法律页面可在站内访问并更新 SEO', async () => {
     const user = userEvent.setup();
     render(<App />);
@@ -58,5 +70,21 @@ describe('官网', () => {
       'href',
       'https://canna2026ai.github.io/zhili-logistics-ai/privacy'
     );
+    expect(document.querySelector('script[type="application/ld+json"]')).toHaveTextContent(
+      'WebPage'
+    );
+  });
+
+  it('预约 API 失败时保留表单输入', async () => {
+    vi.spyOn(websitePort, 'requestDemo').mockRejectedValueOnce(new Error('预约服务不可用'));
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '预约演示' }));
+    await user.type(screen.getByLabelText('企业名称'), '保留企业');
+    await user.type(screen.getByLabelText('联系电话'), '13800138000');
+    await user.click(screen.getByRole('button', { name: '提交预约' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('预约服务不可用');
+    expect(screen.getByRole('dialog', { name: '预约产品演示' })).toBeVisible();
+    expect(screen.getByLabelText('企业名称')).toHaveValue('保留企业');
   });
 });

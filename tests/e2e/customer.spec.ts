@@ -14,6 +14,7 @@ test('客户门户只呈现当前企业数据边界', async ({ page }) => {
     'true'
   );
   await expect(page.getByRole('table', { name: '最近账单' })).toContainText('ST202605-0008');
+  await expect(page.getByRole('table', { name: '付款记录' })).not.toContainText('PAY-20260512-01');
   await page.getByRole('button', { name: '支付 ST202605-0008' }).click();
   await expect(page.getByRole('dialog', { name: '确认支付' })).toContainText('CNY 2,320.00');
   await page.getByRole('button', { name: '确认支付' }).click();
@@ -34,7 +35,22 @@ test('客户从查价进入新建运单并查看租户内轨迹', async ({ page 
   await page.getByRole('button', { name: '提交预报' }).click();
   await expect(page.getByRole('status')).toContainText('预报已提交');
   await page.getByRole('button', { name: '我的运单' }).click();
-  await page.getByRole('button', { name: '查看轨迹 S2505120004' }).click();
+  await expect(page.getByRole('table', { name: '我的运单列表' })).toContainText('S2505120006');
+  await page.getByRole('button', { name: '查看轨迹 S2505120006' }).click();
   await expect(page.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
-  await expect(page.getByText('已收货 · 悉尼仓库')).toBeVisible();
+  await expect(page.getByText('预报已提交 · 等待仓库收货')).toBeVisible();
+});
+
+test('客户门户 390px 无页面级横向溢出且触控导航可用', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  const width = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth,
+    client: document.documentElement.clientWidth,
+  }));
+  expect(width.scroll).toBeLessThanOrEqual(width.client);
+  await page.getByRole('button', { name: '运单', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '我的运单' })).toBeVisible();
+  await expect(page.locator('.portal-table-wrap')).toHaveCSS('overflow-x', 'auto');
+  await page.screenshot({ path: 'artifacts/e2e/f1c/customer-390x844.png', fullPage: true });
 });

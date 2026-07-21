@@ -1,5 +1,6 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Button, Dialog, StatusTag } from '@zhili/ui';
+import { customerPort } from './api';
 
 type Page =
   | '工作台'
@@ -27,15 +28,23 @@ const navigation: Page[] = [
   'API',
 ];
 
-const waybills = [
+type WaybillRow = [string, string, string, string, string, string, string];
+const waybillSeed: WaybillRow[] = [
   ['S2505120001', 'HBL2505120001', '运输中', '英国/洛杉矶', '20', '12,340.50', '在港装船'],
   ['S2505120002', 'HBL2505120002', '待收货', '德国/法兰克福', '5', '320.00', '到达仓库'],
   ['S2505120003', 'HBL2505120003', '运输中', '美国/伦敦', '8', '1,250.30', '离港'],
   ['S2505120004', 'HBL2505120004', '已收货，待分货', '澳大利亚/悉尼', '18', '123.50', '已收货'],
   ['S2505120005', 'HBL2505120005', '运输中', '俄罗斯/莫斯科', '12', '6,500.00', '中转中'],
-] as const;
+];
+const readRows = () => {
+  try {
+    return JSON.parse(localStorage.getItem('zhili.customer.waybills') ?? '') as WaybillRow[];
+  } catch {
+    return waybillSeed;
+  }
+};
 
-function ScenarioNotice({ scenario }: { scenario: Scenario }) {
+function ScenarioNotice({ scenario, recover }: { scenario: Scenario; recover: () => void }) {
   if (scenario === 'normal') return null;
   const notices: Record<Exclude<Scenario, 'normal'>, { role: 'alert' | 'status'; text: string }> = {
     loading: { role: 'status', text: '正在加载最新数据，请稍候。' },
@@ -51,7 +60,10 @@ function ScenarioNotice({ scenario }: { scenario: Scenario }) {
   const notice = notices[scenario];
   return (
     <div className={`portal-notice portal-notice--${scenario}`} role={notice.role}>
-      {notice.text}
+      <span>{notice.text}</span>
+      <button onClick={recover}>
+        {scenario === 'partial' ? '仅重试失败项' : scenario === 'stale' ? '刷新并比较' : '重试'}
+      </button>
     </div>
   );
 }
@@ -76,7 +88,42 @@ function SectionHeader({
   );
 }
 
-function Dashboard({ navigate }: { navigate: (page: Page) => void }) {
+const shortcutSeed: Array<[Page, string, string]> = [
+  ['新建运单', '新建运单', '创建运输订单'],
+  ['批量导入', '批量导入', 'Excel 批量导入'],
+  ['查价', '立即查价', '快速获取报价'],
+  ['账单与付款', '提交付款凭证', '上传凭证并关联'],
+];
+
+function Dashboard({
+  navigate,
+  rows,
+  notify,
+}: {
+  navigate: (page: Page) => void;
+  rows: WaybillRow[];
+  notify: (message: string) => void;
+}) {
+  const [editingShortcuts, setEditingShortcuts] = useState(false);
+  const [shortcutPages, setShortcutPages] = useState<Page[]>(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem('zhili.customer.shortcuts') ??
+          JSON.stringify(shortcutSeed.map(([p]) => p))
+      ) as Page[];
+    } catch {
+      return shortcutSeed.map(([page]) => page);
+    }
+  });
+  const saveShortcuts = (next: Page[]) =>
+    void customerPort
+      .saveShortcuts(next)
+      .then(() => {
+        localStorage.setItem('zhili.customer.shortcuts', JSON.stringify(next));
+        setShortcutPages(next);
+        notify('快捷入口布局已保存。');
+      })
+      .catch((error: Error) => notify(error.message));
   return (
     <>
       <SectionHeader
@@ -101,7 +148,7 @@ function Dashboard({ navigate }: { navigate: (page: Page) => void }) {
                 <small>Excel 批量导入运单</small>
               </span>
             </button>
-            <button aria-label="立即查价" onClick={() => navigate('查价')}>
+            <button aria-label="快速查价" onClick={() => navigate('查价')}>
               <b>⌕</b>
               <span>
                 <strong>立即查价</strong>
@@ -132,30 +179,40 @@ function Dashboard({ navigate }: { navigate: (page: Page) => void }) {
               <h2>最近运单</h2>
               <button onClick={() => navigate('我的运单')}>查看全部</button>
             </div>
-            <WaybillTable onTrack={() => navigate('轨迹查询')} compact />
+            <WaybillTable rows={rows} onTrack={() => navigate('轨迹查询')} compact />
           </div>
           <section className="portal-secondary-actions" aria-label="可编辑快捷入口">
             <div>
               <h2>快捷入口（可编辑）</h2>
-              <button>编辑</button>
+              <button onClick={() => setEditingShortcuts((value) => !value)}>
+                {editingShortcuts ? '完成编辑' : '编辑'}
+              </button>
             </div>
-            <nav>
-              <button onClick={() => navigate('新建运单')}>
-                <strong>新建运单</strong>
-                <small>创建运输订单</small>
-              </button>
-              <button onClick={() => navigate('批量导入')}>
-                <strong>批量导入</strong>
-                <small>Excel 批量导入</small>
-              </button>
-              <button onClick={() => navigate('查价')}>
-                <strong>立即查价</strong>
-                <small>快速获取报价</small>
-              </button>
-              <button aria-label="提交付款凭证" onClick={() => navigate('账单与付款')}>
-                <strong>提交付款凭证</strong>
-                <small>上传凭证并关联</small>
-              </button>
+            {editingShortcuts ? (
+              <p>
+                点击入口可隐藏；已显示 {shortcutPages.length} 项。
+                <button onClick={() => saveShortcuts(shortcutSeed.map(([page]) => page))}>
+                  恢复默认
+                </button>
+              </p>
+            ) : null}
+            <nav data-editing={editingShortcuts || undefined}>
+              {shortcutSeed
+                .filter(([page]) => shortcutPages.includes(page))
+                .map(([page, label, note]) => (
+                  <button
+                    key={page}
+                    aria-label={editingShortcuts ? `隐藏 ${label}` : label}
+                    onClick={() =>
+                      editingShortcuts
+                        ? saveShortcuts(shortcutPages.filter((item) => item !== page))
+                        : navigate(page)
+                    }
+                  >
+                    <strong>{label}</strong>
+                    <small>{editingShortcuts ? '点击隐藏此入口' : note}</small>
+                  </button>
+                ))}
             </nav>
           </section>
         </div>
@@ -252,7 +309,11 @@ function QuotePage({ choose }: { choose: () => void }) {
         <Button type="submit">获取报价</Button>
       </form>
       {quoted ? (
-        <section className="portal-panel portal-quote-result" aria-live="polite">
+        <section
+          className="portal-panel portal-quote-result"
+          aria-label="报价 Q2505120042"
+          aria-live="polite"
+        >
           <div>
             <StatusTag tone="success">可用</StatusTag>
             <h2>智立海运专线</h2>
@@ -261,11 +322,19 @@ function QuotePage({ choose }: { choose: () => void }) {
           <dl>
             <div>
               <dt>基础运费</dt>
-              <dd>CNY 4,860.00</dd>
+              <dd>CNY 4,680.00</dd>
             </div>
             <div>
-              <dt>附加费</dt>
-              <dd>CNY 460.00</dd>
+              <dt>燃油附加费</dt>
+              <dd>CNY 514.80</dd>
+            </div>
+            <div>
+              <dt>偏远附加费</dt>
+              <dd>CNY 80.00</dd>
+            </div>
+            <div>
+              <dt>操作费</dt>
+              <dd>CNY 45.20</dd>
             </div>
             <div>
               <dt>合计</dt>
@@ -285,10 +354,15 @@ function QuotePage({ choose }: { choose: () => void }) {
 function OrderPage({
   selectedQuote,
   onSubmitted,
+  onDraft,
 }: {
   selectedQuote: boolean;
-  onSubmitted: () => void;
+  onSubmitted: () => Promise<void>;
+  onDraft: () => Promise<void>;
 }) {
+  const [draftSaved, setDraftSaved] = useState(
+    () => localStorage.getItem('zhili.customer.draft') === 'saved'
+  );
   return (
     <>
       <SectionHeader
@@ -304,6 +378,9 @@ function OrderPage({
       >
         {selectedQuote ? (
           <p className="portal-selected-quote">已选择：智立海运专线 · CNY 5,320.00</p>
+        ) : null}
+        {draftSaved ? (
+          <p className="portal-selected-quote">草稿已保存，可继续编辑后提交。</p>
         ) : null}
         <fieldset>
           <legend>收件信息</legend>
@@ -336,7 +413,18 @@ function OrderPage({
           </label>
         </fieldset>
         <div className="portal-form-actions">
-          <Button variant="secondary" type="button">
+          <Button
+            variant="secondary"
+            type="button"
+            onClick={() =>
+              void onDraft()
+                .then(() => {
+                  localStorage.setItem('zhili.customer.draft', 'saved');
+                  setDraftSaved(true);
+                })
+                .catch(() => undefined)
+            }
+          >
             保存草稿
           </Button>
           <Button type="submit">提交预报</Button>
@@ -346,7 +434,15 @@ function OrderPage({
   );
 }
 
-function WaybillTable({ onTrack, compact = false }: { onTrack: () => void; compact?: boolean }) {
+function WaybillTable({
+  rows,
+  onTrack,
+  compact = false,
+}: {
+  rows: WaybillRow[];
+  onTrack: (waybillNo: string) => void;
+  compact?: boolean;
+}) {
   return (
     <div className="portal-table-wrap">
       <table aria-label={compact ? '最近运单' : '我的运单列表'} className="portal-table">
@@ -363,7 +459,7 @@ function WaybillTable({ onTrack, compact = false }: { onTrack: () => void; compa
           </tr>
         </thead>
         <tbody>
-          {waybills.map((row) => (
+          {rows.map((row) => (
             <tr key={row[0]}>
               <td>
                 <strong>{row[0]}</strong>
@@ -383,7 +479,7 @@ function WaybillTable({ onTrack, compact = false }: { onTrack: () => void; compa
               <td>{row[5]}</td>
               <td>{row[6]}</td>
               <td>
-                <button aria-label={`查看轨迹 ${row[0]}`} onClick={onTrack}>
+                <button aria-label={`查看轨迹 ${row[0]}`} onClick={() => onTrack(row[0])}>
                   查看
                 </button>
               </td>
@@ -395,29 +491,58 @@ function WaybillTable({ onTrack, compact = false }: { onTrack: () => void; compa
   );
 }
 
-function WaybillsPage({ onTrack }: { onTrack: () => void }) {
+function WaybillsPage({
+  rows,
+  onTrack,
+  notify,
+}: {
+  rows: WaybillRow[];
+  onTrack: (waybillNo: string) => void;
+  notify: (message: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [appliedQuery, setAppliedQuery] = useState('');
+  const filtered = rows.filter((row) => row.join(' ').includes(appliedQuery));
   return (
     <>
       <SectionHeader
         title="我的运单"
         description="仅显示深圳鑫源贸易有限公司的数据范围，共 1,248 条。"
-        action={<Button>导出当前结果</Button>}
+        action={
+          <Button
+            onClick={() =>
+              void customerPort
+                .createExport()
+                .then(() => notify(`导出任务已创建，共 ${filtered.length} 条。`))
+                .catch((error: Error) => notify(error.message))
+            }
+          >
+            导出当前结果
+          </Button>
+        }
       />
       <div className="portal-filter">
-        <input aria-label="搜索运单" placeholder="运单号 / 主运单号 / 参考号" />
+        <input
+          aria-label="搜索运单"
+          placeholder="运单号 / 主运单号 / 参考号"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
         <select aria-label="运单状态">
           <option>全部状态</option>
           <option>运输中</option>
           <option>已收货</option>
         </select>
-        <Button variant="secondary">查询</Button>
+        <Button variant="secondary" onClick={() => setAppliedQuery(query.trim())}>
+          查询
+        </Button>
       </div>
-      <WaybillTable onTrack={onTrack} />
+      <WaybillTable rows={filtered} onTrack={onTrack} />
     </>
   );
 }
 
-function TrackingPage() {
+function TrackingPage({ waybillNo }: { waybillNo: string }) {
   return (
     <>
       <SectionHeader
@@ -428,16 +553,24 @@ function TrackingPage() {
         <div className="portal-waybill-summary">
           <div>
             <small>运单号</small>
-            <strong>S2505120004</strong>
+            <strong>{waybillNo}</strong>
           </div>
           <StatusTag tone="success">已收货，待分货</StatusTag>
         </div>
         <ol>
-          <li>
-            <time>2026-05-12 08:16</time>
-            <strong>已收货 · 悉尼仓库</strong>
-            <span>来源：仓库扫描</span>
-          </li>
+          {waybillNo === 'S2505120006' ? (
+            <li>
+              <time>刚刚</time>
+              <strong>预报已提交 · 等待仓库收货</strong>
+              <span>来源：客户门户 API</span>
+            </li>
+          ) : (
+            <li>
+              <time>2026-05-12 08:16</time>
+              <strong>已收货 · 悉尼仓库</strong>
+              <span>来源：仓库扫描</span>
+            </li>
+          )}
           <li>
             <time>2026-05-11 19:20</time>
             <strong>到达目的港</strong>
@@ -454,7 +587,19 @@ function TrackingPage() {
   );
 }
 
-function FinancePage({ requestPayment }: { requestPayment: () => void }) {
+function FinancePage({
+  requestPayment,
+  paymentCreated,
+  notify,
+}: {
+  requestPayment: () => void;
+  paymentCreated: boolean;
+  notify: (message: string) => void;
+}) {
+  const [receipt, setReceipt] = useState<File | null>(null);
+  const [receiptName, setReceiptName] = useState(
+    () => localStorage.getItem('zhili.customer.receipt') ?? ''
+  );
   return (
     <>
       <SectionHeader
@@ -474,6 +619,34 @@ function FinancePage({ requestPayment }: { requestPayment: () => void }) {
           <span>本期待付款 CNY 2,320.00</span>
           <small>ST202605-0008</small>
         </div>
+      </section>
+      <section className="portal-panel">
+        <h2>提交付款凭证</h2>
+        <div className="portal-filter">
+          <input
+            type="file"
+            aria-label="付款凭证"
+            accept="image/*,.pdf"
+            onChange={(event) => setReceipt(event.target.files?.[0] ?? null)}
+          />
+          <Button
+            disabled={!receipt}
+            onClick={() =>
+              receipt &&
+              void customerPort
+                .uploadReceipt(receipt.name)
+                .then(() => {
+                  localStorage.setItem('zhili.customer.receipt', receipt.name);
+                  setReceiptName(receipt.name);
+                  notify('付款凭证已关联至 ST202605-0008。');
+                })
+                .catch((error: Error) => notify(error.message))
+            }
+          >
+            上传并关联凭证
+          </Button>
+        </div>
+        {receiptName ? <p>已关联凭证：{receiptName}</p> : null}
       </section>
       <section className="portal-panel">
         <h2>最近账单</h2>
@@ -524,15 +697,21 @@ function FinancePage({ requestPayment }: { requestPayment: () => void }) {
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td>PAY-20260512-01</td>
-                <td>ST202605-0008</td>
-                <td>CNY 2,320.00</td>
-                <td>微信支付</td>
-                <td>
-                  <StatusTag tone="info">待支付</StatusTag>
-                </td>
-              </tr>
+              {paymentCreated ? (
+                <tr>
+                  <td>PAY-20260512-01</td>
+                  <td>ST202605-0008</td>
+                  <td>CNY 2,320.00</td>
+                  <td>微信支付</td>
+                  <td>
+                    <StatusTag tone="info">待支付</StatusTag>
+                  </td>
+                </tr>
+              ) : (
+                <tr>
+                  <td colSpan={5}>确认付款后将在这里生成支付记录</td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -553,7 +732,11 @@ function TicketsPage({ notify }: { notify: (message: string) => void }) {
           className="portal-form"
           onSubmit={(event) => {
             event.preventDefault();
-            notify('工单已创建，通知发送失败；工单不回滚，可仅重试通知。');
+            const form = new FormData(event.currentTarget);
+            void customerPort
+              .createTicket(String(form.get('description') ?? '轨迹问题'))
+              .then(() => notify('工单已创建，通知发送失败；工单不回滚，可仅重试通知。'))
+              .catch((error: Error) => notify(error.message));
           }}
         >
           <label>
@@ -569,7 +752,7 @@ function TicketsPage({ notify }: { notify: (message: string) => void }) {
           </label>
           <label>
             问题描述
-            <textarea aria-label="问题描述" required />
+            <textarea name="description" aria-label="问题描述" required />
           </label>
           <Button type="submit">提交工单</Button>
         </form>
@@ -598,7 +781,10 @@ function ApiPage({ notify }: { notify: (message: string) => void }) {
         className="portal-form portal-api-form"
         onSubmit={(event) => {
           event.preventDefault();
-          notify('API 申请已提交，预计 1 个工作日内审核。');
+          void customerPort
+            .requestApi()
+            .then(() => notify('API 申请已提交，预计 1 个工作日内审核。'))
+            .catch((error: Error) => notify(error.message));
         }}
       >
         <label>
@@ -616,6 +802,100 @@ function ApiPage({ notify }: { notify: (message: string) => void }) {
         </label>
         <Button type="submit">提交 API 申请</Button>
       </form>
+    </>
+  );
+}
+
+function ImportPage({ notify }: { notify: (message: string) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [result, setResult] = useState('');
+  return (
+    <>
+      <SectionHeader title="批量导入" description="上传 CSV 或 Excel，逐行校验后提交。" />
+      <section className="portal-panel portal-form">
+        <label>
+          导入文件
+          <input
+            aria-label="导入文件"
+            type="file"
+            accept=".csv,.xlsx"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
+        </label>
+        <Button
+          disabled={!file}
+          onClick={() =>
+            file &&
+            void customerPort
+              .createImport(file.name)
+              .then(() => {
+                setResult('导入完成：1 行成功，0 行失败。');
+                notify('导入完成：1 行成功，0 行失败。');
+              })
+              .catch((error: Error) => notify(error.message))
+          }
+        >
+          开始导入
+        </Button>
+        {result ? <p>{result}</p> : null}
+      </section>
+    </>
+  );
+}
+
+function AddressPage({ notify }: { notify: (message: string) => void }) {
+  const [name, setName] = useState('');
+  const [addresses, setAddresses] = useState<string[]>(() => {
+    try {
+      return JSON.parse(
+        localStorage.getItem('zhili.customer.addresses') ?? '["深圳南山发货仓"]'
+      ) as string[];
+    } catch {
+      return ['深圳南山发货仓'];
+    }
+  });
+  return (
+    <>
+      <SectionHeader title="地址簿" description="地址仅在当前企业数据边界内复用。" />
+      <form
+        className="portal-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void customerPort
+            .saveAddress(name)
+            .then(() => {
+              setAddresses((items) => {
+                const next = [...items, name];
+                localStorage.setItem('zhili.customer.addresses', JSON.stringify(next));
+                return next;
+              });
+              setName('');
+              notify('地址已保存。');
+            })
+            .catch((error: Error) => notify(error.message));
+        }}
+      >
+        <label>
+          地址名称
+          <input
+            aria-label="地址名称"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            required
+          />
+        </label>
+        <Button type="submit">保存地址</Button>
+      </form>
+      <table className="portal-table" aria-label="地址列表">
+        <tbody>
+          {addresses.map((address) => (
+            <tr key={address}>
+              <td>{address}</td>
+              <td>深圳鑫源贸易有限公司</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   );
 }
@@ -638,13 +918,22 @@ export function App() {
   const [selectedQuote, setSelectedQuote] = useState(false);
   const [toast, setToast] = useState('');
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [rows, setRows] = useState<WaybillRow[]>(readRows);
+  const [paymentCreated, setPaymentCreated] = useState(
+    () => localStorage.getItem('zhili.customer.payment') === 'created'
+  );
+  const [trackingNo, setTrackingNo] = useState('S2505120004');
+  useEffect(() => localStorage.setItem('zhili.customer.waybills', JSON.stringify(rows)), [rows]);
+  useEffect(() => {
+    if (paymentCreated) localStorage.setItem('zhili.customer.payment', 'created');
+  }, [paymentCreated]);
 
   const navigate = (next: Page) => {
     setPage(next);
     setScenario('normal');
   };
   let content: ReactNode;
-  if (page === '工作台') content = <Dashboard navigate={navigate} />;
+  if (page === '工作台') content = <Dashboard navigate={navigate} rows={rows} notify={setToast} />;
   else if (page === '查价')
     content = (
       <QuotePage
@@ -658,15 +947,61 @@ export function App() {
     content = (
       <OrderPage
         selectedQuote={selectedQuote}
-        onSubmitted={() => setToast('预报已提交：S2505120006，仓库将等待收货。')}
+        onDraft={async () => {
+          try {
+            await customerPort.saveDraft();
+            setToast('草稿已保存：DRAFT-S2505120006。');
+          } catch (error) {
+            setToast(error instanceof Error ? error.message : '草稿保存失败。');
+            throw error;
+          }
+        }}
+        onSubmitted={async () => {
+          try {
+            const order = await customerPort.createOrder();
+            const newRow: WaybillRow = [
+              order.orderNo,
+              'HBL2505120006',
+              '待收货',
+              '美国/洛杉矶',
+              '18',
+              '123.50',
+              '预报已提交',
+            ];
+            setRows((current) =>
+              current.some((row) => row[0] === order.orderNo) ? current : [newRow, ...current]
+            );
+            setToast(`预报已提交：${order.orderNo}，仓库将等待收货。`);
+          } catch (error) {
+            setToast(error instanceof Error ? error.message : '预报提交失败。');
+          }
+        }}
       />
     );
-  else if (page === '我的运单') content = <WaybillsPage onTrack={() => navigate('轨迹查询')} />;
-  else if (page === '轨迹查询') content = <TrackingPage />;
+  else if (page === '我的运单')
+    content = (
+      <WaybillsPage
+        rows={rows}
+        notify={setToast}
+        onTrack={(waybillNo) => {
+          setTrackingNo(waybillNo);
+          navigate('轨迹查询');
+        }}
+      />
+    );
+  else if (page === '轨迹查询') content = <TrackingPage waybillNo={trackingNo} />;
   else if (page === '账单与付款')
-    content = <FinancePage requestPayment={() => setPaymentOpen(true)} />;
+    content = (
+      <FinancePage
+        requestPayment={() => setPaymentOpen(true)}
+        paymentCreated={paymentCreated}
+        notify={setToast}
+      />
+    );
   else if (page === '问题工单') content = <TicketsPage notify={setToast} />;
   else if (page === 'API') content = <ApiPage notify={setToast} />;
+  else if (page === '批量导入') content = <ImportPage notify={setToast} />;
+  else if (page === '地址簿') content = <AddressPage notify={setToast} />;
   else content = <PlaceholderPage page={page} />;
 
   return (
@@ -680,6 +1015,7 @@ export function App() {
             <button
               key={item}
               data-active={page === item || undefined}
+              disabled={scenario !== 'normal'}
               onClick={() => navigate(item)}
             >
               <span aria-hidden="true">
@@ -722,8 +1058,8 @@ export function App() {
           <strong>深圳鑫源贸易有限公司</strong>
         </header>
         <main>
-          <ScenarioNotice scenario={scenario} />
-          {scenario === 'empty' ? null : content}
+          <ScenarioNotice scenario={scenario} recover={() => setScenario('normal')} />
+          {scenario === 'normal' ? content : null}
         </main>
       </div>
       {toast ? (
@@ -744,10 +1080,16 @@ export function App() {
               取消
             </Button>
             <Button
-              onClick={() => {
-                setPaymentOpen(false);
-                setToast('支付订单已创建：PAY-20260512-01，请在 15 分钟内完成。');
-              }}
+              onClick={() =>
+                void customerPort
+                  .createPayment()
+                  .then((payment) => {
+                    setPaymentCreated(true);
+                    setPaymentOpen(false);
+                    setToast(`支付订单已创建：${payment.paymentOrderNo}，请在 15 分钟内完成。`);
+                  })
+                  .catch((error: Error) => setToast(error.message))
+              }
             >
               确认支付
             </Button>
@@ -762,7 +1104,7 @@ export function App() {
       </Dialog>
       <nav className="portal-mobile-nav" aria-label="移动端导航">
         {(['工作台', '新建运单', '我的运单', '账单与付款', '问题工单'] as Page[]).map((item) => (
-          <button key={item} onClick={() => navigate(item)}>
+          <button key={item} disabled={scenario !== 'normal'} onClick={() => navigate(item)}>
             {item === '工作台'
               ? '首页'
               : item === '新建运单'
