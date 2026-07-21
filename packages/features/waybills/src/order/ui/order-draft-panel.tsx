@@ -1,6 +1,12 @@
 import { Button } from '@zhili/ui';
-import { useState } from 'react';
-import type { OrderType } from '../model/order';
+import { useRef, useState } from 'react';
+import {
+  buildOrderRequest,
+  memoryOrderPort,
+  type OrderPort,
+  type OrderResult,
+  type OrderType,
+} from '../model/order';
 import './order-draft-panel.css';
 
 interface PackageRow {
@@ -16,7 +22,15 @@ interface CommodityRow {
   quantity: string;
 }
 
-export function OrderDraftPanel() {
+export interface OrderDraftPanelProps {
+  port?: OrderPort;
+  readOnly?: boolean;
+}
+
+export function OrderDraftPanel({
+  port = memoryOrderPort,
+  readOnly = false,
+}: OrderDraftPanelProps) {
   const [type, setType] = useState<OrderType>('STANDARD');
   const [packages, setPackages] = useState<PackageRow[]>([
     { id: 1, ref: 'PKG-01', weight: '122.00', dimensions: '100 × 80 × 60' },
@@ -24,6 +38,41 @@ export function OrderDraftPanel() {
   const [commodities, setCommodities] = useState<CommodityRow[]>([
     { id: 1, description: '电子产品及配件', hs: '8504900000', quantity: '5' },
   ]);
+  const nextId = useRef(2);
+  const [order, setOrder] = useState<OrderResult | null>(null);
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const request = () => ({
+    ...buildOrderRequest(type),
+    packages: packages.map((item, index) => {
+      const [lengthCm = '0', widthCm = '0', heightCm = '0'] = item.dimensions.split(/\s*[×x]\s*/);
+      return {
+        packageRef: item.ref,
+        weightKg: item.weight,
+        lengthCm,
+        widthCm,
+        heightCm,
+        commodityDescription: commodities[index]?.description ?? commodities[0]?.description ?? '',
+      };
+    }),
+  });
+
+  const run = async (operation: () => Promise<void>) => {
+    setPending(true);
+    setMessage('');
+    setError('');
+    try {
+      await operation();
+    } catch {
+      setError('订单命令失败；可能是校验或版本冲突，草稿内容已保留。');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const ensureOrder = async () => order ?? port.save(request());
   return (
     <section className="order-draft">
       <header>
@@ -40,6 +89,7 @@ export function OrderDraftPanel() {
             type="radio"
             name="orderType"
             checked={type === 'STANDARD'}
+            disabled={readOnly}
             onChange={() => setType('STANDARD')}
           />
           标准运单
@@ -49,6 +99,7 @@ export function OrderDraftPanel() {
             type="radio"
             name="orderType"
             checked={type === 'FBA'}
+            disabled={readOnly}
             onChange={() => setType('FBA')}
           />
           FBA 入仓
@@ -78,6 +129,7 @@ export function OrderDraftPanel() {
             <input
               aria-label={`包裹编号 ${index + 1}`}
               value={row.ref}
+              disabled={readOnly}
               onChange={(event) =>
                 setPackages((items) =>
                   items.map((item) =>
@@ -89,6 +141,7 @@ export function OrderDraftPanel() {
             <input
               aria-label={`包裹重量 ${index + 1}`}
               value={row.weight}
+              disabled={readOnly}
               onChange={(event) =>
                 setPackages((items) =>
                   items.map((item) =>
@@ -100,6 +153,7 @@ export function OrderDraftPanel() {
             <input
               aria-label={`包裹尺寸 ${index + 1}`}
               value={row.dimensions}
+              disabled={readOnly}
               onChange={(event) =>
                 setPackages((items) =>
                   items.map((item) =>
@@ -113,11 +167,12 @@ export function OrderDraftPanel() {
         <Button
           variant="secondary"
           size="compact"
+          disabled={readOnly}
           onClick={() =>
             setPackages((items) => [
               ...items,
               {
-                id: Date.now(),
+                id: nextId.current++,
                 ref: `PKG-${String(items.length + 1).padStart(2, '0')}`,
                 weight: '',
                 dimensions: '',
@@ -135,6 +190,7 @@ export function OrderDraftPanel() {
             <input
               aria-label={`品名描述 ${index + 1}`}
               value={row.description}
+              disabled={readOnly}
               onChange={(event) =>
                 setCommodities((items) =>
                   items.map((item) =>
@@ -146,6 +202,7 @@ export function OrderDraftPanel() {
             <input
               aria-label={`HS 编码 ${index + 1}`}
               value={row.hs}
+              disabled={readOnly}
               onChange={(event) =>
                 setCommodities((items) =>
                   items.map((item) =>
@@ -157,6 +214,7 @@ export function OrderDraftPanel() {
             <input
               aria-label={`品名数量 ${index + 1}`}
               value={row.quantity}
+              disabled={readOnly}
               onChange={(event) =>
                 setCommodities((items) =>
                   items.map((item) =>
@@ -170,10 +228,11 @@ export function OrderDraftPanel() {
         <Button
           variant="secondary"
           size="compact"
+          disabled={readOnly}
           onClick={() =>
             setCommodities((items) => [
               ...items,
-              { id: Date.now(), description: '', hs: '', quantity: '1' },
+              { id: nextId.current++, description: '', hs: '', quantity: '1' },
             ])
           }
         >
@@ -181,9 +240,63 @@ export function OrderDraftPanel() {
         </Button>
       </fieldset>
       <footer>
-        <Button variant="secondary">保存草稿</Button>
-        <Button>提交预报</Button>
+        <Button
+          variant="secondary"
+          disabled={readOnly || pending}
+          onClick={() =>
+            void run(async () => {
+              const saved = await port.save(request());
+              setOrder(saved);
+              setMessage(`草稿 ${saved.orderNo} 已保存`);
+            })
+          }
+        >
+          {pending ? '处理中…' : '保存草稿'}
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={readOnly || pending}
+          onClick={() =>
+            void run(async () => {
+              const current = await ensureOrder();
+              setOrder(current);
+              const validation = await port.validate(current.id, current.version);
+              setMessage(validation.valid ? '校验通过，可以提交预报' : '校验失败，请修正错误项');
+            })
+          }
+        >
+          预校验
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={readOnly || pending}
+          onClick={() =>
+            void run(async () => {
+              const current = await ensureOrder();
+              const copied = await port.copy(current.id, current.version);
+              setOrder(copied);
+              setMessage(`已复制为 ${copied.orderNo}`);
+            })
+          }
+        >
+          复制订单
+        </Button>
+        <Button
+          disabled={readOnly || pending}
+          onClick={() =>
+            void run(async () => {
+              const current = await ensureOrder();
+              const submitted = await port.submit(current.id, current.version);
+              setOrder(submitted);
+              setMessage(`订单 ${submitted.orderNo} 已提交预报`);
+            })
+          }
+        >
+          提交预报
+        </Button>
       </footer>
+      {message ? <p role="status">{message}</p> : null}
+      {error ? <p role="alert">{error}</p> : null}
     </section>
   );
 }

@@ -1,6 +1,13 @@
 import { Button, StatusTag } from '@zhili/ui';
 import { useMemo, useState } from 'react';
-import { calculateQuote, formatMoney, quoteInputFixture } from '../model/quote';
+import {
+  calculateQuote,
+  formatMoney,
+  memoryQuotePort,
+  quoteInputFixture,
+  type QuoteExplanationView,
+  type QuotePort,
+} from '../model/quote';
 import './quote-workbench.css';
 
 export type QuoteViewState =
@@ -8,14 +15,74 @@ export type QuoteViewState =
 
 export interface QuoteWorkbenchProps {
   state?: QuoteViewState;
-  onSubmitForecast?: () => void;
+  port?: QuotePort;
+  readOnly?: boolean;
+  onSubmitForecast?: () => void | Promise<void>;
 }
 
-export function QuoteWorkbench({ state = 'normal', onSubmitForecast }: QuoteWorkbenchProps) {
-  const quote = useMemo(() => calculateQuote(quoteInputFixture), []);
+export function QuoteWorkbench({
+  state = 'normal',
+  port = memoryQuotePort,
+  readOnly = false,
+  onSubmitForecast,
+}: QuoteWorkbenchProps) {
+  const [weightKg, setWeightKg] = useState(quoteInputFixture.request.packages[0]?.weightKg ?? '0');
+  const request = useMemo(
+    () => ({
+      ...quoteInputFixture.request,
+      packages: quoteInputFixture.request.packages.map((item, index) =>
+        index === 0 ? { ...item, weightKg } : item
+      ),
+    }),
+    [weightKg]
+  );
+  const [quote, setQuote] = useState(() => calculateQuote(quoteInputFixture));
   const [selectedId, setSelectedId] = useState('dhl-express');
-  const [explanationOpen, setExplanationOpen] = useState(false);
+  const [explanation, setExplanation] = useState<QuoteExplanationView | null>(null);
+  const [pending, setPending] = useState<'quote' | 'explain' | 'accept' | 'save' | 'submit' | null>(
+    null
+  );
+  const [actionError, setActionError] = useState('');
+  const [actionStatus, setActionStatus] = useState('');
+  const [commodityCount, setCommodityCount] = useState(1);
   const selected = quote.options.find((option) => option.id === selectedId) ?? quote.options[0]!;
+
+  const run = async <T,>(kind: NonNullable<typeof pending>, operation: () => Promise<T>) => {
+    setPending(kind);
+    setActionError('');
+    setActionStatus('');
+    try {
+      return await operation();
+    } catch {
+      setActionError(
+        kind === 'quote'
+          ? '报价失败；没有覆盖当前输入的有效价卡，请修正后重试。'
+          : `${kind === 'explain' ? '解释' : '业务命令'}执行失败；数据未改变，请重试。`
+      );
+      return undefined;
+    } finally {
+      setPending(null);
+    }
+  };
+
+  const refreshQuote = async () => {
+    const next = await run('quote', () => port.create(request));
+    if (next) {
+      setQuote(next);
+      setSelectedId(
+        next.options.find((option) => option.available)?.id ?? next.options[0]?.id ?? ''
+      );
+    }
+  };
+
+  const loadExplanation = async () => {
+    if (explanation) {
+      setExplanation(null);
+      return;
+    }
+    const next = await run('explain', () => port.explain(quote.id, selected.id));
+    if (next) setExplanation(next);
+  };
 
   if (state === 'loading')
     return (
@@ -134,7 +201,11 @@ export function QuoteWorkbench({ state = 'normal', onSubmitForecast }: QuoteWork
             </label>
             <label>
               实重 (kg)
-              <input defaultValue="123.50" />
+              <input
+                value={weightKg}
+                disabled={readOnly}
+                onChange={(event) => setWeightKg(event.target.value)}
+              />
             </label>
             <label>
               体积 (cm)
@@ -149,19 +220,40 @@ export function QuoteWorkbench({ state = 'normal', onSubmitForecast }: QuoteWork
               <input value={quote.chargeableWeightKg} readOnly />
             </label>
           </div>
-          <div className="quote-commodity-row">
-            <span>1</span>
-            <input aria-label="品名" defaultValue="电子产品及配件" />
-            <input aria-label="HS 编码" defaultValue="8504900000" />
-            <input aria-label="申报价值" defaultValue="50,000.00" />
-            <input aria-label="原产国" defaultValue="中国" />
-            <input aria-label="数量" defaultValue="5 箱" />
-          </div>
+          {Array.from({ length: commodityCount }, (_, index) => (
+            <div className="quote-commodity-row" key={`commodity-${index + 1}`}>
+              <span>{index + 1}</span>
+              <input
+                aria-label={`品名 ${index + 1}`}
+                defaultValue={index === 0 ? '电子产品及配件' : ''}
+              />
+              <input
+                aria-label={`HS 编码 ${index + 1}`}
+                defaultValue={index === 0 ? '8504900000' : ''}
+              />
+              <input
+                aria-label={`申报价值 ${index + 1}`}
+                defaultValue={index === 0 ? '50,000.00' : ''}
+              />
+              <input aria-label={`原产国 ${index + 1}`} defaultValue="中国" />
+              <input aria-label={`数量 ${index + 1}`} defaultValue={index === 0 ? '5 箱' : '1'} />
+            </div>
+          ))}
           <div className="quote-inline-actions">
-            <Button variant="secondary" size="compact">
+            <Button
+              variant="secondary"
+              size="compact"
+              disabled={readOnly}
+              onClick={() => setCommodityCount((count) => count + 1)}
+            >
               新增品名
             </Button>
-            <Button variant="secondary" size="compact">
+            <Button
+              variant="secondary"
+              size="compact"
+              disabled={readOnly}
+              onClick={() => setActionStatus('已打开品名批量导入映射；当前表单内容保持不变。')}
+            >
               批量导入
             </Button>
           </div>
@@ -190,9 +282,40 @@ export function QuoteWorkbench({ state = 'normal', onSubmitForecast }: QuoteWork
           </label>
         </fieldset>
         <footer className="quote-actions">
-          <Button variant="secondary">保存草稿</Button>
-          <Button onClick={onSubmitForecast}>提交预报</Button>
-          <Button variant="quiet">更多操作</Button>
+          <Button
+            variant="secondary"
+            disabled={readOnly || pending !== null}
+            onClick={() =>
+              void run('save', () => port.saveDraft(request)).then((result) => {
+                if (result) setActionStatus(result.message ?? '草稿已保存');
+              })
+            }
+          >
+            {pending === 'save' ? '保存中…' : '保存草稿'}
+          </Button>
+          <Button
+            disabled={readOnly || pending !== null}
+            onClick={() =>
+              void run('submit', () =>
+                port.submitForecast(quote.id, selected.id, quote.version)
+              ).then(async (result) => {
+                if (!result) return;
+                setActionStatus(result.message ?? '预报已提交');
+                await onSubmitForecast?.();
+              })
+            }
+          >
+            {pending === 'submit' ? '提交中…' : '提交预报'}
+          </Button>
+          <Button
+            variant="quiet"
+            disabled={readOnly}
+            onClick={() => setActionStatus('更多操作：复制草稿、保存模板、导出校验报告。')}
+          >
+            更多操作
+          </Button>
+          {actionError ? <span role="alert">{actionError}</span> : null}
+          {actionStatus ? <span role="status">{actionStatus}</span> : null}
         </footer>
       </div>
       <aside className="quote-workbench__result" aria-label="报价与限制">
@@ -201,14 +324,25 @@ export function QuoteWorkbench({ state = 'normal', onSubmitForecast }: QuoteWork
             <h2>报价与限制</h2>
             <span>{quote.quoteNo}</span>
           </div>
-          <Button variant="secondary" size="compact">
-            刷新报价
+          <Button
+            variant="secondary"
+            size="compact"
+            disabled={readOnly || pending !== null}
+            onClick={() => void refreshQuote()}
+          >
+            {pending === 'quote'
+              ? '报价中…'
+              : actionError.startsWith('报价失败')
+                ? '重试报价'
+                : '刷新报价'}
           </Button>
         </header>
         {state === 'stale' ? (
           <div className="quote-alert">
             价卡已从 v3 发布为 v4；旧结果保留，接受前必须重算。
-            <Button size="compact">按 v4 重新计算</Button>
+            <Button size="compact" onClick={() => void refreshQuote()}>
+              按 v4 重新计算
+            </Button>
           </div>
         ) : null}
         <div className="quote-options" role="radiogroup" aria-label="渠道报价">
@@ -258,27 +392,42 @@ export function QuoteWorkbench({ state = 'normal', onSubmitForecast }: QuoteWork
             </div>
           ) : (
             <div className="quote-cost">
-              <span>成本 CNY 4,580.50</span>
-              <span>毛利 CNY 739.50 / 13.90%</span>
+              <span>成本 {formatMoney(selected.cost)}</span>
+              <span>
+                毛利 {formatMoney(selected.margin)} / {selected.marginPercent}
+              </span>
             </div>
           )}
           <Button
             variant="secondary"
             size="compact"
-            onClick={() => setExplanationOpen((open) => !open)}
+            disabled={pending !== null}
+            onClick={() => void loadExplanation()}
           >
-            查看解释
+            {pending === 'explain' ? '加载解释…' : explanation ? '收起解释' : '查看解释'}
+          </Button>
+          <Button
+            size="compact"
+            disabled={readOnly || pending !== null}
+            onClick={() =>
+              void run('accept', () => port.accept(quote.id, selected.id, quote.version)).then(
+                (result) => {
+                  if (result) setActionStatus(`已接受 ${selected.product} 不可变报价快照`);
+                }
+              )
+            }
+          >
+            {pending === 'accept' ? '接受中…' : '接受报价'}
           </Button>
         </section>
-        {explanationOpen ? (
+        {explanation ? (
           <section className="quote-explanation">
             <h3>报价说明</h3>
-            <p>{quote.rateCardVersion}</p>
+            <p>{explanation.rateCardVersion}</p>
             <ol>
-              <li>计费重取实重与材积重较大值：max(123.50, 80.00)</li>
-              <li>基础运费按 38.36 × 122 kg 的已保存快照计价</li>
-              <li>燃油附加费使用规则版本 FUEL-11.00%</li>
-              <li>偏远附加费按目的地邮编 90001 计算</li>
+              {explanation.steps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
             </ol>
           </section>
         ) : null}

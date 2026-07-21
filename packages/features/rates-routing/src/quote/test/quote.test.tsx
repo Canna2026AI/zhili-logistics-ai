@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { QuoteWorkbench } from '../ui/quote-workbench';
 import { calculateQuote, quoteInputFixture } from '../model/quote';
@@ -14,12 +14,12 @@ describe('multi-channel quote', () => {
     );
   });
 
-  it('selects a channel and displays rule-by-rule explanation', () => {
+  it('selects a channel and displays rule-by-rule explanation', async () => {
     render(<QuoteWorkbench state="normal" />);
     fireEvent.click(screen.getByRole('radio', { name: /DHL Express/ }));
     expect(screen.getAllByText('CNY 5,320.00')).toHaveLength(2);
     fireEvent.click(screen.getByRole('button', { name: '查看解释' }));
-    expect(screen.getByText(/RATE-DHL-CN-US-2026\.05-v3/)).toBeInTheDocument();
+    expect(await screen.findByText(/RATE-DHL-CN-US-2026\.05-v3/)).toBeInTheDocument();
     expect(screen.getByText(/计费重取实重与材积重较大值/)).toBeInTheDocument();
   });
 
@@ -48,5 +48,47 @@ describe('multi-channel quote', () => {
     expect(GET).toHaveBeenCalledWith('/quotes/{quoteId}/explanation', {
       params: { path: { quoteId: 'quote-1' } },
     });
+  });
+
+  it('builds a request from controlled weight and awaits a refreshed calculation', async () => {
+    const create = vi.fn(async (request: typeof quoteInputFixture.request) =>
+      calculateQuote({ request, volumeDivisor: 6000 })
+    );
+    const explain = vi.fn(async () => ({ rateCardVersion: 'RATE-DHL-v4', steps: ['200 kg'] }));
+    const accept = vi.fn(async () => ({ acceptedOptionId: 'dhl-express', version: 2 }));
+    render(<QuoteWorkbench port={{ create, explain, accept } as never} />);
+    fireEvent.change(screen.getByLabelText('实重 (kg)'), { target: { value: '200.00' } });
+    fireEvent.click(screen.getByRole('button', { name: '刷新报价' }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('200.00 kg')).toBeInTheDocument();
+    expect(screen.getAllByText('CNY 8,537.83')).toHaveLength(2);
+  });
+
+  it('loads option-specific explanation and accepts the selected immutable snapshot', async () => {
+    const create = vi.fn(async () => calculateQuote(quoteInputFixture));
+    const explain = vi.fn(async (_quoteId: string, optionId: string) => ({
+      rateCardVersion: optionId === 'ups-saver' ? 'RATE-UPS-v5' : 'RATE-DHL-v3',
+      steps: [`${optionId} / 123.50 kg`],
+    }));
+    const accept = vi.fn(async () => ({ acceptedOptionId: 'ups-saver', version: 2 }));
+    render(<QuoteWorkbench port={{ create, explain, accept } as never} />);
+    fireEvent.click(screen.getByRole('radio', { name: /UPS Worldwide Saver/ }));
+    expect(screen.getByText(/成本 CNY 4,710.00/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看解释' }));
+    expect(await screen.findByText('RATE-UPS-v5')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '接受报价' }));
+    await waitFor(() => expect(accept).toHaveBeenCalledWith('quote-2505120042', 'ups-saver', 1));
+  });
+
+  it('surfaces quote port rejection and allows retry', async () => {
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('NO_RATE'))
+      .mockResolvedValueOnce(calculateQuote(quoteInputFixture));
+    render(<QuoteWorkbench port={{ create, explain: vi.fn(), accept: vi.fn() } as never} />);
+    fireEvent.click(screen.getByRole('button', { name: '刷新报价' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('报价失败');
+    fireEvent.click(screen.getByRole('button', { name: '重试报价' }));
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
   });
 });

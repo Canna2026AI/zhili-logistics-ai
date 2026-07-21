@@ -12,7 +12,7 @@ describe('identity session', () => {
       permissionsVersion: 7,
     });
 
-    render(<LoginShell api={{ login }} onAuthenticated={() => undefined} />);
+    render(<LoginShell api={{ login } as never} onAuthenticated={() => undefined} />);
     fireEvent.change(screen.getByLabelText('账号'), { target: { value: 'zhangwei' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'correct-password' } });
     fireEvent.click(screen.getByRole('button', { name: '登录系统' }));
@@ -23,7 +23,7 @@ describe('identity session', () => {
 
   it('maps session expiration into an actionable state', async () => {
     const login = vi.fn().mockRejectedValue({ code: 'SESSION_EXPIRED' });
-    render(<LoginShell api={{ login }} onAuthenticated={() => undefined} />);
+    render(<LoginShell api={{ login } as never} onAuthenticated={() => undefined} />);
     fireEvent.change(screen.getByLabelText('账号'), { target: { value: 'zhangwei' } });
     fireEvent.change(screen.getByLabelText('密码'), { target: { value: 'expired' } });
     fireEvent.click(screen.getByRole('button', { name: '登录系统' }));
@@ -52,5 +52,33 @@ describe('identity session', () => {
     expect(POST).toHaveBeenCalledWith('/auth/password/sessions', {
       body: { account: 'zhangwei', password: 'password' },
     });
+  });
+
+  it('refreshes, reauthenticates and logs out through generated session paths', async () => {
+    const POST = vi.fn().mockResolvedValue({
+      data: {
+        data: {
+          subjectId: 'usr-zhang',
+          tenantId: 'tenant-zhili',
+          expiresAt: '2026-07-22T20:00:00+08:00',
+          permissionsVersion: 8,
+        },
+      },
+    });
+    const DELETE = vi.fn().mockResolvedValue({});
+    const adapter = createSessionApi({ POST, DELETE } as never);
+    await adapter.refresh();
+    await adapter.reauthenticate({
+      subjectId: 'usr-zhang',
+      tenantId: 'tenant-zhili',
+      expiresAt: '2026-07-22T20:00:00+08:00',
+      permissionsVersion: 8,
+    });
+    await adapter.logout();
+    expect(POST).toHaveBeenCalledWith('/auth/sessions:refresh');
+    expect(POST).toHaveBeenCalledWith('/auth/sessions/current:reauthenticate', {
+      body: expect.objectContaining({ subjectId: 'usr-zhang' }),
+    });
+    expect(DELETE).toHaveBeenCalledWith('/auth/sessions/current');
   });
 });

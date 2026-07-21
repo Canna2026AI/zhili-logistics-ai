@@ -11,6 +11,10 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@zhili/feature-identity-masterdata": "workspace:*",
+    "@zhili/feature-rates-routing": "workspace:*",
+    "@zhili/feature-waybills": "workspace:*",
+    "@zhili/ops": "workspace:*",
     "@zhili/ui": "workspace:*",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"

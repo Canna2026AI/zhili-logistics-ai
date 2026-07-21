@@ -4,88 +4,93 @@
 
 分支：`codex/frontend-ops-orders`
 
-## 交付范围
+## 可集成入口与包边界
 
-| 功能组                               | 功能 ID                                | 实现位置                                                   |
-| ------------------------------------ | -------------------------------------- | ---------------------------------------------------------- |
-| 登录、会话、权限模拟                 | IAM-01、IAM-03、IAM-06                 | `packages/features/identity-masterdata/src/session`        |
-| 客户、组织、仓库、合作方、引用主数据 | MDM-01、MDM-03、MDM-04、MDM-05、CRM-01 | `packages/features/identity-masterdata/src/master-data`    |
-| 渠道、价卡、附加费、限制、报价与解释 | RATE-01 至 RATE-07                     | `packages/features/rates-routing/src/catalog`、`src/quote` |
-| 标准/FBA 下单、包裹、品名、导入      | ORD-01 至 ORD-06                       | `packages/features/waybills/src/order`、`src/import`       |
-| 运单、面单与批量命令                 | ORD-06、ORD-07、ORD-08                 | `packages/features/waybills/src/waybill`、`src/adapters`   |
-| 运营壳、工作台与模块导航             | F1A composition                        | `apps/ops/src/features/orders`                             |
+- 组合组件：`@zhili/ops/orders` 的 `OpsOrdersWorkspace`。
+- 路由注册入口：`@zhili/ops/orders-entry` 的 `opsOrdersFeatureEntry`，目标路由 `/operations/orders`。
+- Ops 和 Storybook 只通过 `@zhili/feature-*` / `@zhili/ops` 公共出口导入，并在各自 `package.json` 声明 workspace 依赖；没有跨仓库相对导入。
+- 本分支不越权修改共享 `apps/ops/src/app.tsx`、根 `playwright.config.ts` 或锁文件。主线集成需挂载上述 entry、把 F1A project 合并进根 Playwright，并统一刷新 `pnpm-lock.yaml`。
 
-UI 不是静态截图：登录、筛选、搜索、选择、Drawer、标准/FBA 切换、包裹/品名增行、导入状态机、渠道选择、解释、权限模拟及危险确认均维护真实组件状态。登录、报价、解释、运单读取、提交、面单与批量命令通过 `@zhili/api-client` 生成路径和 `@zhili/contracts` DTO 进入强类型端口；列表与 Storybook 在本分支以确定性 fixture 驱动，待集成负责人接入服务端实现。
+## 功能状态（按 operation/验收，不再整包宣称完成）
 
-## 状态与安全
+| 功能 ID                 | 状态        | 本分支可执行证据                                                                            | 尚未宣称完成的边界                             |
+| ----------------------- | ----------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| IAM-01                  | IMPLEMENTED | 密码登录 UI、typed session port、失败/过期/禁止态                                           | —                                              |
+| IAM-03                  | PARTIAL     | refresh/logout/reauth typed adapter 与契约测试                                              | 尚未装入共享用户菜单                           |
+| IAM-06                  | PARTIAL     | 只读模拟真实保留 read、全模块禁 write、深圳范围、手机号脱敏                                 | 服务端权限预览/模拟生命周期待系统权限页        |
+| MDM-01/03/04/05、CRM-01 | PARTIAL     | 主数据目录、客户异步保存/reject、信用字段、范围/脱敏；组织、地址、引用、信用 typed adapters | 组织树/库位/完整地址和引用编辑器未在本域标完成 |
+| RATE-01..05             | PARTIAL     | 渠道/分区/价卡/附加费/限制/特殊价目录，计费段/进位/最低消费，价卡异步发布/reject            | 完整渠道 CRUD、限制维护编辑器未标完成          |
+| RATE-06                 | IMPLEMENTED | 受控输入构造 `CreateQuoteRequest`，多渠道异步报价/reject、成本脱敏                          | —                                              |
+| RATE-07                 | IMPLEMENTED | 渠道专属解释、接受不可变快照、版本/过期提示                                                 | —                                              |
+| ORD-01/02               | IMPLEMENTED | 标准/FBA 草稿、包裹/品名编辑、save/copy/validate/submit typed ports                         | —                                              |
+| ORD-03/04               | IMPLEMENTED | CSV BOM/引号/正重量校验，create/validate/commit/partial/rollback ports                      | XLSX 二进制解析留给上传服务                    |
+| ORD-05                  | IMPLEMENTED | 包裹重量/尺寸/品名真实状态与唯一 ID                                                         | —                                              |
+| ORD-06                  | PARTIAL     | label job 异步队列与版本头                                                                  | 报关/保险/附件编辑器未标完成                   |
+| ORD-07                  | PARTIAL     | submit 与 renumber typed adapter                                                            | 改号 UI 尚未标完成                             |
+| ORD-08                  | PARTIAL     | 批量提交/标签/取消、逐项 partial/reject；split/merge typed adapters                         | 拆合单编辑 UI 尚未标完成                       |
 
-- 登录和会话：正常、加载、失败、过期、禁止。
-- 主数据：正常、加载、空、失败、禁止、过期；新增客户保持当前分类。
-- 报价：正常、加载、空、失败、禁止、过期、陈旧版本和成本/利润脱敏。
-- 运单：正常、加载、空、失败、禁止、过期、陈旧、批量部分成功。
-- 危险动作：价卡发布和取消运单均展示影响范围、原因、当前版本和审计去向；条件不全时确认按钮禁用。
-- 契约保护：变更命令携带 `Idempotency-Key`，并在适用命令携带 `If-Match` 版本头。
+三个 feature package 的公开状态均为 `partial`，避免把目录 fixture 或仅存在 adapter 误报为整项 P0 完成。
 
-## 测试先行记录
+## 真实交互、端口与错误处理
 
-先创建包级/工作区行为测试并观察入口模块尚不存在的解析失败，再实现最小模型、端口和 UI，随后补齐异常态与危险确认。最终本域结果：
+- Ops composition 显式注入 `OpsOrdersPorts`；Storybook 使用同一强类型 memory ports，生产可替换为 OpenAPI adapters。
+- 主数据保存、价卡发布、刷新报价、加载解释、接受报价、保存/提交报价、订单保存/校验/复制/提交、导入创建/校验/提交/回滚、详情读取、标签、批量提交和取消都 `await` typed port。
+- 每个异步页面命令都有 pending 禁重入、成功反馈、reject 提示和重试/内容保留；版本化命令携带 `If-Match`，创建/变更携带 `Idempotency-Key`。
+- Drawer 只渲染所选 `get(waybillId)` 返回的 `WaybillDetail`，并在 scope 不匹配时拒绝显示；德国运单断言不会出现深圳客户联系人。
+- 报价从受控重量构造请求。DHL 在 123.50 kg 保持 canonical `CNY 5,320.00`；改为 200 kg 后重算为 `CNY 8,537.83`。UPS 的成本、毛利和解释随所选 option 快照切换。
 
-| Gate                  | 命令                                                    | 结果                        |
-| --------------------- | ------------------------------------------------------- | --------------------------- |
-| Identity tests        | `pnpm --filter @zhili/feature-identity-masterdata test` | 2 files / 6 tests passed    |
-| Rates tests           | `pnpm --filter @zhili/feature-rates-routing test`       | 2 files / 8 tests passed    |
-| Waybill tests         | `pnpm --filter @zhili/feature-waybills test`            | 3 files / 17 tests passed   |
-| Ops composition tests | `pnpm --filter @zhili/ops test`                         | 1 file / 4 tests passed     |
-| Target lint           | `pnpm exec eslint <F1A-owned paths>`                    | passed                      |
-| Typecheck             | 三个领域包、`@zhili/ops`、`@zhili/storybook`            | passed                      |
-| Package build         | 三个领域包、`@zhili/ops`                                | passed                      |
-| Storybook build       | `storybook build --output-dir /tmp/zhili-f1a-storybook` | passed；仅既有大 chunk 警告 |
-| Playwright Chromium   | `ops-orders.spec.ts`                                    | 3/3 passed                  |
-| Diff hygiene          | `git diff --check`                                      | passed                      |
+## RED → GREEN 记录
 
-本地应用内浏览能力不可用，因此视觉和交互回归使用 Playwright Chromium、固定中文 locale、Asia/Shanghai 时区及 1585/1586 × 992 视口。E2E 覆盖 12 行密度、筛选、选择保持、详情 Drawer、危险批量确认、标准报价、规则解释、唯一主命令和禁止权限说明。
+独立评审后先添加并运行失败回归测试，确认以下旧行为被捕获：端口 props 被忽略、保存后无行、reject 无提示、只读误作禁止读取、报价不响应 200 kg、UPS 仍显示 DHL 解释/成本、Drawer 串用联系人、导入只改本地 step、缺少 session/renumber/split/merge 调用。实现后结果如下：
 
-## 概念图 00 对照：运营运单列表
+| Gate                                  | Fresh 结果                                                                         |
+| ------------------------------------- | ---------------------------------------------------------------------------------- |
+| Identity Vitest                       | 2 files / 11 tests passed                                                          |
+| Rates Vitest                          | 2 files / 14 tests passed                                                          |
+| Waybills Vitest                       | 3 files / 25 tests passed                                                          |
+| Ops composition Vitest                | 1 file / 4 tests passed                                                            |
+| F1A Playwright collection             | 1 file / 4 tests collected（不再是 0）                                             |
+| F1A Playwright Chromium               | 4/4 passed；含真实交互与 axe                                                       |
+| axe                                   | DenseWaybillList、OrderQuote、PermissionSimulation 均无 serious/critical violation |
+| 5 个 TypeScript checks                | identity、rates、waybills、ops、storybook passed                                   |
+| Builds                                | 3 个 feature 声明构建、Ops tsc/Vite、Storybook passed                              |
+| Target ESLint / Prettier / diff-check | passed                                                                             |
+
+标准复现命令：
+
+```bash
+node_modules/.bin/playwright test --config tests/e2e/ops-orders.playwright.config.ts --list
+node_modules/.bin/playwright test --config tests/e2e/ops-orders.playwright.config.ts
+```
+
+专属配置自行启动 Storybook，不依赖预先运行的 6006 服务。Browser plugin 本轮不可用，因此按前端测试 skill 使用 Playwright Chromium fallback。
+
+## 概念图 00：运营运单列表
 
 运行截图：`artifacts/e2e/f1a/ops-waybill-1586x992.png`
 
 基准：`docs/01-design/concepts/00-ops-waybill-list.png`
 
-1. 保留石墨色紧凑侧栏、顶部租户/搜索、页签和高密度工作区层级。
-2. 状态计数横排，标准 fixture 为全部 `1,248`、待收货 `156`、待分货 `86`、待转运 `97`、转运中 `238`、已发货 `502`、已签收 `1,123`、问题件 `46`。
-3. 首屏固定 12 行数据、32px 级密度、横向字段表格和行内状态徽标，关闭 UI0 的低密度差异。
-4. 唯一实心主命令“新增预报”位于列表工具栏；筛选、保存视图、批量操作和行选择均可交互。
-5. 480px 详情 Drawer 保留背景上下文，展示 `S2505120004`、标准重量/路线/客户/节点信息；关闭后选择不丢失。
+1. 石墨色紧凑侧栏、租户/搜索、页签和高密度工作区层级保持一致。
+2. 状态计数横排；首屏固定 12 行和 32px 级密度，关闭 UI0 低密度差异。
+3. 唯一实心主命令“新增预报”，筛选、选择、Drawer 和危险批量命令均真实响应。
+4. 480px Drawer 保留背景上下文，关闭不丢选择；详情 loading/reject/scope 独立处理。
+5. canonical `S2505120004` 与德国 `S2505120002` 分别由各自详情数据渲染，不拼接其他客户 PII。
 
-首屏文案相对概念稿仅将品牌替换为“智立科技物流AI系统”，并使用项目冻结的 DHL 标准样例与状态中文；未引入营销文案或演示权限控件。
-
-## 概念图 01 对照：下单与报价
+## 概念图 01：下单与报价
 
 运行截图：`artifacts/e2e/f1a/ops-quote-1585x992.png`
 
 基准：`docs/01-design/concepts/01-order-quote.png`
 
-1. 延续同一桌面壳，主体为左侧高密度下单表单、右侧固定报价和限制面板。
-2. 表单按客户渠道、收寄件、包裹品名、清关附件分组，并支持标准/FBA 类型和可编辑增行。
-3. 多渠道方案以单选列表呈现，可用、推荐和不可用限制不混淆；不使用卡片墙或多个实心主命令。
-4. 标准费用严格为基础 `4,680.00` + 燃油 `514.80` + 偏远 `80.00` + 操作 `45.20` = `CNY 5,320.00`，并展示成本和毛利。
-5. “查看解释”展开 `RATE-DHL-CN-US-2026.05-v3` 逐规则说明；底部唯一主命令为“提交预报”。
+1. 左侧高密度下单表单、右侧固定报价与限制面板保持一致。
+2. 标准/FBA、地址、包裹、品名与清关分组均保留真实表单状态。
+3. 多渠道单选清楚区分推荐、可用和限制，不使用卡片墙或多个实心主命令。
+4. 费用逐行相加严格等于总计，并按当前计费重和渠道实时更新成本/毛利。
+5. “查看解释”和“接受报价”读取当前 option/version 的不可变快照；底部唯一主命令为“提交预报”。
 
-首屏文案保留业务语义但统一为本项目标准 fixture；概念稿若使用通用渠道名，本实现以冻结的 DHL/UPS 数据替代，金额、重量、线路和规则版本均与 canonical fixture 一致。
+## 主线集成待办（不属于本工作树所有权）
 
-## Storybook 入口
-
-- `F1A/OpsOrders/DenseWaybillList`
-- `F1A/OpsOrders/OrderQuote`
-- `F1A/OpsOrders/OperationsDashboard`
-- `F1A/OpsOrders/PermissionSimulation`
-- `F1A/OpsOrders/PasswordLogin`
-- `F1A/OpsOrders/ExplicitStates`
-
-## 未关闭差异与有意偏差
-
-- 无 Critical 或 Important 视觉差异。
-- 侧栏未补装饰性图标；信息层级、选中态和密度已对齐，避免修改共享 UI 包。
-- 领域页面暂不改共享 `apps/ops/src/app.tsx` 路由，按 F1 简报由集成负责人合并 F1A/F1B 后统一装配；本分支提供可直接挂载的 `OpsOrdersWorkspace`。
-- 本分支不实现后端持久化。生产行为已隔离在强类型 API adapter 后，Storybook/组件测试使用确定性数据，后续只替换端口实现，不需重写交互层。
-- Storybook 构建存在依赖级大 chunk 警告，不影响功能、类型或 E2E；建议集成阶段统一做 story 分包。
+1. 在共享 `apps/ops/src/app.tsx` 挂载 `opsOrdersFeatureEntry`，使生产 bundle 路由进入 F1A。
+2. 将 `ops-orders.playwright.config.ts` 的 project/webServer 合并进根 `playwright.config.ts`，使根 `pnpm e2e` 自动包含 F1A。
+3. 合并各工作树 manifests 后统一运行冻结安装并提交刷新后的 `pnpm-lock.yaml`。

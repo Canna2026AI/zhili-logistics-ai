@@ -10,6 +10,9 @@ describe('waybill OpenAPI adapter', () => {
     await adapter.submit('waybill-1', 7);
     await adapter.createLabel('waybill-1', 7, 'A4');
     await adapter.batch(['waybill-1'], 'CANCEL', 7, '客户书面申请取消');
+    await adapter.renumber('waybill-1', 7, 'S2505129999');
+    await adapter.split('waybill-1', 7, ['PKG-01']);
+    await adapter.merge(['waybill-1', 'waybill-2'], 7);
     expect(GET).toHaveBeenCalledWith('/waybills/{waybillId}', {
       params: { path: { waybillId: 'waybill-1' } },
     });
@@ -28,6 +31,20 @@ describe('waybill OpenAPI adapter', () => {
     expect(POST).toHaveBeenCalledWith(
       '/waybills:batch-command',
       expect.objectContaining({ body: expect.objectContaining({ command: 'CANCEL' }) })
+    );
+    expect(POST).toHaveBeenCalledWith(
+      '/waybills/{waybillId}:renumber',
+      expect.objectContaining({ body: expect.objectContaining({ waybillNo: 'S2505129999' }) })
+    );
+    expect(POST).toHaveBeenCalledWith(
+      '/waybills:split',
+      expect.objectContaining({ body: expect.objectContaining({ packageRefs: ['PKG-01'] }) })
+    );
+    expect(POST).toHaveBeenCalledWith(
+      '/waybills:merge',
+      expect.objectContaining({
+        body: expect.objectContaining({ ids: ['waybill-1', 'waybill-2'] }),
+      })
     );
   });
 });

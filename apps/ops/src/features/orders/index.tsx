@@ -1,15 +1,9 @@
 import { AppShell, Button, StatusTag, type NavigationGroup, type WorkspaceTab } from '@zhili/ui';
 import { useState } from 'react';
-import { MasterDataPanel } from '../../../../../packages/features/identity-masterdata/src';
-import {
-  QuoteWorkbench,
-  RateCatalogPanel,
-} from '../../../../../packages/features/rates-routing/src';
-import {
-  ImportWorkbench,
-  OrderDraftPanel,
-  WaybillList,
-} from '../../../../../packages/features/waybills/src';
+import { MasterDataPanel } from '@zhili/feature-identity-masterdata';
+import { QuoteWorkbench, RateCatalogPanel } from '@zhili/feature-rates-routing';
+import { ImportWorkbench, OrderDraftPanel, WaybillList } from '@zhili/feature-waybills';
+import { defaultOpsOrdersPorts, type OpsOrdersPorts } from './ports';
 import './orders-workspace.css';
 
 type OrdersPage =
@@ -126,17 +120,20 @@ function OperationsDashboard({ onOpen }: { onOpen: (page: OrdersPage) => void })
 export interface OpsOrdersWorkspaceProps {
   initialPage?: OrdersPage;
   showPermissionController?: boolean;
+  ports?: Partial<OpsOrdersPorts>;
 }
 
 export function OpsOrdersWorkspace({
   initialPage = 'waybills',
   showPermissionController = false,
+  ports,
 }: OpsOrdersWorkspaceProps) {
   const [page, setPage] = useState<OrdersPage>(initialPage);
   const [openPages, setOpenPages] = useState<OrdersPage[]>(
     initialPage === 'dashboard' ? ['dashboard'] : ['dashboard', initialPage]
   );
   const [simulation, setSimulation] = useState(false);
+  const activePorts = { ...defaultOpsOrdersPorts, ...ports };
 
   const open = (next: OrdersPage) => {
     setPage(next);
@@ -146,24 +143,38 @@ export function OpsOrdersWorkspace({
   const tabs: WorkspaceTab[] = openPages.map((id) => ({
     id,
     label: labels[id],
-    stale: simulation && id !== 'dashboard',
+    stale: false,
   }));
 
   const content =
     page === 'dashboard' ? (
       <OperationsDashboard onOpen={open} />
     ) : page === 'master-data' ? (
-      <MasterDataPanel />
+      <MasterDataPanel
+        port={activePorts.masterData}
+        readOnly={simulation}
+        dataScope={simulation ? '深圳分公司' : '全租户'}
+        maskPhone={simulation}
+      />
     ) : page === 'rate-catalog' ? (
-      <RateCatalogPanel />
+      <RateCatalogPanel port={activePorts.rates} readOnly={simulation} />
     ) : page === 'quotes' ? (
-      <QuoteWorkbench state={simulation ? 'forbidden' : 'normal'} />
+      <QuoteWorkbench
+        port={activePorts.quotes}
+        state={simulation ? 'forbidden-cost' : 'normal'}
+        readOnly={simulation}
+      />
     ) : page === 'orders' ? (
-      <OrderDraftPanel />
+      <OrderDraftPanel port={activePorts.orders} readOnly={simulation} />
     ) : page === 'imports' ? (
-      <ImportWorkbench />
+      <ImportWorkbench port={activePorts.imports} readOnly={simulation} />
     ) : (
-      <WaybillList state={simulation ? 'forbidden' : 'normal'} onCreate={() => open('quotes')} />
+      <WaybillList
+        port={activePorts.waybills}
+        readOnly={simulation}
+        dataScope={simulation ? '深圳分公司' : '全租户'}
+        onCreate={() => open('quotes')}
+      />
     );
 
   return (
@@ -190,7 +201,8 @@ export function OpsOrdersWorkspace({
               <div>
                 <strong>权限模拟：王丽 · 客服专员</strong>
                 <span>
-                  waybill.write 被 DENY；数据范围仅深圳分公司；手机号按字段策略脱敏。模拟剩余 13
+                  waybill.read 被 ALLOW、waybill.write 被
+                  DENY，其他写动作同步禁用；数据范围仅深圳分公司；手机号按字段策略脱敏。模拟剩余 13
                   分钟，操作会记录审计。
                 </span>
               </div>

@@ -2,7 +2,10 @@ import { Button, DataTable, Dialog, Input, StatusTag, type DataTableColumn } fro
 import { useMemo, useState } from 'react';
 import {
   filterMasterData,
+  maskPhoneInName,
   masterDataFixtures,
+  memoryMasterDataPort,
+  type MasterDataPort,
   type MasterDataCategory,
   type MasterDataRecord,
 } from '../model/master-data';
@@ -14,6 +17,10 @@ export type MasterDataViewState =
 export interface MasterDataPanelProps {
   state?: MasterDataViewState;
   onCreate?: (record: MasterDataRecord) => void;
+  port?: MasterDataPort;
+  readOnly?: boolean;
+  dataScope?: string;
+  maskPhone?: boolean;
 }
 
 const categories: MasterDataCategory[] = [
@@ -26,17 +33,37 @@ const categories: MasterDataCategory[] = [
   '费用',
 ];
 
-export function MasterDataPanel({ state = 'normal', onCreate }: MasterDataPanelProps) {
+export function MasterDataPanel({
+  state = 'normal',
+  onCreate,
+  port = memoryMasterDataPort,
+  readOnly = false,
+  dataScope = '全租户',
+  maskPhone = false,
+}: MasterDataPanelProps) {
   const [category, setCategory] = useState<MasterDataCategory>('客户');
   const [query, setQuery] = useState('');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [customerName, setCustomerName] = useState('');
+  const [creditLimit, setCreditLimit] = useState('500000.00');
+  const [paymentTerms, setPaymentTerms] = useState('月结 30 天');
+  const [records, setRecords] = useState(masterDataFixtures);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
   const rows = useMemo(() => {
     if (state === 'empty') return [];
-    return filterMasterData(masterDataFixtures, query).filter(
-      (record) => record.category === category
-    );
-  }, [category, query, state]);
+    return filterMasterData(records, query)
+      .filter((record) => record.category === category)
+      .filter(
+        (record) =>
+          dataScope === '全租户' || record.branch === dataScope || record.branch === '全租户'
+      )
+      .map((record) =>
+        maskPhone && record.category === '联系人'
+          ? { ...record, name: maskPhoneInName(record.name) }
+          : record
+      );
+  }, [category, dataScope, maskPhone, query, records, state]);
 
   if (state === 'loading')
     return (
@@ -77,19 +104,25 @@ export function MasterDataPanel({ state = 'normal', onCreate }: MasterDataPanelP
     { key: 'version', header: '版本', align: 'right', render: (row) => `v${row.version}` },
   ];
 
-  const saveCustomer = () => {
-    const record: MasterDataRecord = {
-      id: `customer-${Date.now()}`,
-      category: '客户',
-      code: 'CUST-NEW',
-      name: customerName.trim(),
-      scope: '深圳分公司',
-      status: '待审核',
-      version: 1,
-    };
-    onCreate?.(record);
-    setDialogOpen(false);
-    setCustomerName('');
+  const saveCustomer = async () => {
+    setSaving(true);
+    setSaveError('');
+    try {
+      const record = await port.createCustomer({
+        name: customerName.trim(),
+        scope: dataScope === '全租户' ? '深圳分公司' : dataScope,
+        creditLimit,
+        paymentTerms,
+      });
+      setRecords((current) => [...current, record]);
+      onCreate?.(record);
+      setDialogOpen(false);
+      setCustomerName('');
+    } catch {
+      setSaveError('客户保存失败；数据未写入，请检查版本或重试。');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -99,7 +132,9 @@ export function MasterDataPanel({ state = 'normal', onCreate }: MasterDataPanelP
           <h1 id="master-data-title">主数据</h1>
           <p>客户、联系人、组织、仓库、合作方与结算参考数据</p>
         </div>
-        <Button onClick={() => setDialogOpen(true)}>新增客户</Button>
+        <Button disabled={readOnly} onClick={() => setDialogOpen(true)}>
+          新增客户
+        </Button>
       </header>
       <div className="master-data__tabs" role="tablist" aria-label="主数据分类">
         {categories.map((item) => (
@@ -139,8 +174,8 @@ export function MasterDataPanel({ state = 'normal', onCreate }: MasterDataPanelP
             <Button variant="secondary" onClick={() => setDialogOpen(false)}>
               取消
             </Button>
-            <Button disabled={!customerName.trim()} onClick={saveCustomer}>
-              保存客户
+            <Button disabled={!customerName.trim() || saving} onClick={() => void saveCustomer()}>
+              {saving ? '保存中…' : '保存客户'}
             </Button>
           </>
         }
@@ -150,6 +185,17 @@ export function MasterDataPanel({ state = 'normal', onCreate }: MasterDataPanelP
           value={customerName}
           onChange={(event) => setCustomerName(event.target.value)}
         />
+        <Input
+          label="信用额度（CNY）"
+          value={creditLimit}
+          onChange={(event) => setCreditLimit(event.target.value)}
+        />
+        <Input
+          label="付款周期"
+          value={paymentTerms}
+          onChange={(event) => setPaymentTerms(event.target.value)}
+        />
+        {saveError ? <p role="alert">{saveError}</p> : null}
       </Dialog>
     </section>
   );

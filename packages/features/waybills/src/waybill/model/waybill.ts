@@ -14,9 +14,10 @@ export interface WaybillListItem {
   weightKg: string;
   createdAt: string;
   version: number;
+  branch: string;
 }
 
-export const waybillFixtures: WaybillListItem[] = [
+const baseWaybillFixtures: Omit<WaybillListItem, 'branch'>[] = [
   {
     id: 'wb-001',
     waybillNo: 'S2505120001',
@@ -174,6 +175,96 @@ export const waybillFixtures: WaybillListItem[] = [
     version: 11,
   },
 ];
+
+export const waybillFixtures: WaybillListItem[] = baseWaybillFixtures.map((item, index) => ({
+  ...item,
+  branch: index === 8 ? '广州分公司' : '深圳分公司',
+}));
+
+export interface WaybillDetail {
+  id: string;
+  waybillNo: string;
+  masterNo: string;
+  customer: string;
+  customerCode: string;
+  contactName: string;
+  contactPhone: string;
+  route: string;
+  service: string;
+  transport: string;
+  pieces: number;
+  forecastWeightKg: string;
+  actualWeightKg: string;
+  volumeM3: string;
+  createdAt: string;
+  state: WaybillStateLabel;
+  version: number;
+  branch: string;
+  timeline: string[];
+}
+
+const destinationRoutes: Record<string, string> = {
+  '美国/洛杉矶': 'CN-SZX → US-LAX',
+  '德国/法兰克福': 'CN-SZX → DE-FRA',
+  '英国/伦敦': 'CN-SZX → GB-LHR',
+  '俄罗斯/莫斯科': 'CN-SZX → RU-MOW',
+  '日本/东京': 'CN-SZX → JP-NRT',
+  '加拿大/温哥华': 'CN-SZX → CA-YVR',
+  '美国/纽约': 'CN-SZX → US-JFK',
+  '法国/巴黎': 'CN-CAN → FR-CDG',
+  '哈萨克斯坦/阿拉木图': 'CN-SZX → KZ-ALA',
+  '新加坡/新加坡': 'CN-SZX → SG-SIN',
+  '韩国/首尔': 'CN-SZX → KR-ICN',
+};
+
+const contactById: Record<string, { code: string; name: string; phone: string; service: string }> =
+  {
+    'wb-002': {
+      code: 'CUST-EU-18',
+      name: 'Anna Müller',
+      phone: '+49 69 123 8800',
+      service: 'Lufthansa Cargo',
+    },
+    'wb-004': {
+      code: 'CUST00256',
+      name: '王志强',
+      phone: '139 2654 8800',
+      service: 'DHL Express Worldwide',
+    },
+  };
+
+export const waybillDetailFixtures: Record<string, WaybillDetail> = Object.fromEntries(
+  waybillFixtures.map((item) => {
+    const contact = contactById[item.id] ?? {
+      code: `CUST-${item.id.toUpperCase()}`,
+      name: `${item.customer}联系人`,
+      phone: `138 **** ${item.id.slice(-3).padStart(4, '0')}`,
+      service: item.transport === '空运' ? '国际空运标准' : `${item.transport}标准服务`,
+    };
+    const detail: WaybillDetail = {
+      id: item.id,
+      waybillNo: item.waybillNo,
+      masterNo: item.masterNo,
+      customer: item.customer,
+      customerCode: contact.code,
+      contactName: contact.name,
+      contactPhone: contact.phone,
+      route: destinationRoutes[item.destination] ?? `CN-SZX → ${item.destination}`,
+      service: contact.service,
+      transport: item.transport,
+      pieces: item.pieces,
+      forecastWeightKg: item.id === 'wb-004' ? '122.00' : item.weightKg.replace(',', ''),
+      actualWeightKg: item.weightKg.replace(',', ''),
+      volumeM3: item.id === 'wb-004' ? '0.48' : (item.pieces * 0.08).toFixed(2),
+      createdAt: item.createdAt,
+      state: item.state,
+      version: item.version,
+      branch: item.branch,
+      timeline: [`${item.state} · ${item.branch === '深圳分公司' ? '深圳仓库' : '广州仓库'}`],
+    };
+    return [item.id, detail];
+  })
+);
 
 export interface WaybillFilter {
   query: string;

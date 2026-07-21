@@ -10,6 +10,21 @@ export interface RateCatalogRecord {
   status: '生效' | '草稿' | '待发布';
 }
 
+export interface RateCatalogPublishResult {
+  version: string;
+  status: RateCatalogRecord['status'];
+}
+
+export interface RateCatalogPort {
+  publish(rateCardId: string, version: number, reason: string): Promise<RateCatalogPublishResult>;
+}
+
+export const memoryRateCatalogPort: RateCatalogPort = {
+  async publish() {
+    return { version: 'v4', status: '生效' };
+  },
+};
+
 export const rateCatalogFixture: RateCatalogRecord[] = [
   {
     id: 'channel-dhl',
@@ -34,7 +49,7 @@ export const rateCatalogFixture: RateCatalogRecord[] = [
     kind: '价卡',
     code: 'RATE-DHL-CN-US',
     name: 'DHL 中美销售价',
-    rule: '0–300 kg 分段价',
+    rule: '0–300 kg 分段价 · 0.5kg 进位 · 最低 CNY 180',
     version: 'v3',
     status: '生效',
   },

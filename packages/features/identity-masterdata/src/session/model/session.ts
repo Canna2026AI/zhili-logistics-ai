@@ -8,6 +8,9 @@ export type SessionInfo = Pick<
 
 export interface SessionPort {
   login(credentials: LoginCredentials): Promise<SessionInfo>;
+  refresh(): Promise<SessionInfo>;
+  reauthenticate(session: SessionInfo): Promise<void>;
+  logout(): Promise<void>;
 }
 
 export function sessionErrorMessage(error: unknown) {

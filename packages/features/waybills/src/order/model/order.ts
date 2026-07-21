@@ -1,6 +1,31 @@
 import type { components } from '@zhili/contracts';
 
 export type OrderType = components['schemas']['CreateOrderDraftRequest']['orderType'];
+export type OrderRequest = components['schemas']['CreateOrderDraftRequest'];
+export type OrderResult = components['schemas']['Order'];
+export type OrderValidation = components['schemas']['OrderValidation'];
+
+export interface OrderPort {
+  save(request: OrderRequest): Promise<OrderResult>;
+  validate(orderId: string, version: number): Promise<OrderValidation>;
+  copy(orderId: string, version: number): Promise<OrderResult>;
+  submit(orderId: string, version: number): Promise<OrderResult>;
+}
+
+export const memoryOrderPort: OrderPort = {
+  async save() {
+    return { id: 'order-1', orderNo: 'ORD-DRAFT-0268', status: 'DRAFT', version: 1 };
+  },
+  async validate() {
+    return { valid: true, items: [] };
+  },
+  async copy() {
+    return { id: 'order-copy-1', orderNo: 'ORD-DRAFT-0269', status: 'DRAFT', version: 1 };
+  },
+  async submit(orderId, version) {
+    return { id: orderId, orderNo: 'ORD-DRAFT-0268', status: 'SUBMITTED', version: version + 1 };
+  },
+};
 
 export function buildOrderRequest(
   orderType: OrderType

@@ -8,7 +8,41 @@ export interface MasterDataRecord {
   scope: string;
   status: '启用' | '停用' | '待审核';
   version: number;
+  branch: string;
+  creditLimit?: string;
+  paymentTerms?: string;
 }
+
+export interface CreateCustomerInput {
+  name: string;
+  scope: string;
+  creditLimit: string;
+  paymentTerms: string;
+}
+
+export interface MasterDataPort {
+  createCustomer(input: CreateCustomerInput): Promise<MasterDataRecord>;
+}
+
+let localCustomerSequence = 256;
+
+export const memoryMasterDataPort: MasterDataPort = {
+  async createCustomer(input) {
+    localCustomerSequence += 1;
+    return {
+      id: `customer-local-${localCustomerSequence}`,
+      category: '客户',
+      code: `CUST${String(localCustomerSequence).padStart(5, '0')}`,
+      name: input.name,
+      scope: input.scope,
+      status: '待审核',
+      version: 1,
+      branch: input.scope,
+      creditLimit: input.creditLimit,
+      paymentTerms: input.paymentTerms,
+    };
+  },
+};
 
 export const masterDataFixtures: MasterDataRecord[] = [
   {
@@ -19,6 +53,9 @@ export const masterDataFixtures: MasterDataRecord[] = [
     scope: '深圳分公司',
     status: '启用',
     version: 7,
+    branch: '深圳分公司',
+    creditLimit: 'CNY 500,000.00',
+    paymentTerms: '月结 30 天',
   },
   {
     id: 'contact-wang',
@@ -28,6 +65,7 @@ export const masterDataFixtures: MasterDataRecord[] = [
     scope: 'CUST00256',
     status: '启用',
     version: 4,
+    branch: '深圳分公司',
   },
   {
     id: 'org-sz',
@@ -37,6 +75,7 @@ export const masterDataFixtures: MasterDataRecord[] = [
     scope: '租户根组织',
     status: '启用',
     version: 12,
+    branch: '深圳分公司',
   },
   {
     id: 'warehouse-sz',
@@ -46,6 +85,7 @@ export const masterDataFixtures: MasterDataRecord[] = [
     scope: '深圳分公司',
     status: '启用',
     version: 9,
+    branch: '深圳分公司',
   },
   {
     id: 'partner-dhl',
@@ -55,6 +95,7 @@ export const masterDataFixtures: MasterDataRecord[] = [
     scope: '国际快递供应商',
     status: '启用',
     version: 5,
+    branch: '深圳分公司',
   },
   {
     id: 'currency-cny',
@@ -64,6 +105,7 @@ export const masterDataFixtures: MasterDataRecord[] = [
     scope: '默认结算币种 · 2 位精度',
     status: '启用',
     version: 3,
+    branch: '全租户',
   },
   {
     id: 'charge-freight',
@@ -73,6 +115,7 @@ export const masterDataFixtures: MasterDataRecord[] = [
     scope: '应收 / 应付',
     status: '启用',
     version: 6,
+    branch: '全租户',
   },
 ];
 
@@ -84,4 +127,8 @@ export function filterMasterData(records: MasterDataRecord[], query: string) {
       .toLowerCase()
       .includes(normalized)
   );
+}
+
+export function maskPhoneInName(value: string) {
+  return value.replace(/(1\d{2})\s?\d{4}\s?(\d{4})/, '$1 **** $2');
 }
