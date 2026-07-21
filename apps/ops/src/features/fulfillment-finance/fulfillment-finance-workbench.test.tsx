@@ -53,15 +53,76 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('surfaces a rejected command without success, state mutation or audit increment', async () => {
-    const execute = vi.fn().mockRejectedValue(new Error('409 版本冲突'));
+    let rejectCommand: ((reason: Error) => void) | undefined;
+    const execute = vi.fn(
+      () =>
+        new Promise<{ auditId: string }>((_resolve, reject) => {
+          rejectCommand = reject;
+        })
+    );
     render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="tracking" />);
 
     fireEvent.click(screen.getByRole('button', { name: '解决问题' }));
+    expect(screen.getByText('正在提交 resolveIssue')).toBeVisible();
+    expect(screen.queryByText('操作成功')).not.toBeInTheDocument();
+    expect(screen.getByText('处理中')).toBeVisible();
+    expect(screen.getByText('0')).toBeVisible();
+
+    rejectCommand?.(new Error('409 版本冲突'));
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('409 版本冲突'));
     expect(screen.queryByText('操作成功')).not.toBeInTheDocument();
     expect(screen.getByText('处理中')).toBeVisible();
     expect(screen.getByText('0')).toBeVisible();
+  });
+
+  it('wires the remaining warehouse, last-mile and tracking P0 operations', async () => {
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
+      auditId: `AUD-${command.operationId}`,
+    }));
+    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} />);
+
+    for (const [label, operationId] of [
+      ['记录测量', 'recordMeasurement'],
+      ['撤销收货', 'undoReceipt'],
+      ['提交盘点', 'commitStocktake'],
+      ['创建装载单', 'createLoadUnit'],
+      ['重打交接单', 'reprintDocument'],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      await waitFor(() =>
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({ operationId }))
+      );
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: /干线尾程/ }));
+    for (const [label, operationId] of [
+      ['创建尾程接货', 'createLastMileIntake'],
+      ['扫描尾程接货', 'scanLastMileIntake'],
+      ['创建派送任务', 'createDeliveryTask'],
+      ['更新派送状态', 'updateDeliveryTaskStatus'],
+      ['修订 POD', 'amendProofOfDelivery'],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      await waitFor(() =>
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({ operationId }))
+      );
+    }
+
+    fireEvent.click(screen.getByRole('button', { name: /轨迹客服/ }));
+    for (const [label, operationId] of [
+      ['接收轨迹', 'ingestTrackingEvent'],
+      ['检测停滞', 'detectTrackingStall'],
+      ['创建问题件', 'createIssue'],
+      ['指派问题件', 'assignIssue'],
+      ['结算索赔', 'settleClaim'],
+      ['授权放货', 'releaseShipmentHold'],
+    ] as const) {
+      fireEvent.click(screen.getByRole('button', { name: label }));
+      await waitFor(() =>
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({ operationId }))
+      );
+    }
   });
 
   it('keeps warehouse scan evidence and finance table dense enough for desktop operations', () => {

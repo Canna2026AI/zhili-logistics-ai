@@ -2,22 +2,24 @@
 
 ## 完成范围
 
-- `WH-01–08`：扫码收货、复重/量方/图片、差异、库位/盘点、分货、袋/托/柜、出库预检，以及具有队列状态的交接单打印命令。
-- `LINE-01–04` / `LM-01–06`：订舱、提单、清关、FBA、尾程接货/派送/POD、合作方同步/幂等重放，以及尾程应收应付生成。
-- `TRK-01–03` / `CS-01–03`：轨迹去重乱序、人工轨迹、停滞、问题件、退件、索赔和扣放货。
+- `WH-01–08`：扫码收货、复重/量方/图片、撤销收货、差异、库位/盘点提交、分货、袋/托/柜、装载单、出库预检，以及交接单初次打印/重打命令。
+- `LINE-01–04` / `LM-01–06`：订舱、提单、清关、FBA、尾程接货单创建/扫描、派送任务创建/状态迁移、POD 采集/修订、合作方同步/幂等重放，以及尾程应收应付生成。
+- `TRK-01–03` / `CS-01–03`：合作方轨迹接收、去重乱序、人工轨迹、停滞检测、问题件创建/指派/解决、退件、索赔创建/结算和扣放货。
 - `FIN-01–10` / `PAY-01–05`：应收应付导入校验与部分提交、对账、审核/反审核、账单争议、付款分配、支付订单、预存款/未分配收款、退款、支付对账、核销、余额、汇率、分摊、期间、发票审批和利润回查。
 
 ## 契约与交互
 
-- 四域客户端使用 `@zhili/contracts` 生成 `paths` 与 `@zhili/api-client`。所有业务按钮发送具名、带实体版本和稳定幂等键的联合类型命令；最终装配必须持有可执行 command port。
+- 四域客户端使用 `@zhili/contracts` 生成 `paths` 与 `@zhili/api-client`。全部 67 个联合命令都在穷举路由表中映射到具体契约路径；POST 命令携带稳定 `Idempotency-Key`，有版本时携带 `If-Match`。
+- `FulfillmentFinanceApplication` 生产默认创建真实 API command port，不再产生本地成功。内存端口仅由组件测试、Storybook 和 E2E 预览壳显式注入。成功返回服务端 `meta.requestId`/响应头请求号，服务端 Problem Detail 原样拒绝，不伪造审计 ID。
 - 命令先显示提交中，只有 command port resolve 后才更新业务状态、成功反馈和审计计数；reject 显示可重试错误，保留原状态和幂等键，不增加审计。
-- `F06-DANGER-UNREVIEW` 在确认前同屏显示下游影响、至少 5 字原因、本地/预期版本 11 和 `audit://finance/charges/CHG-S2505120004`。API 端口实际调用既有 `unreviewCharge` 生成适配器并传递原因、`If-Match: 11` 和 `Idempotency-Key`。
+- `F06-DANGER-UNREVIEW` 在确认前同屏显示下游影响、至少 5 字原因、本地/预期版本 11 和 `audit://finance/charges/CHG-S2505120004`。API 端口实际请求 `/finance/charges/{chargeId}:unreview`，传递原因、`If-Match: 11` 和 `Idempotency-Key`。
 - 通用状态覆盖 `NORMAL/LOADING/EMPTY/FAILED/FORBIDDEN/STALE/PARTIAL`。本地领域导航使用 `aria-current="page"`；零销售额利润率定义为 `0`，避免 `NaN/Infinity`。
 
 ## 测试与截图
 
-- Vitest：四域模型/契约 17 个，最终装配、API 端口与工作台 14 个，共 31 个；包含 resolve/reject、无伪成功/审计、反审核请求头和 P0 流程状态。
-- Playwright Chromium：5 个本域场景，直接渲染 `FulfillmentFinanceApplication` 最终装配，覆盖仓库→干线→轨迹、WH-08、LM-05/06、财务 P0、危险反审核、6 类异常态和 axe。浏览器插件连接返回 `No browser is available` 且可用列表为空，因此按技能规则使用仓库 Playwright 回退。
+- Vitest：四域模型/契约 17 个，最终装配、API 端口与工作台 20 个，共 37 个；包含 resolve/延迟 reject、无伪成功/审计、67 个命令逐项契约路由、WH-08 不得为 0 的单请求断言、服务端资源 ID 返回、反审核请求头和补齐后的 P0 流程。
+- 目标包门禁：`lint + typecheck + test + build` 共 43/43 任务通过（契约、API 客户端、MSW、UI、四域模型、Ops 与 Storybook）。
+- Playwright Chromium：5 个本域场景通过，直接渲染 `FulfillmentFinanceApplication` 最终装配并显式注入 E2E 内存端口，覆盖仓库→干线→轨迹、新增仓库/尾程/轨迹 P0、WH-08、LM-05/06、财务 P0、危险反审核、6 类异常态和 axe。浏览器插件连接返回 `No browser is available` 且可用列表为空，因此按技能规则使用仓库 Playwright 回退。
 - axe WCAG 2 A/AA/2.1 AA：仓库与财务装配页均为 0 个 `serious/critical`；已修正活动导航说明和警告重量的两个原始对比度问题。
 - 原生画布 1586×992：`artifacts/e2e/F1B/warehouse-1586x992.png` 与 `artifacts/e2e/F1B/finance-1586x992.png`（QA 产物受 `.gitignore` 管理）。
 

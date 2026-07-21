@@ -45,16 +45,49 @@ test('final application assembly executes WH-08, LM-05/06 and finance P0 workflo
   page,
 }) => {
   await page.goto(previewPath);
+  for (const [label, auditOperation] of [
+    ['记录测量', 'recordMeasurement'],
+    ['撤销收货', 'undoReceipt'],
+    ['提交盘点', 'commitStocktake'],
+    ['创建装载单', 'createLoadUnit'],
+    ['重打交接单', 'reprintDocument'],
+  ] as const) {
+    await page.getByRole('button', { name: label }).click();
+    await expect(page.getByRole('status')).toContainText(`AUD-${auditOperation}-1`);
+  }
   await page.getByRole('button', { name: '打印交接单' }).click();
   await expect(page.getByLabel('WH-08 打印任务')).toContainText('PRINT-S2505120004');
 
   await page.getByRole('button', { name: /干线尾程/ }).click();
+  for (const [label, state] of [
+    ['创建尾程接货', '等待扫描'],
+    ['扫描尾程接货', '42/42 票'],
+    ['创建派送任务', '已下发'],
+    ['更新派送状态', '派送中'],
+    ['修订 POD', 'POD 已修订至 v4'],
+  ] as const) {
+    await page.getByRole('button', { name: label }).click();
+    await expect(page.getByLabel('合作方同步状态')).toContainText(state);
+  }
   await page.getByRole('button', { name: '同步合作方' }).click();
   await expect(page.getByLabel('合作方同步状态')).toContainText('已完成 42 条');
   await page.getByRole('button', { name: '重放事件' }).click();
   await expect(page.getByLabel('合作方同步状态')).toContainText('未产生重复状态');
   await page.getByRole('button', { name: '生成尾程费用' }).click();
   await expect(page.getByLabel('合作方同步状态')).toContainText('应收 ¥860.00 / 应付 ¥620.00');
+
+  await page.getByRole('button', { name: /轨迹客服/ }).click();
+  for (const [label, evidence] of [
+    ['接收轨迹', 'EVT-DHL-260722-88'],
+    ['检测停滞', '48h 阈值'],
+    ['创建问题件', '待指派'],
+    ['指派问题件', '已指派'],
+    ['结算索赔', 'CNY 368.00'],
+    ['授权放货', '已授权放货'],
+  ] as const) {
+    await page.getByRole('button', { name: label }).click();
+    await expect(page.locator('.ff-domain')).toContainText(evidence);
+  }
 
   await page.getByRole('button', { name: /财务结算/ }).click();
   for (const [label, result] of [

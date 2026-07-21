@@ -9,17 +9,20 @@ export type WorkbenchViewState =
   'normal' | 'loading' | 'empty' | 'failed' | 'forbidden' | 'stale' | 'partial';
 
 export type FulfillmentFinanceOperationId =
-  | 'refreshWarehouseDashboard'
   | 'receiveScan'
+  | 'recordMeasurement'
   | 'attachReceiptMedia'
   | 'confirmReceipt'
-  | 'exportReceiptScanReport'
+  | 'undoReceipt'
   | 'routeWaybill'
   | 'moveInventory'
+  | 'commitStocktake'
   | 'attachWaybills'
+  | 'createLoadUnit'
   | 'sealLoadUnit'
   | 'dispatchLoadUnit'
   | 'createPrintJob'
+  | 'reprintDocument'
   | 'createBooking'
   | 'validateLoadCompatibility'
   | 'captureProofOfDelivery'
@@ -28,11 +31,22 @@ export type FulfillmentFinanceOperationId =
   | 'syncLastMilePartner'
   | 'replayPartnerEvent'
   | 'generateLastMileCharges'
+  | 'createLastMileIntake'
+  | 'scanLastMileIntake'
+  | 'createDeliveryTask'
+  | 'updateDeliveryTaskStatus'
+  | 'amendProofOfDelivery'
+  | 'ingestTrackingEvent'
   | 'appendManualTrackingEvent'
+  | 'detectTrackingStall'
+  | 'createIssue'
+  | 'assignIssue'
   | 'requestIssueMaterial'
   | 'resolveIssue'
   | 'createClaim'
+  | 'settleClaim'
   | 'placeShipmentHold'
+  | 'releaseShipmentHold'
   | 'generateCharges'
   | 'reviewCharge'
   | 'unreviewCharge'
@@ -60,7 +74,8 @@ export type FulfillmentFinanceOperationId =
   | 'createStatementPaymentOrder'
   | 'closePaymentOrder'
   | 'createPaymentRefund'
-  | 'reconcilePayments';
+  | 'reconcilePayments'
+  | 'queryBusinessReport';
 
 export interface FulfillmentFinanceCommand {
   domain: FulfillmentSection;
@@ -205,6 +220,7 @@ function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
   const [media, setMedia] = useState(['外箱全景.jpg', '箱角封装.jpg', '托盘标签.jpg']);
   const [selectedRoute, setSelectedRoute] = useState('COSCO AQUARIUS 085W');
   const [printState, setPrintState] = useState('未创建打印任务');
+  const [lastRefreshed, setLastRefreshed] = useState('尚未刷新');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -217,12 +233,7 @@ function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
         <div className="ff-inline-actions">
           <Button
             variant="secondary"
-            onClick={() =>
-              runCommand(
-                command('warehouse', 'refreshWarehouseDashboard', 'WH-SZX-01'),
-                '已刷新最近扫描与设备校准状态'
-              )
-            }
+            onClick={() => setLastRefreshed(`已刷新 · ${new Date().toLocaleTimeString('zh-CN')}`)}
           >
             刷新
           </Button>
@@ -297,7 +308,7 @@ function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
           <div className="ff-panel">
             <div className="ff-panel-title">
               <h3>重量与尺寸</h3>
-              <span>电子秤-01 · 体积扫描仪-02 已连接</span>
+              <span>电子秤-01 · 体积扫描仪-02 已连接 · {lastRefreshed}</span>
             </div>
             <dl className="ff-measurements">
               <div>
@@ -333,6 +344,22 @@ function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
                 </dd>
               </div>
             </dl>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                runCommand(
+                  command('warehouse', 'recordMeasurement', 'RCV-S2505120004', 7, {
+                    actualWeightKg: 123.5,
+                    lengthCm: 100,
+                    widthCm: 80,
+                    heightCm: 60,
+                  }),
+                  '测量结果已记录到收货版本 8'
+                )
+              }
+            >
+              记录测量
+            </Button>
           </div>
 
           <div className="ff-panel">
@@ -378,7 +405,9 @@ function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
                 className="ff-link"
                 onClick={() =>
                   runCommand(
-                    command('warehouse', 'exportReceiptScanReport', 'WH-SZX-01'),
+                    command('finance', 'queryBusinessReport', 'WH-SZX-01', 1, {
+                      reportType: 'WAREHOUSE_RECEIPT_SCAN',
+                    }),
                     '扫描报告已生成'
                   )
                 }
@@ -558,20 +587,79 @@ function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
                 <strong>WH-08 交接单打印</strong>
                 <span>{printState}</span>
               </div>
+              <div className="ff-inline-actions">
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    runCommand(
+                      command('warehouse', 'createPrintJob', 'S2505120004', 7, {
+                        documentType: 'HANDOVER',
+                        copies: 1,
+                      }),
+                      '打印任务 PRINT-S2505120004 已排队',
+                      () => setPrintState('打印任务 PRINT-S2505120004 已排队')
+                    )
+                  }
+                >
+                  打印交接单
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    runCommand(
+                      command('warehouse', 'reprintDocument', 'PRINT-S2505120004', 1, {
+                        reason: '交接单模糊',
+                        copies: 1,
+                      }),
+                      '交接单重打任务已排队',
+                      () => setPrintState('重打任务已排队')
+                    )
+                  }
+                >
+                  重打交接单
+                </Button>
+              </div>
+            </div>
+            <div className="ff-inline-actions" aria-label="仓库补充操作">
               <Button
                 variant="secondary"
                 onClick={() =>
                   runCommand(
-                    command('warehouse', 'createPrintJob', 'S2505120004', 7, {
-                      documentType: 'HANDOVER',
-                      copies: 1,
+                    command('warehouse', 'undoReceipt', 'RCV-S2505120004', 7, {
+                      reason: '收货数量需复核',
                     }),
-                    '打印任务 PRINT-S2505120004 已排队',
-                    () => setPrintState('打印任务 PRINT-S2505120004 已排队')
+                    '收货已撤销并返回待复核'
                   )
                 }
               >
-                打印交接单
+                撤销收货
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  runCommand(
+                    command('warehouse', 'commitStocktake', 'STK-WH-SZX-01-0722', 1, {
+                      warehouseId: 'WH-SZX-01',
+                      countedQuantity: 42,
+                    }),
+                    '盘点结果已提交'
+                  )
+                }
+              >
+                提交盘点
+              </Button>
+              <Button
+                onClick={() =>
+                  runCommand(
+                    command('linehaul', 'createLoadUnit', 'CNT-SZX-260722-01', 1, {
+                      loadUnitType: 'CONTAINER',
+                      warehouseId: 'WH-SZX-01',
+                    }),
+                    '装载单 CNT-SZX-260722-01 已创建'
+                  )
+                }
+              >
+                创建装载单
               </Button>
             </div>
           </div>
@@ -765,6 +853,79 @@ function LinehaulWorkbench({ runCommand }: { runCommand: RunCommand }) {
             variant="secondary"
             onClick={() =>
               runCommand(
+                command('linehaul', 'createLastMileIntake', 'LMI-LAX-260722-01', 1, {
+                  partnerCode: 'LAX-PARTNER',
+                  loadUnitId: 'CNT-SZX-260722-01',
+                }),
+                '尾程接货单 LMI-LAX-260722-01 已创建',
+                () => setPartnerState('尾程接货单已创建，等待扫描')
+              )
+            }
+          >
+            创建尾程接货
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'scanLastMileIntake', 'LMI-LAX-260722-01', 1, {
+                  barcode: 'CNT-SZX-260722-01',
+                }),
+                '尾程接货扫描已入库',
+                () => setPartnerState('接货扫描完成 · 42/42 票')
+              )
+            }
+          >
+            扫描尾程接货
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'createDeliveryTask', 'DEL-LAX-260729-04', 1, {
+                  intakeId: 'LMI-LAX-260722-01',
+                  destination: 'ONT8',
+                }),
+                '派送任务 DEL-LAX-260729-04 已创建',
+                () => setPartnerState('派送任务已下发给 LAX-PARTNER')
+              )
+            }
+          >
+            创建派送任务
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'updateDeliveryTaskStatus', 'DEL-LAX-260729-03', 3, {
+                  status: 'OUT_FOR_DELIVERY',
+                }),
+                '派送状态已更新为派送中',
+                () => setPartnerState('派送中 · 尾程设备在线')
+              )
+            }
+          >
+            更新派送状态
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'amendProofOfDelivery', 'DEL-LAX-260729-03', 3, {
+                  reason: '补充收件人姓名',
+                  recipientName: 'Alex Chen',
+                }),
+                'POD v4 已修订并保留历史版本',
+                () => setPartnerState('POD 已修订至 v4')
+              )
+            }
+          >
+            修订 POD
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
                 command('linehaul', 'syncLastMilePartner', 'LAX-PARTNER', 8, {
                   checkpoint: 'CP-20260722-42',
                 }),
@@ -818,6 +979,7 @@ const trackingEvents = [
 
 function TrackingWorkbench({ runCommand }: { runCommand: RunCommand }) {
   const [issueState, setIssueState] = useState('处理中');
+  const [trackingState, setTrackingState] = useState('轨迹监控正常');
   return (
     <section className="ff-domain" aria-labelledby="tracking-title">
       <div className="ff-section-heading">
@@ -837,6 +999,101 @@ function TrackingWorkbench({ runCommand }: { runCommand: RunCommand }) {
         >
           追加轨迹
         </Button>
+      </div>
+      <div className="ff-panel ff-partner-ops" aria-label="轨迹与异常命令">
+        <div>
+          <h3>轨迹检测与处置</h3>
+          <p>{trackingState}</p>
+        </div>
+        <div className="ff-inline-actions">
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('tracking', 'ingestTrackingEvent', 'EVT-DHL-260722-88', 1, {
+                  waybillNo: 'S2505120004',
+                  status: 'DELIVERED',
+                  occurredAt: '2026-07-22T16:42:00+08:00',
+                }),
+                '合作方轨迹已接收并去重',
+                () => setTrackingState('最新轨迹已接收 · EVT-DHL-260722-88')
+              )
+            }
+          >
+            接收轨迹
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('tracking', 'detectTrackingStall', 'S2505120004', 12, {
+                  thresholdHours: 48,
+                }),
+                '停滞检测完成：未超过 48 小时阈值',
+                () => setTrackingState('停滞检测通过 · 48h 阈值')
+              )
+            }
+          >
+            检测停滞
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('tracking', 'createIssue', 'ISSUE-260722-10', 1, {
+                  waybillNo: 'S2505120004',
+                  issueType: 'TRACKING_STALL',
+                }),
+                '问题件 ISSUE-260722-10 已创建',
+                () => setIssueState('待指派')
+              )
+            }
+          >
+            创建问题件
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('tracking', 'assignIssue', 'ISSUE-260722-09', 4, {
+                  assigneeId: 'USR-ZHANGWEI',
+                }),
+                '问题件已指派给张伟',
+                () => setIssueState('已指派')
+              )
+            }
+          >
+            指派问题件
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('tracking', 'settleClaim', 'CLM-260722-02', 2, {
+                  settlementAmountCents: 36800,
+                  currency: 'CNY',
+                }),
+                '索赔 CLM-260722-02 已结算',
+                () => setTrackingState('索赔已结算 · CNY 368.00')
+              )
+            }
+          >
+            结算索赔
+          </Button>
+          <Button
+            onClick={() =>
+              runCommand(
+                command('tracking', 'releaseShipmentHold', 'HOLD-S2505120004', 2, {
+                  reason: '审批通过',
+                }),
+                '扣货已解除，运单恢复履约',
+                () => setTrackingState('已授权放货')
+              )
+            }
+          >
+            授权放货
+          </Button>
+        </div>
       </div>
       <div className="ff-tracking-grid">
         <div className="ff-panel">

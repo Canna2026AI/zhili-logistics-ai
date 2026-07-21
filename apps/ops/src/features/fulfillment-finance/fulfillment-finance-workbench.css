@@ -378,6 +378,12 @@
   flex-direction: column;
 }
 
+.ff-partner-ops > .ff-inline-actions {
+  flex: 1;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .ff-print-row span,
 .ff-partner-ops p {
   margin: 0;
