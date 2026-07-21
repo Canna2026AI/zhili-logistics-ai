@@ -9,6 +9,15 @@ import {
 } from '../index';
 
 describe('finance settlement', () => {
+  it('defines zero-sales margin as zero instead of NaN', () => {
+    expect(summarizeCharge([], 1200)).toEqual({
+      salesCents: 0,
+      costCents: 1200,
+      profitCents: -1200,
+      marginPercent: 0,
+    });
+  });
+
   it('keeps canonical charge, payment and profit arithmetic exact in cents', () => {
     expect(summarizeCharge([468000, 51480, 8000, 4520], 458050)).toEqual({
       salesCents: 532000,
@@ -56,10 +65,21 @@ describe('finance settlement', () => {
         'generateCharges',
         'reviewCharge',
         'unreviewCharge',
+        'adjustCharge',
+        'validatePayableImport',
+        'commitPayableImport',
+        'reconcilePayables',
         'createStatement',
+        'sendStatement',
+        'openStatementDispute',
         'createStatementPaymentOrder',
+        'createPrepaymentOrder',
+        'closePaymentOrder',
         'createPaymentRefund',
+        'reconcilePayments',
         'recordReceipt',
+        'createDisbursement',
+        'allocateDisbursement',
         'allocateReceipt',
         'reverseAllocation',
         'publishExchangeRateSet',
@@ -68,6 +88,7 @@ describe('finance settlement', () => {
         'closeFinancialPeriod',
         'reopenFinancialPeriod',
         'createInvoiceRequest',
+        'reviewInvoiceRequest',
       ])
     );
   });

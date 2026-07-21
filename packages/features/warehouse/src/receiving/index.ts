@@ -80,6 +80,8 @@ export const warehouseCapabilities = [
     operationId: 'dispatchLoadUnit',
     path: '/linehaul/load-units/{loadUnitId}:dispatch',
   },
+  { id: 'WH-08', operationId: 'createPrintJob', path: '/documents/print-jobs' },
+  { id: 'WH-08', operationId: 'reprintDocument', path: '/documents/print-jobs:reprint' },
 ] as const satisfies ReadonlyArray<{ id: string; operationId: string; path: keyof paths }>;
 
 export type ReceiveScanBody =

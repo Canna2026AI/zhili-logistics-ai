@@ -8,9 +8,63 @@ export type FulfillmentSection = 'warehouse' | 'linehaul' | 'tracking' | 'financ
 export type WorkbenchViewState =
   'normal' | 'loading' | 'empty' | 'failed' | 'forbidden' | 'stale' | 'partial';
 
+export type FulfillmentFinanceOperationId =
+  | 'refreshWarehouseDashboard'
+  | 'receiveScan'
+  | 'attachReceiptMedia'
+  | 'confirmReceipt'
+  | 'exportReceiptScanReport'
+  | 'routeWaybill'
+  | 'moveInventory'
+  | 'attachWaybills'
+  | 'sealLoadUnit'
+  | 'dispatchLoadUnit'
+  | 'createPrintJob'
+  | 'createBooking'
+  | 'validateLoadCompatibility'
+  | 'captureProofOfDelivery'
+  | 'createBillOfLading'
+  | 'linkFbaShipment'
+  | 'syncLastMilePartner'
+  | 'replayPartnerEvent'
+  | 'generateLastMileCharges'
+  | 'appendManualTrackingEvent'
+  | 'requestIssueMaterial'
+  | 'resolveIssue'
+  | 'createClaim'
+  | 'placeShipmentHold'
+  | 'generateCharges'
+  | 'reviewCharge'
+  | 'unreviewCharge'
+  | 'adjustCharge'
+  | 'createPayableImport'
+  | 'validatePayableImport'
+  | 'commitPayableImport'
+  | 'reconcilePayables'
+  | 'createStatement'
+  | 'sendStatement'
+  | 'openStatementDispute'
+  | 'recordReceipt'
+  | 'createDisbursement'
+  | 'allocateReceipt'
+  | 'allocateDisbursement'
+  | 'reverseAllocation'
+  | 'publishExchangeRateSet'
+  | 'allocateCharges'
+  | 'getProfitTrace'
+  | 'closeFinancialPeriod'
+  | 'reopenFinancialPeriod'
+  | 'createInvoiceRequest'
+  | 'reviewInvoiceRequest'
+  | 'createPrepaymentOrder'
+  | 'createStatementPaymentOrder'
+  | 'closePaymentOrder'
+  | 'createPaymentRefund'
+  | 'reconcilePayments';
+
 export interface FulfillmentFinanceCommand {
   domain: FulfillmentSection;
-  operationId: string;
+  operationId: FulfillmentFinanceOperationId;
   entityRef: string;
   idempotencyKey: string;
   expectedVersion?: number;
@@ -24,7 +78,30 @@ export interface FulfillmentFinanceCommandPort {
 export interface FulfillmentFinanceWorkbenchProps {
   initialSection?: FulfillmentSection;
   initialViewState?: WorkbenchViewState;
-  commandPort?: FulfillmentFinanceCommandPort;
+  commandPort: FulfillmentFinanceCommandPort;
+}
+
+type RunCommand = (
+  command: FulfillmentFinanceCommand,
+  successMessage: string,
+  onResolved?: () => void
+) => Promise<void>;
+
+function command(
+  domain: FulfillmentSection,
+  operationId: FulfillmentFinanceOperationId,
+  entityRef: string,
+  expectedVersion = 1,
+  payload?: Record<string, unknown>
+): FulfillmentFinanceCommand {
+  return {
+    domain,
+    operationId,
+    entityRef,
+    idempotencyKey: `${operationId}:${entityRef}:v${expectedVersion}`,
+    expectedVersion,
+    payload,
+  };
 }
 
 const measurement = deriveMeasurement({
@@ -123,9 +200,11 @@ const viewStateEvidence: Record<Exclude<WorkbenchViewState, 'normal'>, ReactNode
   ),
 };
 
-function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => void }) {
+function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
   const [scan, setScan] = useState('S2505120004');
   const [media, setMedia] = useState(['外箱全景.jpg', '箱角封装.jpg', '托盘标签.jpg']);
+  const [selectedRoute, setSelectedRoute] = useState('COSCO AQUARIUS 085W');
+  const [printState, setPrintState] = useState('未创建打印任务');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -136,10 +215,29 @@ function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => v
           <p>扫码匹配预报，在一屏内完成复重、量方、图片、库位与分货预检。</p>
         </div>
         <div className="ff-inline-actions">
-          <Button variant="secondary" onClick={() => onFeedback('已刷新最近扫描与设备校准状态')}>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('warehouse', 'refreshWarehouseDashboard', 'WH-SZX-01'),
+                '已刷新最近扫描与设备校准状态'
+              )
+            }
+          >
             刷新
           </Button>
-          <Button onClick={() => onFeedback('收货已确认，已进入待分货')}>确认收货</Button>
+          <Button
+            onClick={() =>
+              runCommand(
+                command('warehouse', 'confirmReceipt', 'RCV-S2505120004', 7, {
+                  waybillNo: 'S2505120004',
+                }),
+                '收货已确认，已进入待分货'
+              )
+            }
+          >
+            确认收货
+          </Button>
         </div>
       </div>
 
@@ -168,10 +266,23 @@ function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => v
                 value={scan}
                 onChange={(event) => setScan(event.target.value)}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter') onFeedback(`已匹配预报 ${scan}`);
+                  if (event.key === 'Enter')
+                    void runCommand(
+                      command('warehouse', 'receiveScan', scan, 1, { barcode: scan }),
+                      `已匹配预报 ${scan}`
+                    );
                 }}
               />
-              <Button onClick={() => onFeedback(`已匹配预报 ${scan}`)}>匹配</Button>
+              <Button
+                onClick={() =>
+                  runCommand(
+                    command('warehouse', 'receiveScan', scan, 1, { barcode: scan }),
+                    `已匹配预报 ${scan}`
+                  )
+                }
+              >
+                匹配
+              </Button>
             </div>
             <div className="ff-waybill-line">
               <div>
@@ -240,8 +351,14 @@ function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => v
               aria-label="选择收货图片"
               onChange={(event) => {
                 const names = [...(event.target.files ?? [])].map((file) => file.name);
-                setMedia((current) => [...current, ...names]);
-                if (names.length > 0) onFeedback(`已加入 ${names.length} 张图片的上传队列`);
+                if (names.length > 0)
+                  void runCommand(
+                    command('warehouse', 'attachReceiptMedia', 'RCV-S2505120004', 7, {
+                      files: names,
+                    }),
+                    `已上传 ${names.length} 张图片`,
+                    () => setMedia((current) => [...current, ...names])
+                  );
               }}
             />
             <div className="ff-media-list">
@@ -257,7 +374,15 @@ function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => v
           <div className="ff-panel">
             <div className="ff-panel-title">
               <h3>最近扫描记录</h3>
-              <button className="ff-link" onClick={() => onFeedback('已导出扫描报告')}>
+              <button
+                className="ff-link"
+                onClick={() =>
+                  runCommand(
+                    command('warehouse', 'exportReceiptScanReport', 'WH-SZX-01'),
+                    '扫描报告已生成'
+                  )
+                }
+              >
                 导出报告
               </button>
             </div>
@@ -304,8 +429,16 @@ function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => v
             <div className="ff-route-options">
               <button
                 aria-label="COSCO AQUARIUS 085W 2026年船期"
-                data-selected="true"
-                onClick={() => onFeedback('已选择 COSCO AQUARIUS 085W')}
+                data-selected={selectedRoute === 'COSCO AQUARIUS 085W'}
+                onClick={() =>
+                  runCommand(
+                    command('warehouse', 'routeWaybill', 'S2505120004', 7, {
+                      route: 'COSCO AQUARIUS 085W',
+                    }),
+                    '已选择 COSCO AQUARIUS 085W',
+                    () => setSelectedRoute('COSCO AQUARIUS 085W')
+                  )
+                }
               >
                 <span>推荐</span>
                 <strong>COSCO AQUARIUS 085W</strong>
@@ -313,14 +446,32 @@ function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => v
               </button>
               <button
                 aria-label="EMC OAKLAND 082W 2026年船期"
-                onClick={() => onFeedback('已选择 EMC OAKLAND 082W')}
+                data-selected={selectedRoute === 'EMC OAKLAND 082W'}
+                onClick={() =>
+                  runCommand(
+                    command('warehouse', 'routeWaybill', 'S2505120004', 7, {
+                      route: 'EMC OAKLAND 082W',
+                    }),
+                    '已选择 EMC OAKLAND 082W',
+                    () => setSelectedRoute('EMC OAKLAND 082W')
+                  )
+                }
               >
                 <strong>EMC OAKLAND 082W</strong>
                 <small>US-ONT · USD 318.00 · 05-30</small>
               </button>
               <button
                 aria-label="COSCO PISCES 086W 2026年船期"
-                onClick={() => onFeedback('已选择 COSCO PISCES 086W')}
+                data-selected={selectedRoute === 'COSCO PISCES 086W'}
+                onClick={() =>
+                  runCommand(
+                    command('warehouse', 'routeWaybill', 'S2505120004', 7, {
+                      route: 'COSCO PISCES 086W',
+                    }),
+                    '已选择 COSCO PISCES 086W',
+                    () => setSelectedRoute('COSCO PISCES 086W')
+                  )
+                }
               >
                 <strong>COSCO PISCES 086W</strong>
                 <small>US-LGB · USD 322.00 · 05-29</small>
@@ -357,7 +508,15 @@ function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => v
               </dl>
               <Button
                 variant="secondary"
-                onClick={() => onFeedback('已移库至 A-01-16，审计事件已记录')}
+                onClick={() =>
+                  runCommand(
+                    command('warehouse', 'moveInventory', 'S2505120004', 7, {
+                      fromLocation: 'A-01-15',
+                      toLocation: 'A-01-16',
+                    }),
+                    '已移库至 A-01-16'
+                  )
+                }
               >
                 移库
               </Button>
@@ -369,16 +528,51 @@ function WarehouseWorkbench({ onFeedback }: { onFeedback: (message: string) => v
               <span>实体版本 7</span>
             </div>
             <div className="ff-process-rail">
-              {['收货', '上架', '分货', '加入托盘', '封装', '出库'].map((item, index) => (
+              {(
+                [
+                  ['收货', 'confirmReceipt'],
+                  ['上架', 'moveInventory'],
+                  ['分货', 'routeWaybill'],
+                  ['加入托盘', 'attachWaybills'],
+                  ['封装', 'sealLoadUnit'],
+                  ['出库', 'dispatchLoadUnit'],
+                ] as const
+              ).map(([item, operationId], index) => (
                 <button
                   key={item}
                   data-complete={index < 2}
-                  onClick={() => onFeedback(`已执行：${item}`)}
+                  onClick={() =>
+                    runCommand(
+                      command('warehouse', operationId, 'S2505120004', 7, { stage: item }),
+                      `已执行：${item}`
+                    )
+                  }
                 >
                   {index + 1}
                   <span>{item}</span>
                 </button>
               ))}
+            </div>
+            <div className="ff-print-row" aria-label="WH-08 打印任务">
+              <div>
+                <strong>WH-08 交接单打印</strong>
+                <span>{printState}</span>
+              </div>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  runCommand(
+                    command('warehouse', 'createPrintJob', 'S2505120004', 7, {
+                      documentType: 'HANDOVER',
+                      copies: 1,
+                    }),
+                    '打印任务 PRINT-S2505120004 已排队',
+                    () => setPrintState('打印任务 PRINT-S2505120004 已排队')
+                  )
+                }
+              >
+                打印交接单
+              </Button>
             </div>
           </div>
         </div>
@@ -422,8 +616,9 @@ const loadRows: LoadRow[] = [
   },
 ];
 
-function LinehaulWorkbench({ onFeedback }: { onFeedback: (message: string) => void }) {
+function LinehaulWorkbench({ runCommand }: { runCommand: RunCommand }) {
   const [selected, setSelected] = useState<string[]>([]);
+  const [partnerState, setPartnerState] = useState('等待同步');
   const columns: DataTableColumn<LoadRow>[] = [
     {
       key: 'ref',
@@ -446,7 +641,18 @@ function LinehaulWorkbench({ onFeedback }: { onFeedback: (message: string) => vo
           <h2 id="linehaul-title">干线与尾程履约</h2>
           <p>订舱、提单、清关、FBA 箱号、接货、派送和 POD 主从工作台。</p>
         </div>
-        <Button onClick={() => onFeedback('新订舱 BK202607220019 已创建')}>新建订舱</Button>
+        <Button
+          onClick={() =>
+            runCommand(
+              command('linehaul', 'createBooking', 'BK202607220019', 1, {
+                route: 'SZX-LAX',
+              }),
+              '新订舱 BK202607220019 已创建'
+            )
+          }
+        >
+          新建订舱
+        </Button>
       </div>
       <div className="ff-flow-map" aria-label="干线履约阶段">
         {['订舱', '提单', '集包/卡板', '报关', '装柜', 'FBA 关联', '尾程接货', '派送', 'POD'].map(
@@ -465,11 +671,26 @@ function LinehaulWorkbench({ onFeedback }: { onFeedback: (message: string) => vo
             <Button
               variant="secondary"
               disabled={selected.length === 0}
-              onClick={() => onFeedback(`已对 ${selected.length} 条任务运行兼容校验`)}
+              onClick={() =>
+                runCommand(
+                  command('linehaul', 'validateLoadCompatibility', 'CNT-SZX-260722-01', 4, {
+                    selectedIds: selected,
+                  }),
+                  `已对 ${selected.length} 条任务运行兼容校验`
+                )
+              }
             >
               兼容校验
             </Button>
-            <Button variant="secondary" onClick={() => onFeedback('POD v3 已锁定为当前版本')}>
+            <Button
+              variant="secondary"
+              onClick={() =>
+                runCommand(
+                  command('linehaul', 'captureProofOfDelivery', 'DEL-LAX-260729-03', 3),
+                  'POD v3 已锁定为当前版本'
+                )
+              }
+            >
               POD 版本
             </Button>
           </div>
@@ -487,14 +708,30 @@ function LinehaulWorkbench({ onFeedback }: { onFeedback: (message: string) => vo
         <div className="ff-panel">
           <h3>清关资料</h3>
           <p>CI/PL 已验证 · HS 编码 4/4 通过</p>
-          <Button variant="secondary" onClick={() => onFeedback('报关资料包已生成')}>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'createBillOfLading', 'BOL-SZX-260722-04', 1),
+                '报关资料包已生成'
+              )
+            }
+          >
             生成资料包
           </Button>
         </div>
         <div className="ff-panel">
           <h3>FBA 关联</h3>
           <p>Amazon 货件 FBA18Q4K9 · ONT8 · 8 箱</p>
-          <Button variant="secondary" onClick={() => onFeedback('FBA 箱号与运单已双向关联')}>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'linkFbaShipment', 'FBA18Q4K9', 2),
+                'FBA 箱号与运单已双向关联'
+              )
+            }
+          >
             关联箱号
           </Button>
         </div>
@@ -506,7 +743,66 @@ function LinehaulWorkbench({ onFeedback }: { onFeedback: (message: string) => vo
             <li>未关闭问题 0</li>
             <li>交接单已打印</li>
           </ul>
-          <Button onClick={() => onFeedback('装载单 CNT-SZX-260722-01 已出库')}>确认出库</Button>
+          <Button
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'dispatchLoadUnit', 'CNT-SZX-260722-01', 4),
+                '装载单 CNT-SZX-260722-01 已出库'
+              )
+            }
+          >
+            确认出库
+          </Button>
+        </div>
+      </div>
+      <div className="ff-panel ff-partner-ops" aria-label="合作方同步状态">
+        <div>
+          <h3>LM-05 / LM-06 合作方执行</h3>
+          <p>{partnerState}</p>
+        </div>
+        <div className="ff-inline-actions">
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'syncLastMilePartner', 'LAX-PARTNER', 8, {
+                  checkpoint: 'CP-20260722-42',
+                }),
+                '合作方同步已完成 42 条',
+                () => setPartnerState('已完成 42 条 · 检查点 CP-20260722-42')
+              )
+            }
+          >
+            同步合作方
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'replayPartnerEvent', 'EVT-LM-5001', 8, {
+                  sourceEventId: 'EVT-LM-5001',
+                }),
+                '合作方事件 EVT-LM-5001 已幂等重放',
+                () => setPartnerState('已重放 EVT-LM-5001 · 未产生重复状态')
+              )
+            }
+          >
+            重放事件
+          </Button>
+          <Button
+            onClick={() =>
+              runCommand(
+                command('linehaul', 'generateLastMileCharges', 'DEL-LAX-260729-03', 3, {
+                  receivableCents: 86000,
+                  payableCents: 62000,
+                }),
+                '尾程应收应付已生成并进入对账',
+                () => setPartnerState('费用已生成：应收 ¥860.00 / 应付 ¥620.00')
+              )
+            }
+          >
+            生成尾程费用
+          </Button>
         </div>
       </div>
     </section>
@@ -520,7 +816,7 @@ const trackingEvents = [
   ['2026-07-20 07:55', '抵达 LAX', 'DHL', '重复×2'],
 ] as const;
 
-function TrackingWorkbench({ onFeedback }: { onFeedback: (message: string) => void }) {
+function TrackingWorkbench({ runCommand }: { runCommand: RunCommand }) {
   const [issueState, setIssueState] = useState('处理中');
   return (
     <section className="ff-domain" aria-labelledby="tracking-title">
@@ -529,7 +825,16 @@ function TrackingWorkbench({ onFeedback }: { onFeedback: (message: string) => vo
           <h2 id="tracking-title">轨迹客服与异常处理</h2>
           <p>保留事件时间、接收时间和来源，问题件、退件、索赔与扣放货并行处理。</p>
         </div>
-        <Button onClick={() => onFeedback('已追加人工轨迹，审计事件 TRK-MANUAL-018')}>
+        <Button
+          onClick={() =>
+            runCommand(
+              command('tracking', 'appendManualTrackingEvent', 'S2505120004', 12, {
+                status: 'CUSTOMER_CONFIRMED',
+              }),
+              '已追加人工轨迹 TRK-MANUAL-018'
+            )
+          }
+        >
           追加轨迹
         </Button>
       </div>
@@ -567,14 +872,27 @@ function TrackingWorkbench({ onFeedback }: { onFeedback: (message: string) => vo
               <dd>POD 照片收件人不清晰</dd>
             </dl>
             <div className="ff-inline-actions">
-              <Button variant="secondary" onClick={() => onFeedback('已向客户请求补充资料')}>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  runCommand(
+                    command('tracking', 'requestIssueMaterial', 'ISSUE-260722-09', 4),
+                    '已向客户请求补充资料'
+                  )
+                }
+              >
                 补资料
               </Button>
               <Button
-                onClick={() => {
-                  setIssueState('已解决');
-                  onFeedback('问题件已关闭；客户通知失败，已创建重试 JOB-NOTIFY-5001');
-                }}
+                onClick={() =>
+                  runCommand(
+                    command('tracking', 'resolveIssue', 'ISSUE-260722-09', 4, {
+                      resolution: 'POD_EVIDENCE_ACCEPTED',
+                    }),
+                    '问题件已关闭；客户通知失败，已创建重试 JOB-NOTIFY-5001',
+                    () => setIssueState('已解决')
+                  )
+                }
               >
                 解决问题
               </Button>
@@ -583,15 +901,38 @@ function TrackingWorkbench({ onFeedback }: { onFeedback: (message: string) => vo
           <div className="ff-panel">
             <h3>退件与索赔</h3>
             <div className="ff-action-list">
-              <button onClick={() => onFeedback('退件 RET-260722-04 已创建')}>
+              <button
+                onClick={() =>
+                  runCommand(
+                    command('tracking', 'createClaim', 'RET-260722-04', 1, { type: 'RETURN' }),
+                    '退件 RET-260722-04 已创建'
+                  )
+                }
+              >
                 <strong>创建退件</strong>
                 <span>原路退回 / 改派 / 销毁</span>
               </button>
-              <button onClick={() => onFeedback('索赔 CLM-260722-02 已创建')}>
+              <button
+                onClick={() =>
+                  runCommand(
+                    command('tracking', 'createClaim', 'CLM-260722-02', 1, { type: 'DAMAGE' }),
+                    '索赔 CLM-260722-02 已创建'
+                  )
+                }
+              >
                 <strong>创建索赔</strong>
                 <span>破损 / 丢失 / 延误证据</span>
               </button>
-              <button onClick={() => onFeedback('放货申请已提交审批链')}>
+              <button
+                onClick={() =>
+                  runCommand(
+                    command('tracking', 'placeShipmentHold', 'S2505120004', 11, {
+                      action: 'RELEASE_REQUEST',
+                    }),
+                    '放货申请已提交审批链'
+                  )
+                }
+              >
                 <strong>扣货 / 放货</strong>
                 <span>信用策略、原因与审批</span>
               </button>
@@ -705,10 +1046,12 @@ const financeRows: FinanceRow[] = [
   },
 ];
 
-function FinanceWorkbench({ onFeedback }: { onFeedback: (message: string) => void }) {
+function FinanceWorkbench({ runCommand }: { runCommand: RunCommand }) {
   const [selected, setSelected] = useState(['4']);
   const [dangerOpen, setDangerOpen] = useState(false);
   const [reason, setReason] = useState('');
+  const [selectedFilter, setSelectedFilter] = useState('全部');
+  const [workflowState, setWorkflowState] = useState('选择流程并提交后显示服务端结果');
   const selectedCharge = financeRows.find((row) => row.id === '4')!;
   const columns: DataTableColumn<FinanceRow>[] = [
     {
@@ -755,11 +1098,28 @@ function FinanceWorkbench({ onFeedback }: { onFeedback: (message: string) => voi
         <div className="ff-inline-actions">
           <Button
             variant="secondary"
-            onClick={() => onFeedback('应付导入预校验：98 成功 / 2 失败')}
+            onClick={() =>
+              runCommand(
+                command('finance', 'createPayableImport', 'PIMP-20260722-08', 1, {
+                  fileName: 'supplier-payables-202607.xlsx',
+                }),
+                '应付导入 PIMP-20260722-08 已创建',
+                () => setWorkflowState('应付文件已导入，等待校验')
+              )
+            }
           >
             应付导入
           </Button>
-          <Button onClick={() => onFeedback('费用生成任务 JOB-FIN-260722-08 已提交')}>
+          <Button
+            onClick={() =>
+              runCommand(
+                command('finance', 'generateCharges', 'S2505120004', 11, {
+                  source: 'WAYBILL_AND_LAST_MILE',
+                }),
+                '费用生成任务 JOB-FIN-260722-08 已提交'
+              )
+            }
+          >
             生成费用
           </Button>
         </div>
@@ -773,7 +1133,11 @@ function FinanceWorkbench({ onFeedback }: { onFeedback: (message: string) => voi
           ['¥96,310.20', '部分核销'],
           ['¥165,430.60', '逾期'],
         ].map(([value, label]) => (
-          <button key={label} onClick={() => onFeedback(`已筛选：${label}`)}>
+          <button
+            key={label}
+            aria-pressed={selectedFilter === label}
+            onClick={() => setSelectedFilter(label)}
+          >
             <strong>{value}</strong>
             <span>{label}</span>
           </button>
@@ -801,7 +1165,7 @@ function FinanceWorkbench({ onFeedback }: { onFeedback: (message: string) => voi
               费用期间
               <input type="text" defaultValue="2026-07-01 ~ 2026-07-31" />
             </label>
-            <Button variant="secondary" onClick={() => onFeedback('已应用高级筛选')}>
+            <Button variant="secondary" onClick={() => setSelectedFilter('高级筛选')}>
               高级筛选
             </Button>
           </div>
@@ -811,19 +1175,38 @@ function FinanceWorkbench({ onFeedback }: { onFeedback: (message: string) => voi
                 <Button
                   variant="secondary"
                   disabled={selected.length === 0}
-                  onClick={() => onFeedback(`已审核 ${selected.length} 条费用`)}
+                  onClick={() =>
+                    runCommand(
+                      command('finance', 'reviewCharge', 'CHG-S2505120004', 11, {
+                        selectedIds: selected,
+                      }),
+                      `已审核 ${selected.length} 条费用`
+                    )
+                  }
                 >
                   审核
                 </Button>
                 <Button
                   variant="secondary"
-                  onClick={() => onFeedback('账单 ST202605-0008 v2 已生成')}
+                  onClick={() =>
+                    runCommand(
+                      command('finance', 'createStatement', 'ST202605-0008', 2),
+                      '账单 ST202605-0008 v2 已生成'
+                    )
+                  }
                 >
                   生成账单
                 </Button>
                 <Button
                   variant="secondary"
-                  onClick={() => onFeedback('核销守恒校验通过，已核销 CNY 3,000.00')}
+                  onClick={() =>
+                    runCommand(
+                      command('finance', 'allocateReceipt', 'RCT-20260722-03', 6, {
+                        amountCents: 300000,
+                      }),
+                      '核销守恒校验通过，已核销 CNY 3,000.00'
+                    )
+                  }
                 >
                   核销
                 </Button>
@@ -909,7 +1292,14 @@ function FinanceWorkbench({ onFeedback }: { onFeedback: (message: string) => voi
             </li>
           </ol>
           <div className="ff-detail-actions">
-            <Button onClick={() => onFeedback('费用 CHG-S2505120004 已审核，版本 11 已锁定')}>
+            <Button
+              onClick={() =>
+                runCommand(
+                  command('finance', 'reviewCharge', 'CHG-S2505120004', 11),
+                  '费用 CHG-S2505120004 已审核，版本 11 已锁定'
+                )
+              }
+            >
               审核通过
             </Button>
             <Button variant="danger" onClick={() => setDangerOpen(true)}>
@@ -918,24 +1308,188 @@ function FinanceWorkbench({ onFeedback }: { onFeedback: (message: string) => voi
           </div>
         </aside>
       </div>
-      <div className="ff-finance-modules" aria-label="财务功能入口">
-        {[
-          '应付对账',
-          '支付订单',
-          '预存款 / 未分配收款',
-          '退款',
-          '余额',
-          '汇率版本',
-          '费用分摊',
-          '期间结账',
-          '发票申请',
-          '利润回查',
-        ].map((module) => (
-          <button key={module} onClick={() => onFeedback(`已打开：${module}`)}>
-            {module}
-          </button>
-        ))}
-      </div>
+      <section className="ff-finance-workflows" aria-label="财务流程状态">
+        <div className="ff-panel-title">
+          <div>
+            <h3>财务 P0 流程执行</h3>
+            <p>{workflowState}</p>
+          </div>
+          <span className="ff-filter-state">筛选：{selectedFilter}</span>
+        </div>
+        <div className="ff-finance-modules" aria-label="财务功能入口">
+          {(
+            [
+              [
+                '校验应付导入',
+                'validatePayableImport',
+                'PIMP-20260722-08',
+                1,
+                '应付导入校验：98 成功 / 2 失败',
+              ],
+              [
+                '提交部分成功项',
+                'commitPayableImport',
+                'PIMP-20260722-08',
+                1,
+                '应付导入部分提交：98 已提交 / 2 条保留失败',
+              ],
+              [
+                '执行应付对账',
+                'reconcilePayables',
+                'RECON-PAYABLE-07',
+                1,
+                '应付对账完成：差异 2 条',
+              ],
+              [
+                '调整费用',
+                'adjustCharge',
+                'CHG-S2505120004',
+                11,
+                '调整单 ADJ-CHG-S2505120004 已创建',
+              ],
+              [
+                '发送账单',
+                'sendStatement',
+                'ST202605-0008',
+                2,
+                '账单 ST202605-0008 v2 已冻结并发送',
+              ],
+              [
+                '创建供应商付款',
+                'createDisbursement',
+                'DISB-20260722-03',
+                1,
+                '供应商付款 DISB-20260722-03 已创建',
+              ],
+              [
+                '分配付款',
+                'allocateDisbursement',
+                'DISB-20260722-03',
+                3,
+                '付款 CNY 3,000.00 已分配，未分配 0.00',
+              ],
+              [
+                '发起账单争议',
+                'openStatementDispute',
+                'ST202605-0008',
+                2,
+                '账单争议 DSP-ST202605-0008-01 已创建',
+              ],
+              [
+                '记录未分配收款',
+                'recordReceipt',
+                'RCT-20260722-03',
+                6,
+                '预存款 ¥3,000.00 已进入未分配余额',
+              ],
+              [
+                '撤销核销',
+                'reverseAllocation',
+                'ALLOC-20260722-06',
+                3,
+                '核销 ALLOC-20260722-06 已撤销并回到未分配余额',
+              ],
+              [
+                '创建预存款订单',
+                'createPrepaymentOrder',
+                'PREPAY-20260722-01',
+                1,
+                '预存款订单 PREPAY-20260722-01 已创建',
+              ],
+              [
+                '创建支付订单',
+                'createStatementPaymentOrder',
+                'PAY-ST202605-0008',
+                1,
+                '支付订单 PAY-ST202605-0008 已创建',
+              ],
+              [
+                '退款校验',
+                'createPaymentRefund',
+                'PAY-ST202605-0008',
+                2,
+                '退款 ¥320.00 已提交，未超过原支付余额',
+              ],
+              [
+                '关闭支付订单',
+                'closePaymentOrder',
+                'PAY-ST202605-0008',
+                2,
+                '未支付订单 PAY-ST202605-0008 已关闭',
+              ],
+              [
+                '执行支付对账',
+                'reconcilePayments',
+                'PAY-RECON-20260722',
+                1,
+                '微信账单对账完成：隔离金额异常 1 条',
+              ],
+              [
+                '发布汇率版本',
+                'publishExchangeRateSet',
+                'FX-20260722',
+                4,
+                '汇率版本 FX-20260722 v4 已发布',
+              ],
+              ['执行费用分摊', 'allocateCharges', 'S2505120004', 11, '费用已按重量分摊，余额 0.00'],
+              [
+                '关闭财务期间',
+                'closeFinancialPeriod',
+                'PERIOD-2026-07',
+                5,
+                '财务期间 2026-07 已关闭',
+              ],
+              [
+                '重开财务期间',
+                'reopenFinancialPeriod',
+                'PERIOD-2026-07',
+                6,
+                '财务期间 2026-07 已授权重开',
+              ],
+              [
+                '创建发票申请',
+                'createInvoiceRequest',
+                'INV-202607-018',
+                1,
+                '发票 INV-202607-018 已申请',
+              ],
+              [
+                '审批发票',
+                'reviewInvoiceRequest',
+                'INV-202607-018',
+                2,
+                '发票 INV-202607-018 已审批',
+              ],
+              [
+                '利润回查',
+                'getProfitTrace',
+                'S2505120004',
+                11,
+                '利润链路已对账：收入 ¥5,320.00 / 成本 ¥4,580.50',
+              ],
+            ] as const
+          ).map(([label, operationId, entityRef, version, result]) => (
+            <button
+              key={operationId}
+              onClick={() =>
+                runCommand(
+                  command('finance', operationId, entityRef, version, {
+                    amountCents: 300000,
+                    commitMode: operationId === 'commitPayableImport' ? 'PARTIAL' : undefined,
+                    reason:
+                      operationId === 'openStatementDispute' ? '尾程附加费证据待补' : undefined,
+                    decision: operationId === 'reviewInvoiceRequest' ? 'APPROVE' : undefined,
+                  }),
+                  result,
+                  () => setWorkflowState(result)
+                )
+              }
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
       <Dialog
         open={dangerOpen}
         title="反审核费用"
@@ -951,15 +1505,22 @@ function FinanceWorkbench({ onFeedback }: { onFeedback: (message: string) => voi
               variant="danger"
               disabled={reason.trim().length < 5}
               onClick={() => {
-                buildDangerousFinanceCommand({
+                const validated = buildDangerousFinanceCommand({
                   action: 'UNREVIEW_CHARGE',
                   impact: '解锁账单 ST202605-0008 费用版本，要求重新检查支付分配与期间',
                   reason,
                   expectedVersion: 11,
                   auditDestination: 'audit://finance/charges/CHG-S2505120004',
                 });
-                setDangerOpen(false);
-                onFeedback('反审核已提交，审计事件已记录');
+                return runCommand(
+                  command('finance', 'unreviewCharge', 'CHG-S2505120004', 11, {
+                    reason: validated.reason,
+                    impact: validated.impact,
+                    auditDestination: validated.auditDestination,
+                  }),
+                  '反审核已提交',
+                  () => setDangerOpen(false)
+                );
               }}
             >
               确认反审核
@@ -1003,31 +1564,37 @@ export function FulfillmentFinanceWorkbench({
 }: FulfillmentFinanceWorkbenchProps) {
   const [section, setSection] = useState<FulfillmentSection>(initialSection);
   const [viewState, setViewState] = useState<WorkbenchViewState>(initialViewState);
-  const [feedback, setFeedback] = useState('');
+  const [feedback, setFeedback] = useState<
+    | { kind: 'pending'; message: string }
+    | { kind: 'success'; message: string }
+    | { kind: 'error'; message: string }
+    | null
+  >(null);
   const [auditCount, setAuditCount] = useState(0);
   const active = navItems.find((item) => item.id === section)!;
 
-  const handleFeedback = async (message: string) => {
-    setFeedback(message);
-    setAuditCount((count) => count + 1);
-    if (commandPort) {
-      await commandPort.execute({
-        domain: section,
-        operationId: message.includes('收货') ? 'confirmReceipt' : 'clientAction:workbenchCommand',
-        entityRef: 'S2505120004',
-        idempotencyKey: `${section}:S2505120004:${Date.now()}`,
-        expectedVersion: 11,
-        payload: { message },
+  const runCommand: RunCommand = async (nextCommand, successMessage, onResolved) => {
+    setFeedback({ kind: 'pending', message: `正在提交 ${nextCommand.operationId}` });
+    try {
+      const result = await commandPort.execute(nextCommand);
+      onResolved?.();
+      setAuditCount((count) => count + 1);
+      setFeedback({
+        kind: 'success',
+        message: `${successMessage} · 审计 ${result.auditId}`,
       });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '命令执行失败';
+      setFeedback({ kind: 'error', message: `操作失败：${message}。输入与幂等键已保留，可重试。` });
     }
   };
 
   const renderSection = () => {
     if (viewState !== 'normal') return viewStateEvidence[viewState];
-    if (section === 'warehouse') return <WarehouseWorkbench onFeedback={handleFeedback} />;
-    if (section === 'linehaul') return <LinehaulWorkbench onFeedback={handleFeedback} />;
-    if (section === 'tracking') return <TrackingWorkbench onFeedback={handleFeedback} />;
-    return <FinanceWorkbench onFeedback={handleFeedback} />;
+    if (section === 'warehouse') return <WarehouseWorkbench runCommand={runCommand} />;
+    if (section === 'linehaul') return <LinehaulWorkbench runCommand={runCommand} />;
+    if (section === 'tracking') return <TrackingWorkbench runCommand={runCommand} />;
+    return <FinanceWorkbench runCommand={runCommand} />;
   };
 
   return (
@@ -1041,9 +1608,10 @@ export function FulfillmentFinanceWorkbench({
           <button
             key={item.id}
             data-active={section === item.id}
+            aria-current={section === item.id ? 'page' : undefined}
             onClick={() => {
               setSection(item.id);
-              setFeedback('');
+              setFeedback(null);
             }}
           >
             <MiniIcon path={item.path} />
@@ -1089,10 +1657,20 @@ export function FulfillmentFinanceWorkbench({
         </header>
         <div className="ff-content">{renderSection()}</div>
         {feedback ? (
-          <div className="ff-toast" role="status">
-            <strong>操作成功</strong>
-            <span>{feedback}</span>
-            <button aria-label="关闭反馈" onClick={() => setFeedback('')}>
+          <div
+            className="ff-toast"
+            data-kind={feedback.kind}
+            role={feedback.kind === 'error' ? 'alert' : 'status'}
+          >
+            <strong>
+              {feedback.kind === 'pending'
+                ? '正在执行'
+                : feedback.kind === 'success'
+                  ? '操作成功'
+                  : '操作失败'}
+            </strong>
+            <span>{feedback.message}</span>
+            <button aria-label="关闭反馈" onClick={() => setFeedback(null)}>
               ×
             </button>
           </div>

@@ -31,6 +31,9 @@ describe('linehaul orchestration', () => {
         'updateDeliveryTaskStatus',
         'captureProofOfDelivery',
         'amendProofOfDelivery',
+        'syncLastMilePartner',
+        'replayPartnerEvent',
+        'generateLastMileCharges',
       ])
     );
   });

@@ -15,7 +15,7 @@ export function summarizeCharge(lineItemCents: number[], costCents: number): Cha
     salesCents,
     costCents,
     profitCents,
-    marginPercent: Math.round((profitCents / salesCents) * 10_000) / 100,
+    marginPercent: salesCents === 0 ? 0 : Math.round((profitCents / salesCents) * 10_000) / 100,
   };
 }
 
@@ -69,11 +69,22 @@ export const financeCapabilities = [
   { id: 'FIN-03', operationId: 'createPayableImport', path: '/finance/payable-imports' },
   {
     id: 'FIN-03',
+    operationId: 'validatePayableImport',
+    path: '/finance/payable-imports/{payableImportId}:validate',
+  },
+  {
+    id: 'FIN-03',
     operationId: 'commitPayableImport',
     path: '/finance/payable-imports/{payableImportId}:commit',
   },
+  { id: 'FIN-03', operationId: 'reconcilePayables', path: '/finance/payables:reconcile' },
   { id: 'FIN-04', operationId: 'createStatement', path: '/finance/statements' },
   { id: 'FIN-04', operationId: 'sendStatement', path: '/finance/statements/{statementId}:send' },
+  {
+    id: 'FIN-04',
+    operationId: 'openStatementDispute',
+    path: '/finance/statements/{statementId}/disputes',
+  },
   {
     id: 'PAY-02',
     operationId: 'createStatementPaymentOrder',
@@ -82,6 +93,11 @@ export const financeCapabilities = [
   { id: 'PAY-04', operationId: 'createPaymentRefund', path: '/payments/{paymentOrderId}/refunds' },
   { id: 'FIN-05', operationId: 'recordReceipt', path: '/finance/receipts' },
   { id: 'FIN-05', operationId: 'createDisbursement', path: '/finance/disbursements' },
+  {
+    id: 'FIN-05',
+    operationId: 'allocateDisbursement',
+    path: '/finance/disbursements/{disbursementId}:allocate',
+  },
   {
     id: 'FIN-06',
     operationId: 'allocateReceipt',
@@ -110,6 +126,14 @@ export const financeCapabilities = [
     path: '/finance/periods/{periodId}:reopen',
   },
   { id: 'FIN-10', operationId: 'createInvoiceRequest', path: '/finance/invoice-requests' },
+  {
+    id: 'FIN-10',
+    operationId: 'reviewInvoiceRequest',
+    path: '/finance/invoice-requests/{invoiceRequestId}:review',
+  },
+  { id: 'PAY-01', operationId: 'createPrepaymentOrder', path: '/payments/prepayment-orders' },
+  { id: 'PAY-02', operationId: 'closePaymentOrder', path: '/payments/{paymentOrderId}:close' },
+  { id: 'PAY-05', operationId: 'reconcilePayments', path: '/payments/reconciliations' },
 ] as const satisfies ReadonlyArray<{ id: string; operationId: string; path: keyof paths }>;
 
 export type UnreviewChargeBody =

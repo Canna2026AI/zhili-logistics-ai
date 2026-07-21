@@ -1,11 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { FulfillmentFinanceWorkbench } from '../../../apps/ops/src/features/fulfillment-finance';
+import { FulfillmentFinanceApplication } from '../../../apps/ops/src/features/fulfillment-finance';
 
 const meta = {
   title: '运营端/履约与财务工作台',
-  component: FulfillmentFinanceWorkbench,
+  component: FulfillmentFinanceApplication,
   parameters: { layout: 'fullscreen' },
-} satisfies Meta<typeof FulfillmentFinanceWorkbench>;
+} satisfies Meta<typeof FulfillmentFinanceApplication>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

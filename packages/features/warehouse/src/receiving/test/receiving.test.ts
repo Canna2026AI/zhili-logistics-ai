@@ -38,6 +38,8 @@ describe('warehouse receiving', () => {
       'attachWaybills',
       'sealLoadUnit',
       'dispatchLoadUnit',
+      'createPrintJob',
+      'reprintDocument',
     ]);
   });
 

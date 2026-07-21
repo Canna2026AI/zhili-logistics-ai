@@ -64,6 +64,9 @@ export const linehaulCapabilities = [
     operationId: 'amendProofOfDelivery',
     path: '/last-mile/delivery-tasks/{deliveryTaskId}/proof-of-delivery:amend',
   },
+  { id: 'LM-05', operationId: 'syncLastMilePartner', path: '/last-mile/partners:sync' },
+  { id: 'LM-05', operationId: 'replayPartnerEvent', path: '/last-mile/partner-events:replay' },
+  { id: 'LM-06', operationId: 'generateLastMileCharges', path: '/last-mile/charges:generate' },
 ] as const satisfies ReadonlyArray<{ id: string; operationId: string; path: keyof paths }>;
 
 export type CreateBookingBody =
