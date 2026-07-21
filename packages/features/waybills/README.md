@@ -1,5 +1,16 @@
 # 订单、运单、包裹、品名与批量命令
 
-本包按 `model/application/adapters/ui/worker/test` 拆分，每个独立功能再使用单独子目录。当前只建立稳定工作区入口；对应前端工作树必须以测试先行补齐真实交互、契约 Mock、权限与异常态。
+实现 `ORD-01` 至 `ORD-08`：标准/FBA 订单、包裹与品名、CSV 导入，以及高密度运单列表、抽屉、面单和批量命令。
 
-禁止直接导入其他领域包内部文件；跨域 DTO 来自 `@zhili/contracts`，跨域行为使用公开端口或事件。
+## 目录
+
+- `src/order`：标准/FBA 草稿、Amazon 关联字段、包裹和品名编辑。
+- `src/import`：上传、映射、校验、预览、提交和回滚状态机。
+- `src/waybill/model`：标准状态计数、列表数据和批量结果。
+- `src/waybill/ui`：筛选、选择、详情抽屉、面单与批量危险确认。
+- `src/adapters/api`：生成式 OpenAPI 查询、提交、面单和批量命令适配器。
+- 各功能的 `test`：状态机、幂等头、版本头、部分成功和用户交互测试。
+
+列表覆盖正常、加载、空、失败、禁止、过期、陈旧和部分成功状态。取消等危险批量命令必须显示影响对象、原因、版本和审计去向；部分成功必须逐项反馈。
+
+运行 `pnpm --filter @zhili/feature-waybills test|lint|typecheck|build` 验证本包。跨域 DTO 仅来自 `@zhili/contracts`，跨域行为只通过公开端口或事件。
