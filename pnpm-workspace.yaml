@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+  - packages/features/*
+
+allowBuilds:
+  '@scarf/scarf': false
+  esbuild: true
+  simple-git-hooks: false
+
+minimumReleaseAgeExclude:
+  - react-dom@19.2.8
+  - react@19.2.8

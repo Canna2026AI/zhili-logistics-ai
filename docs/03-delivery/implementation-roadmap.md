@@ -3,7 +3,7 @@
 ## 阶段门槛
 
 1. 文档门槛：产品规格、追踪矩阵、状态机、财务不变量、API 与目录经过一致性检查。
-2. UI 门槛：Figma 令牌、组件、五端页面和 10 条关键流程通过视觉/交互验收。
+2. UI 门槛：仓库内令牌、组件规格、五端基准图和 10 条关键流程通过视觉/交互验收；Figma 是需补录但不阻塞的协作镜像。
 3. 前端门槛：所有页面使用契约 Mock 实现，核心控件真实交互，视觉回归与可访问性通过。
 4. 后端门槛：真实数据库/API/Worker 完成，关闭 Mock 后跨端流程通过。
 5. 发布门槛：功能追踪矩阵全部 `VERIFIED`，Compose 冷启动、备份恢复、性能、安全和外部沙箱通过。
@@ -13,28 +13,33 @@
 - 工作树统一位于 `.worktrees/<name>`，分支统一为 `codex/<english-name>`。
 - 同时最多三个实现工作树，根任务保留为契约、审查和集成负责人。
 - 一个工作树只负责一个领域范围；共享契约先由集成负责人合入。
+- 根集成负责人唯一拥有 `packages/contracts`、生成客户端和数据库迁移序列；`codex/ui-foundation` 唯一拥有 `packages/tokens` 与 `packages/ui`，直到 UI 门槛关闭。
+- 业务工作树不得直接修改共享所有权目录；先提交变更提案，由 owner 合入版本化契约后再消费。
 - PR 标题中英双语，必需检查通过后 squash merge。
 - 每个功能严格走测试先行：先观察失败，再写最小实现，再重构。
 
 ## 前端波次
 
-| Branch | 所有权 |
-| --- | --- |
-| `codex/frontend-ops-orders` | 运营壳、主数据、报价、订单和运单 |
-| `codex/frontend-ops-warehouse-finance` | 仓库、干线、客服和财务 |
-| `codex/frontend-portals` | 客户门户、平台端和官网 |
-| `codex/frontend-pda` | PDA PWA、离线和 Android 壳 |
+| 波次 | Branch                                 | 所有权                           | 进入/退出条件                           |
+| ---- | -------------------------------------- | -------------------------------- | --------------------------------------- |
+| UI0  | `codex/ui-foundation`                  | Figma、令牌、组件、契约、Mock    | 10 条流程和共享状态评审通过后退出       |
+| F1   | `codex/frontend-ops-orders`            | 运营壳、主数据、报价、订单和运单 | 消费 UI0 固定版本；E2E 与视觉通过       |
+| F1   | `codex/frontend-ops-warehouse-finance` | 仓库、干线、尾程、客服和财务     | 消费 UI0 固定版本；E2E 与视觉通过       |
+| F1   | `codex/frontend-portals`               | 客户门户、平台端和官网           | 消费 UI0 固定版本；E2E 与视觉通过       |
+| F2   | `codex/frontend-pda`                   | PDA PWA、离线和 Android 壳       | 至少一个 F1 已合并；弱网与设备 E2E 通过 |
 
 ## 后端波次
 
-| Branch | 所有权 |
-| --- | --- |
-| `codex/backend-identity-masterdata` | 租户、身份、权限、组织和主数据 |
-| `codex/backend-rates-waybills` | 渠道、规则、报价、订单和运单 |
-| `codex/backend-warehouse-linehaul` | 扫描、仓储、装载、订舱和提单 |
-| `codex/backend-finance` | 应收、应付、账单、资金、发票和利润 |
-| `codex/backend-tracking-support` | 轨迹、异常、工单和通知 |
-| `codex/backend-integrations-ai` | API、连接器、自动化、AI、导入导出和报表任务 |
+| 波次 | Branch                              | 所有权                                      | 进入/退出条件                       |
+| ---- | ----------------------------------- | ------------------------------------------- | ----------------------------------- |
+| B1   | `codex/backend-identity-masterdata` | 租户、身份、权限、组织和主数据              | 全前端门槛关闭；集成/安全测试通过   |
+| B1   | `codex/backend-rates-waybills`      | 渠道、规则、报价、订单和运单                | 全前端门槛关闭；属性测试通过        |
+| B1   | `codex/backend-warehouse-linehaul`  | 扫描、仓储、装载、干线和尾程                | 全前端门槛关闭；并发/离线测试通过   |
+| B2   | `codex/backend-finance`             | 应收、应付、账单、资金、发票和利润          | 至少一个 B1 合并；守恒测试通过      |
+| B2   | `codex/backend-tracking-support`    | 轨迹、异常、工单和通知                      | 至少一个 B1 合并；乱序/重试测试通过 |
+| B2   | `codex/backend-integrations-ai`     | API、连接器、自动化、AI、导入导出和报表任务 | 至少一个 B1 合并；沙箱/策略测试通过 |
+
+每个波次只保持最多三个实现工作树。合并顺序为共享 owner → B1/F1 中依赖最少者 → 其余同波次 → 下一波；冲突由目录 owner 解决，不允许业务分支覆盖生成文件。
 
 ## 统一验收
 

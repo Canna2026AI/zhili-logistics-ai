@@ -1,0 +1,68 @@
+{
+  "F01": [
+    "createOrderDraft",
+    "validateOrder",
+    "createQuote",
+    "submitWaybill",
+    "receiveScan",
+    "confirmReceipt"
+  ],
+  "F02": ["createQuote", "getQuoteExplanation", "acceptQuote"],
+  "F03": [
+    "confirmReceipt",
+    "createIssue",
+    "requestIssueMaterial",
+    "resolveIssue",
+    "routeWaybill"
+  ],
+  "F04": [
+    "createBooking",
+    "createBillOfLading",
+    "createLoadUnit",
+    "attachWaybills",
+    "sealLoadUnit",
+    "dispatchLoadUnit"
+  ],
+  "F05": [
+    "ingestTrackingEvent",
+    "detectTrackingStall",
+    "createIssue",
+    "assignIssue",
+    "notifyCustomer",
+    "resolveIssue"
+  ],
+  "F06": [
+    "generateCharges",
+    "reviewCharge",
+    "createStatement",
+    "createStatementPaymentOrder",
+    "ingestWechatPaymentCallback",
+    "allocateReceipt"
+  ],
+  "F07": [
+    "createPayableImport",
+    "validatePayableImport",
+    "commitPayableImport",
+    "reconcilePayables",
+    "createDisbursement",
+    "allocateDisbursement"
+  ],
+  "F08": [
+    "updateRolePolicy",
+    "previewEffectivePermissions",
+    "startPermissionSimulation",
+    "verifyAsSubject",
+    "endPermissionSimulation"
+  ],
+  "F09": ["syncDeviceEvents", "resolveDeviceConflict"],
+  "F10": [
+    "createImportJob",
+    "proposeAiMapping",
+    "validateImportRows",
+    "applyLowRiskMappings",
+    "requestAiApproval",
+    "approveAiAction",
+    "rollbackAiAction",
+    "commitImport"
+  ]
+}

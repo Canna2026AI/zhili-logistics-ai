@@ -1,0 +1,30 @@
+{
+  "name": "@zhili/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./generated": "./src/generated/api.d.ts"
+  },
+  "scripts": {
+    "lint": "redocly lint openapi/zhili.openapi.yaml",
+    "generate": "openapi-typescript openapi/zhili.openapi.yaml -o src/generated/api.d.ts && prettier --write src/generated/api.d.ts",
+    "generate:check": "pnpm generate && git diff --exit-code -- src/generated/api.d.ts",
+    "mock": "prism mock openapi/zhili.openapi.yaml --host 127.0.0.1 --port 4010",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.14.0"
+  },
+  "devDependencies": {
+    "@redocly/cli": "^2.0.0",
+    "@stoplight/prism-cli": "^5.14.0",
+    "openapi-typescript": "^7.10.0",
+    "prettier": "^3.6.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

@@ -5,10 +5,10 @@
 使用 pnpm + Turborepo 的 TypeScript Monorepo：
 
 ```text
-apps/{ops-web,customer-web,pda-web,platform-web,website,api,worker,storybook}
-packages/{ui,tokens,contracts,db,auth,i18n,config,observability,testing}
+apps/{ops,customer-portal,pda,platform,website,api,worker,storybook}
+packages/{ui,tokens,contracts,api-client,mocks,db,auth,i18n,config,observability,testing}
 packages/features/{identity-masterdata,rates-routing,waybills,warehouse,linehaul,tracking-support,finance,reports,integrations,automation,ai}
-docs/ infra/ e2e/
+docs/ infra/ tests/e2e/
 ```
 
 每个功能目录包含自己的领域类型、应用服务、API 适配、前端视图和测试；跨域只能依赖 `contracts` 或明确的应用端口。数据库迁移集中生成，避免并行分支编号冲突。
@@ -27,6 +27,8 @@ docs/ infra/ e2e/
 - 列表：`cursor`、`limit`、`sort` 和结构化 `filter`；最大页长由资源策略控制。
 - 写命令：`Idempotency-Key`、`If-Match`/版本和追踪号；状态动作使用显式端点，如 `POST /waybills/{id}:submit`。
 - 长任务：`GET /jobs/{id}/events` SSE；Webhook 使用时间戳、HMAC、事件 ID、版本和重放保护。
+
+可执行源真相位于 `packages/contracts/openapi/zhili.openapi.yaml`；`core-flow-operation-map.json` 固定 10 条关键流程的 operation 覆盖，`src/generated/api.d.ts` 由契约生成。前端、后端和连接器不得手写重复 DTO。命令通过 `x-feature-id`、`x-permission` 和 `x-audit-event` 关联功能、权限和审计；Prism 提供契约 Mock，MSW 只包装相同 paths 与生成类型。
 
 资源根：`auth`、`tenants`、`organizations`、`users`、`customers`、`master-data`、`channels`、`quotes`、`waybills`、`warehouse`、`linehaul`、`tracking`、`issues`、`finance`、`reports`、`automations`、`integrations`、`ai`、`audit-logs`。
 

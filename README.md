@@ -4,6 +4,8 @@
 
 当前仓库以 `reports/` 中的竞品研究为需求证据，按“架构与文档 → UI/交互冻结 → 前端 → 后端 → 集成验收”的顺序建设。产品对齐 T6 的业务心智、状态流程和操作效率，但使用独立的智立品牌、设计系统、源码与文案。
 
+UI0 已建立可运行的 React/Vite 五端入口、共享设计令牌与组件、OpenAPI 3.1 契约、强类型客户端、MSW 异常场景、Storybook 和 Playwright 浏览器验收。业务功能将按 `packages/features/<domain>/<feature>` 拆分，并通过 Git 工作树并行实现。
+
 ## 交付端
 
 - 内部运营端：订单、报价、仓配、转运、轨迹、异常、财务和报表。
@@ -19,8 +21,28 @@
 - `docs/01-design/design-system.md`：B 风格设计令牌、组件和交互规范。
 - `docs/01-design/page-matrix.md`：五端页面与状态矩阵。
 - `docs/02-architecture/system-architecture.md`：Monorepo、服务、数据与接口架构。
+- `docs/02-architecture/repository-structure.md`：完整目录蓝图、单功能目录规范与并行所有权。
 - `docs/03-delivery/implementation-roadmap.md`：工作树波次、合并门槛和完成定义。
+
+## 本地运行
+
+```bash
+corepack enable
+pnpm install --frozen-lockfile
+pnpm dev:ops
+```
+
+五端默认端口为运营端 `4100`、客户门户 `4101`、PDA `4102`、平台端 `4103`、官网 `4104`；Storybook 使用 `6006`。完整质量门槛：
+
+```bash
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm e2e
+```
 
 ## 许可证
 
-项目计划以 AGPL-3.0 发布。正式 GitHub 发布前会纳入完整许可证文本、第三方许可证清单和 SBOM。
+项目以 [GNU Affero General Public License v3.0](LICENSE) 发布。生产发布阶段会进一步生成第三方许可证清单和 SBOM。

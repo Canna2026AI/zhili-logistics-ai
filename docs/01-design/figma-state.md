@@ -35,3 +35,11 @@
 ## 当前外部限制
 
 Starter 计划在 Phase 0 搜索组件库时触发 Figma MCP 调用上限。文件与发现结果已保存，但变量、组件和页面写入尚未开始。额度恢复或升级后，从 Phase 1 Foundations 继续；不得把本地文档或截图标记为 Figma 完成。
+
+2026-07-22 再次通过已认证账号 `Canna`、Full seat、Starter tier 调用写入，官方仍返回 `You've reached the Figma MCP tool call limit on the Starter plan`。本次没有创建任何 node，`gate-evidence.md` 因此保持 `BLOCKED_EXTERNAL`。恢复后的首个原子写入批次固定为：9 个页面索引、4 个变量集合、8 个文字样式、2 个阴影样式和核心组件页；成功后必须读取 node IDs 并截图复核。
+
+## 本地官方插件回退
+
+为避免设计内容依赖一次性 MCP 调用，仓库已提供无网络的 Figma 开发插件：`tools/figma/zhili-ui-foundation/`。插件代码经过 `node --check`，目标产物为 9 个 `Zhili /` 页面、4 个变量集合、8 个文字样式、2 个阴影样式、共享组件、8 个可编辑基准屏和 10×5 个带原型连接的流程状态。插件只重建带 `zhili-run-id=zhili-ds-v1` 的自有节点，不删除其他设计内容。
+
+当前 Computer Use 通道返回 `Computer Use requires nodeRepl.createElicitation`，因此本轮未能在 Figma Desktop 中导入并运行插件。可人工按插件 README 的四步操作执行；执行后仍必须读取页面/节点、检查变量和原型，并保存截图，才能把 UI gate 从 `BLOCKED_EXTERNAL` 改为 `PASSED`。插件存在和语法通过不能替代真实 Figma node 证据。
