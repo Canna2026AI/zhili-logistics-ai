@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zhili.example/schemas/canonical-fixture.json",
+  "type": "object",
+  "required": ["timezone", "waybill", "quote", "statement", "deviceEvent"],
+  "properties": {
+    "timezone": { "type": "string" },
+    "waybill": {
+      "type": "object",
+      "required": [
+        "waybillNo",
+        "expectedWeightKg",
+        "actualWeightKg",
+        "lengthCm",
+        "widthCm",
+        "heightCm",
+        "volumetricDivisor",
+        "volumetricWeightKg",
+        "chargeableWeightKg"
+      ]
+    },
+    "quote": {
+      "type": "object",
+      "required": ["quoteNo", "lines", "total", "cost", "grossProfit"]
+    },
+    "statement": {
+      "type": "object",
+      "required": ["statementNo", "total", "paid", "allocated", "outstanding"]
+    },
+    "deviceEvent": {
+      "type": "object",
+      "required": [
+        "eventId",
+        "deviceCode",
+        "warehouseCode",
+        "localSequence",
+        "baseVersion",
+        "idempotencyKey"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

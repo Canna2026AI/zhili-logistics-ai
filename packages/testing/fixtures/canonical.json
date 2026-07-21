@@ -1,0 +1,56 @@
+{
+  "$schema": "./canonical.schema.json",
+  "timezone": "Asia/Shanghai",
+  "waybill": {
+    "waybillNo": "S2505120004",
+    "customerName": "深圳鑫源贸易有限公司",
+    "origin": "CN-SZX",
+    "destination": "US-LAX",
+    "service": "DHL Express Worldwide",
+    "expectedWeightKg": 122,
+    "actualWeightKg": 123.5,
+    "weightDifferenceKg": 1.5,
+    "weightDifferencePercent": 1.23,
+    "lengthCm": 100,
+    "widthCm": 80,
+    "heightCm": 60,
+    "volumetricDivisor": 6000,
+    "volumetricWeightKg": 80,
+    "chargeableWeightKg": 123.5,
+    "state": "RECEIVED",
+    "nextState": "AWAITING_ROUTING"
+  },
+  "quote": {
+    "quoteNo": "Q2505120042",
+    "rateCardVersion": "RATE-DHL-CN-US-2026.05-v3",
+    "currency": "CNY",
+    "lines": [
+      { "code": "BASE", "label": "基础运费", "amount": 4680 },
+      { "code": "FUEL", "label": "燃油附加费", "amount": 514.8 },
+      { "code": "REMOTE", "label": "偏远附加费", "amount": 80 },
+      { "code": "HANDLING", "label": "操作费", "amount": 45.2 }
+    ],
+    "total": { "amount": 5320, "currency": "CNY" },
+    "cost": { "amount": 4580.5, "currency": "CNY" },
+    "grossProfit": { "amount": 739.5, "currency": "CNY" },
+    "grossMarginPercent": 13.9
+  },
+  "statement": {
+    "statementNo": "ST202605-0008",
+    "paymentOrderNo": "PAY202605120008",
+    "total": { "amount": 5320, "currency": "CNY" },
+    "paid": { "amount": 3000, "currency": "CNY" },
+    "allocated": { "amount": 3000, "currency": "CNY" },
+    "unapplied": { "amount": 0, "currency": "CNY" },
+    "outstanding": { "amount": 2320, "currency": "CNY" }
+  },
+  "deviceEvent": {
+    "eventId": "01JY8Z8F6ME4F0Y9QH2X6D4R7A",
+    "deviceCode": "PDA-SZX-03",
+    "warehouseCode": "WH-SZX-01",
+    "localSequence": 1842,
+    "baseVersion": 7,
+    "idempotencyKey": "receive:S2505120004:123.50:20260722T091532+0800",
+    "occurredAt": "2026-07-22T09:15:32+08:00"
+  }
+}

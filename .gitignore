@@ -3,12 +3,13 @@
 node_modules/
 .turbo/
 dist/
+storybook-static/
 coverage/
 playwright-report/
 test-results/
+artifacts/
 .env
 .env.*
 !.env.example
 *.log
 .superpowers/
-

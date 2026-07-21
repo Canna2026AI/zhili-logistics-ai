@@ -1,0 +1,13 @@
+**/node_modules/**
+**/dist/**
+**/storybook-static/**
+.worktrees/**
+reports/**
+docs/00-product/**
+docs/01-design/**
+packages/contracts/openapi/**
+packages/contracts/src/generated/**
+packages/contracts/core-flow-*.json
+packages/contracts/test/contract-coverage.test.ts
+pnpm-lock.yaml
+tools/figma/**

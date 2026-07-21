@@ -1,0 +1,14 @@
+{
+  "config": {
+    "MD013": false,
+  },
+  "ignores": [
+    ".superpowers/**",
+    ".worktrees/**",
+    "node_modules/**",
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/storybook-static/**",
+    "reports/**",
+  ],
+}

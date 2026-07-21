@@ -1,0 +1,11 @@
+{
+  "name": "Zhili UI Foundation Builder",
+  "id": "1784670000000000001",
+  "api": "1.0.0",
+  "editorType": ["figma"],
+  "main": "code.js",
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  }
+}

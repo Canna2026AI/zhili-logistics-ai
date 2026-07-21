@@ -1,0 +1,196 @@
+.portal-shell {
+  min-height: 100vh;
+  background: var(--zl-color-page);
+}
+.portal-shell > header {
+  display: grid;
+  grid-template-columns: 260px 1fr auto;
+  align-items: center;
+  height: 56px;
+  padding: 0 32px;
+  border-bottom: 1px solid var(--zl-color-border);
+  background: #fff;
+}
+.portal-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--zl-color-text);
+  font-weight: 700;
+}
+.portal-brand span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  color: #fff;
+  background: var(--zl-color-primary);
+}
+.portal-shell header nav {
+  display: flex;
+  justify-content: center;
+  height: 100%;
+}
+.portal-shell header nav button {
+  padding: 0 16px;
+  border: 0;
+  color: var(--zl-color-text-secondary);
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+.portal-shell header nav button[data-active='true'] {
+  color: var(--zl-color-primary);
+  box-shadow: inset 0 -2px var(--zl-color-primary);
+  font-weight: 600;
+}
+.portal-user {
+  color: var(--zl-color-text-secondary);
+  font-size: 13px;
+}
+.portal-shell main {
+  width: min(1180px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 28px 0 60px;
+}
+.portal-heading,
+.portal-section-title,
+.portal-waybill {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.portal-heading h1 {
+  margin: 0;
+  font-size: 24px;
+}
+.portal-heading p,
+.portal-section-title p,
+.portal-waybill p {
+  margin: 4px 0 0;
+  color: var(--zl-color-text-muted);
+}
+.portal-tasks {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 20px 0;
+  border: 1px solid var(--zl-color-border);
+  border-radius: 6px;
+  background: #fff;
+}
+.portal-tasks button {
+  display: grid;
+  gap: 2px;
+  padding: 18px 20px;
+  border: 0;
+  border-right: 1px solid var(--zl-color-border);
+  color: var(--zl-color-text-secondary);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.portal-tasks button:last-child {
+  border-right: 0;
+}
+.portal-tasks strong {
+  color: var(--zl-color-text);
+  font-family: var(--zl-font-data);
+  font-size: 24px;
+}
+.portal-section {
+  padding: 18px;
+  border: 1px solid var(--zl-color-border);
+  border-radius: 6px;
+  background: #fff;
+}
+.portal-section-title {
+  align-items: center;
+  margin-bottom: 14px;
+}
+.portal-section-title h2,
+.portal-waybill h2 {
+  margin: 0;
+  font-size: 18px;
+}
+.portal-section a {
+  color: var(--zl-color-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+.portal-waybill {
+  align-items: center;
+  margin-top: 16px;
+  padding: 18px 20px;
+  border: 1px solid var(--zl-color-border);
+  border-radius: 6px;
+  background: #fff;
+}
+.portal-label {
+  color: var(--zl-color-text-muted);
+  font-size: 12px;
+}
+.portal-mobile-nav {
+  display: none;
+}
+@media (max-width: 720px) {
+  .portal-shell > header {
+    grid-template-columns: 1fr auto;
+    height: 52px;
+    padding: 0 16px;
+  }
+  .portal-shell header nav {
+    display: none;
+  }
+  .portal-user {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .portal-shell main {
+    width: auto;
+    padding: 18px 14px 78px;
+  }
+  .portal-heading {
+    align-items: center;
+  }
+  .portal-heading h1 {
+    font-size: 19px;
+  }
+  .portal-heading p {
+    display: none;
+  }
+  .portal-tasks {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .portal-tasks button {
+    border-bottom: 1px solid var(--zl-color-border);
+  }
+  .portal-section {
+    padding: 14px;
+    overflow: hidden;
+  }
+  .portal-waybill {
+    align-items: flex-start;
+  }
+  .portal-mobile-nav {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 10;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    height: 58px;
+    border-top: 1px solid var(--zl-color-border);
+    background: #fff;
+  }
+  .portal-mobile-nav button {
+    border: 0;
+    color: var(--zl-color-text-secondary);
+    background: transparent;
+    font-size: 12px;
+  }
+}

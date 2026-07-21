@@ -1,0 +1,23 @@
+{
+  "name": "@zhili/pda",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 4102",
+    "build": "tsc -b && vite build",
+    "lint": "eslint src",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@zhili/api-client": "workspace:*",
+    "@zhili/mocks": "workspace:*",
+    "@zhili/ui": "workspace:*",
+    "idb": "^8.0.3",
+    "lucide-react": "^0.554.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zustand": "^5.0.8"
+  }
+}
