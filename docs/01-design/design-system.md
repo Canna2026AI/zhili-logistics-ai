@@ -9,7 +9,7 @@
 - 强调“扫描反馈、状态可见、金额明确、上下文不丢”，不使用装饰性渐变或大圆角卡片墙。
 - 报价、异常和客服页面可出现可解释 AI 侧栏；其他页面不常驻 AI 面板。
 
-视觉参考：`/Users/canna/.codex/generated_images/019f85fb-e33e-7972-a796-2a97994364e9/exec-743dd8da-55b4-4aee-a31e-5e92a294d47d.png`。
+视觉参考：`docs/01-design/concepts/00-ops-waybill-list.png`。其余终端和关键状态见 `concept-inventory.md`。
 
 ## 2. 设计令牌
 
