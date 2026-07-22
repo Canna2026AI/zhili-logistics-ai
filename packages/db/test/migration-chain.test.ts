@@ -23,6 +23,9 @@ describe('Drizzle migration chain', () => {
     temporaryDirectories.push(temporaryDirectory);
     const migrationOutput = resolve(temporaryDirectory, 'migrations');
     await cp(resolve(packageRoot, 'migrations'), migrationOutput, { recursive: true });
+    const existingMigrationFiles = (await readdir(migrationOutput)).filter((file) =>
+      file.endsWith('.sql')
+    );
 
     await execFileAsync(
       resolve(packageRoot, 'node_modules/.bin/drizzle-kit'),
@@ -41,7 +44,9 @@ describe('Drizzle migration chain', () => {
     );
 
     const migrationFiles = (await readdir(migrationOutput)).filter((file) => file.endsWith('.sql'));
-    const nextMigrationFiles = migrationFiles.filter((file) => file !== '0000_foundation.sql');
+    const nextMigrationFiles = migrationFiles.filter(
+      (file) => !existingMigrationFiles.includes(file)
+    );
     const nextMigrationSql = (
       await Promise.all(
         nextMigrationFiles.map((file) => readFile(resolve(migrationOutput, file), 'utf8'))
