@@ -453,17 +453,25 @@ CREATE TABLE refresh_tokens (
   CONSTRAINT refresh_tokens_revoked_check CHECK (
     (status = 'REVOKED' AND revoked_at IS NOT NULL) OR status <> 'REVOKED'
   ),
+  CONSTRAINT refresh_tokens_no_self_parent_check CHECK (
+    parent_token_id IS NULL OR parent_token_id <> id
+  ),
   CONSTRAINT refresh_tokens_version_check CHECK (version >= 0),
   CONSTRAINT refresh_tokens_timestamps_check CHECK (updated_at >= created_at),
   CONSTRAINT refresh_tokens_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT refresh_tokens_family_id_id_unique UNIQUE (tenant_id, family_id, id),
   CONSTRAINT refresh_tokens_hash_unique UNIQUE (token_hash),
   CONSTRAINT refresh_tokens_tenant_fk FOREIGN KEY (tenant_id)
     REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE,
   CONSTRAINT refresh_tokens_family_fk FOREIGN KEY (tenant_id, family_id)
     REFERENCES refresh_token_families (tenant_id, id) ON UPDATE RESTRICT ON DELETE CASCADE,
-  CONSTRAINT refresh_tokens_parent_fk FOREIGN KEY (tenant_id, parent_token_id)
-    REFERENCES refresh_tokens (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
+  CONSTRAINT refresh_tokens_parent_fk FOREIGN KEY (tenant_id, family_id, parent_token_id)
+    REFERENCES refresh_tokens (tenant_id, family_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
 );
+
+CREATE UNIQUE INDEX refresh_tokens_one_successor_idx
+  ON refresh_tokens (tenant_id, parent_token_id)
+  WHERE parent_token_id IS NOT NULL;
 
 COMMENT ON COLUMN refresh_tokens.token_hash IS
   'Keyed SHA-256 digest of a high-entropy refresh token. The bearer token is never persisted.';

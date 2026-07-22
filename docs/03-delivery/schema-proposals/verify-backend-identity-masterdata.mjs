@@ -313,6 +313,97 @@ try {
       ('01J0000000000000000000010A', ${tenantA}, 'ROOT-A', 'Root A', 'TENANT_ROOT'),
       ('01J0000000000000000000010B', ${tenantB}, 'ROOT-B', 'Root B', 'TENANT_ROOT')
   `;
+  await sql`
+    INSERT INTO users (
+      id, tenant_id, login_name_normalized, display_name, status
+    ) VALUES (
+      '01J0000000000000000000020A', ${tenantA}, 'rotation-user', 'Rotation User', 'ACTIVE'
+    )
+  `;
+  await sql`
+    INSERT INTO sessions (
+      id, tenant_id, user_id, authentication_method, expires_at
+    ) VALUES
+      (
+        '01J0000000000000000000030A', ${tenantA},
+        '01J0000000000000000000020A', 'PASSWORD', now() + interval '1 hour'
+      ),
+      (
+        '01J0000000000000000000030B', ${tenantA},
+        '01J0000000000000000000020A', 'PASSWORD', now() + interval '1 hour'
+      )
+  `;
+  await sql`
+    INSERT INTO refresh_token_families (
+      id, tenant_id, session_id
+    ) VALUES
+      (
+        '01J0000000000000000000040A', ${tenantA},
+        '01J0000000000000000000030A'
+      ),
+      (
+        '01J0000000000000000000040B', ${tenantA},
+        '01J0000000000000000000030B'
+      )
+  `;
+  await sql`
+    INSERT INTO refresh_tokens (
+      id, tenant_id, family_id, token_hash, expires_at
+    ) VALUES (
+      '01J0000000000000000000050A', ${tenantA},
+      '01J0000000000000000000040A', ${'a'.repeat(64)}, now() + interval '1 hour'
+    )
+  `;
+
+  const rollbackAcceptedInvalidInsert = new Error('rollback accepted invalid refresh lineage');
+  async function captureDatabaseRejection(operation) {
+    try {
+      await sql.begin(async (transaction) => {
+        await operation(transaction);
+        throw rollbackAcceptedInvalidInsert;
+      });
+    } catch (error) {
+      if (error === rollbackAcceptedInvalidInsert) return { code: null, rejected: false };
+      return { code: error.code ?? null, rejected: true };
+    }
+    throw new Error('refresh lineage rejection probe did not complete');
+  }
+
+  const refreshLineageRejections = {
+    cross_family_parent: await captureDatabaseRejection(async (transaction) => {
+      await transaction`
+        INSERT INTO refresh_tokens (
+          id, tenant_id, family_id, parent_token_id, token_hash, expires_at
+        ) VALUES (
+          '01J0000000000000000000060A', ${tenantA},
+          '01J0000000000000000000040B', '01J0000000000000000000050A',
+          ${'b'.repeat(64)}, now() + interval '1 hour'
+        )
+      `;
+    }),
+    duplicate_successor: await captureDatabaseRejection(async (transaction) => {
+      await transaction`
+        INSERT INTO refresh_tokens (
+          id, tenant_id, family_id, parent_token_id, token_hash, expires_at
+        ) VALUES
+          (
+            '01J0000000000000000000070A', ${tenantA},
+            '01J0000000000000000000040A', '01J0000000000000000000050A',
+            ${'c'.repeat(64)}, now() + interval '1 hour'
+          ),
+          (
+            '01J0000000000000000000080A', ${tenantA},
+            '01J0000000000000000000040A', '01J0000000000000000000050A',
+            ${'d'.repeat(64)}, now() + interval '1 hour'
+          )
+      `;
+    }),
+  };
+  assert.deepEqual(refreshLineageRejections, {
+    cross_family_parent: { code: '23503', rejected: true },
+    duplicate_successor: { code: '23505', rejected: true },
+  });
+
   await sql.unsafe("ALTER ROLE zhili_app WITH LOGIN PASSWORD 'proposal-verification-only'");
 
   const appUrl = new URL(container.getConnectionUri());
@@ -336,7 +427,7 @@ try {
   assert.deepEqual([...visibleRows], [{ tenant_id: tenantA, id: '01J0000000000000000000010A' }]);
 
   console.log(
-    `PASS backend identity/master-data proposal: ${expectedTables.length} tables, ${tenantOwnedTables.length + 1} forced RLS policies, tenant-safe foreign keys, normalized grants, protected credentials`
+    `PASS backend identity/master-data proposal: ${expectedTables.length} tables, ${tenantOwnedTables.length + 1} forced RLS policies; refresh lineage rejects cross-family=23503 duplicate-successor=23505`
   );
 } finally {
   if (appSql) await appSql.end();
