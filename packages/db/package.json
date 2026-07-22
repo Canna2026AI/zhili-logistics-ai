@@ -1,0 +1,23 @@
+{
+  "name": "@zhili/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "lint": "eslint src test drizzle.config.ts vitest.integration.config.ts --no-error-on-unmatched-pattern",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests --exclude 'test/*.integration.test.ts'",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.9"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.0.4",
+    "drizzle-kit": "^0.31.10"
+  }
+}

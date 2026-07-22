@@ -5,10 +5,15 @@ packages:
 
 allowBuilds:
   '@scarf/scarf': false
+  cpu-features: false
   esbuild: true
+  msgpackr-extract: false
   msw: false
+  protobufjs: false
   simple-git-hooks: false
+  ssh2: false
 
 minimumReleaseAgeExclude:
   - react-dom@19.2.8
   - react@19.2.8
+  - bullmq@5.80.10

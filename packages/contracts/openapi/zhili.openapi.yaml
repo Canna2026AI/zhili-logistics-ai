@@ -71,6 +71,41 @@ tags:
   - name: Operations
     description: Health, recovery and migration control operations.
 paths:
+  /health/live:
+    get:
+      tags: [Operations]
+      operationId: getServiceLiveness
+      summary: Confirm that the API process can serve requests
+      security: []
+      x-feature-id: OPS-HEALTH-LIVE
+      responses:
+        '200':
+          description: API process is live; dependency state is intentionally not consulted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HealthResponse'}
+        '429':
+          $ref: '#/components/responses/RateLimited'
+  /health/ready:
+    get:
+      tags: [Operations]
+      operationId: getServiceReadiness
+      summary: Report bounded PostgreSQL Redis and object-storage readiness probes
+      security: []
+      x-feature-id: OPS-HEALTH-READY
+      responses:
+        '200':
+          description: Every required dependency is ready.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HealthResponse'}
+        '429':
+          $ref: '#/components/responses/RateLimited'
+        '503':
+          description: At least one required dependency is unavailable or timed out.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/HealthResponse'}
   /auth/password/sessions:
     post:
       tags: [Auth]
@@ -4848,6 +4883,9 @@ components:
       properties:
         code: {$ref: '#/components/schemas/ErrorCode'}
         message: {type: string}
+        detail:
+          type: string
+          description: Problem Details compatible alias of message for API error filters.
         details:
           type: array
           items: {$ref: '#/components/schemas/ErrorDetail'}
@@ -4860,6 +4898,32 @@ components:
         requestId: {type: string}
         nextCursor: {type: [string, 'null']}
         asOf: {type: string, format: date-time}
+    HealthDependencyResult:
+      type: object
+      additionalProperties: false
+      required: [status, latencyMs]
+      properties:
+        status: {type: string, enum: [up, down]}
+        latencyMs: {type: integer, minimum: 0}
+        detail:
+          type: string
+          description: Safe dependency class or timeout summary without credentials.
+    ServiceHealth:
+      type: object
+      additionalProperties: false
+      required: [status, checks]
+      properties:
+        status: {type: string, enum: [ok, unavailable]}
+        checks:
+          type: object
+          additionalProperties: {$ref: '#/components/schemas/HealthDependencyResult'}
+    HealthResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/ServiceHealth'}
+        meta: {$ref: '#/components/schemas/Meta'}
     AllowedAction:
       type: object
       additionalProperties: false

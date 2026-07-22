@@ -43,6 +43,46 @@ pnpm build
 pnpm e2e
 ```
 
+## 本地后端 Compose
+
+后端 Compose 验收面向 macOS Docker Desktop（Linux 容器）并使用固定的 Node.js
+22.22、pnpm 11.5、PostgreSQL 17、Redis 8 和 MinIO 版本。首次运行前准备依赖缓存：
+
+```bash
+corepack enable
+corepack prepare pnpm@11.5.0 --activate
+pnpm fetch --frozen-lockfile
+pnpm install --offline --frozen-lockfile
+pnpm test:compose
+```
+
+`pnpm test:compose` 会从空命名卷启动完整栈两次，执行真实对象写读、租户 RLS、
+Outbox/BullMQ、容器加固、故障恢复和 SIGTERM 清理验证。第二轮在 Docker 构建网络为
+`none` 且禁止拉取镜像的条件下复用冻结缓存。验收脚本忽略外部
+`COMPOSE_PROJECT_NAME`，使用强随机项目名、项目专属应用镜像标签和 Docker 分配的临时
+回环端口，退出时只清理本次项目资源。
+
+复制 `infra/.env.example` 为未跟踪的 `infra/.env` 后，可手动操作：
+
+```bash
+docker compose --env-file infra/.env -f infra/compose.yaml build
+docker compose --env-file infra/.env -f infra/compose.yaml up -d --wait
+docker compose --env-file infra/.env -f infra/compose.yaml down --volumes --remove-orphans
+```
+
+所有开发端口只绑定回环地址：PostgreSQL `55432`、Redis `56379`、MinIO API
+`59000`、MinIO Console `59001`、API `53000`。服务健康地址为
+`http://127.0.0.1:53000/api/v1/health/live` 和
+`http://127.0.0.1:53000/api/v1/health/ready`；前者只表示进程存活，后者同时验证
+PostgreSQL、已认证 Redis 与 MinIO。
+
+示例环境文件中的凭据仅适用于一次性本地开发，绝不能用于生产、共享或提交真实
+`infra/.env`。API/Worker 数据库登录密码以单一 `*_PASSWORD_URL_ENCODED` 值提供，迁移器
+只从冻结的数据库 URL 接口解码并设置角色密码；Redis 的原始密码与 URL 编码值必须匹配。
+启动验收会使用包含保留字符的登录密码验证这些边界。API 与 Worker 使用相互独立的
+Redis ACL 用户及 MinIO 桶级用户，不会收到 Redis 默认用户或 MinIO root 凭据。
+`down --volumes` 会不可逆地删除这套本地栈的全部一次性数据库、队列和对象数据。
+
 ## 许可证
 
 项目以 [GNU Affero General Public License v3.0](LICENSE) 发布。生产发布阶段会进一步生成第三方许可证清单和 SBOM。

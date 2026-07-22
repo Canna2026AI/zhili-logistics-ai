@@ -4,6 +4,40 @@
  */
 
 export interface paths {
+  '/health/live': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Confirm that the API process can serve requests */
+    get: operations['getServiceLiveness'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/health/ready': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Report bounded PostgreSQL Redis and object-storage readiness probes */
+    get: operations['getServiceReadiness'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/auth/password/sessions': {
     parameters: {
       query?: never;
@@ -2952,6 +2986,8 @@ export interface components {
     ErrorEnvelope: {
       code: components['schemas']['ErrorCode'];
       message: string;
+      /** @description Problem Details compatible alias of message for API error filters. */
+      detail?: string;
       details: components['schemas']['ErrorDetail'][];
       remediation: string;
       requestId: string;
@@ -2961,6 +2997,24 @@ export interface components {
       nextCursor?: string | null;
       /** Format: date-time */
       asOf?: string;
+    };
+    HealthDependencyResult: {
+      /** @enum {string} */
+      status: 'up' | 'down';
+      latencyMs: number;
+      /** @description Safe dependency class or timeout summary without credentials. */
+      detail?: string;
+    };
+    ServiceHealth: {
+      /** @enum {string} */
+      status: 'ok' | 'unavailable';
+      checks: {
+        [key: string]: components['schemas']['HealthDependencyResult'];
+      };
+    };
+    HealthResponse: {
+      data: components['schemas']['ServiceHealth'];
+      meta: components['schemas']['Meta'];
     };
     AllowedAction: {
       action: string;
@@ -4570,6 +4624,57 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  getServiceLiveness: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description API process is live; dependency state is intentionally not consulted. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HealthResponse'];
+        };
+      };
+      429: components['responses']['RateLimited'];
+    };
+  };
+  getServiceReadiness: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Every required dependency is ready. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HealthResponse'];
+        };
+      };
+      429: components['responses']['RateLimited'];
+      /** @description At least one required dependency is unavailable or timed out. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['HealthResponse'];
+        };
+      };
+    };
+  };
   loginWithPassword: {
     parameters: {
       query?: never;
