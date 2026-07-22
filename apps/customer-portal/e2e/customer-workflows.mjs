@@ -71,6 +71,11 @@ try {
   await desktop.getByRole('button', { name: '立即支付' }).click();
   await desktop.getByRole('button', { name: '确认付款' }).click();
   await assertVisible(
+    desktop.getByRole('heading', { name: '支付订单已创建' }),
+    '支付订单未进入等待回执状态'
+  );
+  await desktop.getByRole('button', { name: '查询支付结果' }).click();
+  await assertVisible(
     desktop.getByRole('heading', { name: '付款成功，部分金额待分配' }),
     '付款后未呈现部分核销'
   );
@@ -115,6 +120,11 @@ try {
   await mobile.getByRole('button', { name: '打开账单详情' }).click();
   await mobile.getByRole('button', { name: '立即支付' }).click();
   await mobile.getByRole('button', { name: '确认付款' }).click();
+  await assertVisible(
+    mobile.getByRole('heading', { name: '支付订单已创建' }),
+    '移动端支付订单未进入等待回执状态'
+  );
+  await mobile.getByRole('button', { name: '查询支付结果' }).click();
   await assertVisible(
     mobile.getByRole('heading', { name: '付款成功，部分金额待分配' }),
     '移动端部分核销流程失败'

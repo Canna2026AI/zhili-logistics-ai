@@ -672,6 +672,7 @@ type CustomerPortalProps = {
   customerId?: string;
   companyName?: string;
   now?: () => number;
+  mockMode?: boolean;
 };
 
 function CustomerPortalApp({
@@ -679,6 +680,9 @@ function CustomerPortalApp({
   customerId = 'customer-xinyuan',
   companyName = '深圳鑫源贸易有限公司',
   now = Date.now,
+  mockMode = import.meta.env.MODE === 'test' ||
+    (typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('mock') === '1'),
 }: CustomerPortalProps) {
   const waybillsKey = storageKey(tenantId, customerId, 'waybills');
   const shortcutsKey = storageKey(tenantId, customerId, 'shortcuts');
@@ -869,6 +873,7 @@ function CustomerPortalApp({
   else if (page === '新建运单')
     content = (
       <ShipmentFlow
+        mockMode={mockMode}
         selectedQuote={selectedQuote}
         draftSaved={draftSaved}
         now={now}
@@ -931,7 +936,8 @@ function CustomerPortalApp({
         }}
       />
     );
-  else if (page === '轨迹查询') content = <TrackingFlow waybillNo={trackingNo} notify={setToast} />;
+  else if (page === '轨迹查询')
+    content = <TrackingFlow waybillNo={trackingNo} notify={setToast} mockMode={mockMode} />;
   else if (page === '账单与付款')
     content = (
       <BillingFlow
@@ -939,9 +945,10 @@ function CustomerPortalApp({
         paymentCreated={paymentCreated}
         notify={setToast}
         receiptKey={receiptKey}
+        mockMode={mockMode}
       />
     );
-  else if (page === '问题工单') content = <ExceptionFlow notify={setToast} />;
+  else if (page === '问题工单') content = <ExceptionFlow notify={setToast} mockMode={mockMode} />;
   else if (page === 'API')
     content = (
       <AccountFlow
@@ -1102,26 +1109,28 @@ function CustomerPortalApp({
               </div>
             ) : null}
           </form>
-          <label className="portal-scenario">
-            演示状态
-            <select
-              aria-label="演示状态"
-              value={scenario}
-              onChange={(event) => {
-                setScenario(event.target.value as Scenario);
-                setMobileNavigationOpen(false);
-                setSearchOpen(false);
-              }}
-            >
-              <option value="normal">正常</option>
-              <option value="loading">加载</option>
-              <option value="empty">空数据</option>
-              <option value="failed">失败</option>
-              <option value="forbidden">无权限</option>
-              <option value="stale">数据过期</option>
-              <option value="partial">部分成功</option>
-            </select>
-          </label>
+          {mockMode ? (
+            <label className="portal-scenario">
+              演示状态
+              <select
+                aria-label="演示状态"
+                value={scenario}
+                onChange={(event) => {
+                  setScenario(event.target.value as Scenario);
+                  setMobileNavigationOpen(false);
+                  setSearchOpen(false);
+                }}
+              >
+                <option value="normal">正常</option>
+                <option value="loading">加载</option>
+                <option value="empty">空数据</option>
+                <option value="failed">失败</option>
+                <option value="forbidden">无权限</option>
+                <option value="stale">数据过期</option>
+                <option value="partial">部分成功</option>
+              </select>
+            </label>
+          ) : null}
           <strong>{companyName}</strong>
         </header>
         <main>

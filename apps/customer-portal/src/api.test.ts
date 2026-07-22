@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { validatePreconditionFailed } from '../../../packages/contracts/test/precondition-schema.js';
-import { customerMockFetch } from './api';
+import { createCustomerCommandTransport, customerMockFetch } from './api';
 
 const contract = readFileSync(
   resolve(import.meta.dirname, '../../../packages/contracts/openapi/zhili.openapi.yaml'),
@@ -238,5 +238,40 @@ describe('customer mock OpenAPI conformance', () => {
       )
     );
     expect(response.status).toBe(422);
+  });
+});
+
+describe('customer app-local command transport', () => {
+  it('uses real same-origin HTTP outside explicit mock mode', async () => {
+    const productionFetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ resourceId: 'cmd-real', status: 'SUCCEEDED', version: 7 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+    );
+    const command = createCustomerCommandTransport('', 'production', productionFetch);
+
+    await expect(
+      command('/api/v1/portal/payment-vouchers', { fileName: 'proof.pdf' })
+    ).resolves.toEqual({ resourceId: 'cmd-real', status: 'SUCCEEDED', version: 7 });
+    expect(productionFetch).toHaveBeenCalledWith(
+      '/api/v1/portal/payment-vouchers',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        headers: expect.objectContaining({ 'content-type': 'application/json' }),
+      })
+    );
+  });
+
+  it('keeps the deterministic app-local mock behind mock=1 only', async () => {
+    const productionFetch = vi.fn();
+    const command = createCustomerCommandTransport('?mock=1', 'production', productionFetch);
+
+    await expect(
+      command('/api/v1/portal/preferences/shortcuts', { shortcuts: ['工作台'] })
+    ).resolves.toMatchObject({ status: 'SUCCEEDED' });
+    expect(productionFetch).not.toHaveBeenCalled();
   });
 });

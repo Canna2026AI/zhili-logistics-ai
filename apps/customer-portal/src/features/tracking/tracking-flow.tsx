@@ -56,21 +56,43 @@ const meta: Record<
 export function TrackingFlow({
   waybillNo,
   notify,
+  mockMode = false,
 }: {
   waybillNo: string;
   notify: (message: string) => void;
+  mockMode?: boolean;
 }) {
   const [step, setStep] = useState<TrackingStep>('stale');
   const [busy, setBusy] = useState(false);
+  const [issue, setIssue] = useState<{ id: string; issueNo: string; version: number } | null>(null);
   const current = meta[step];
   const submit = async () => {
     setBusy(true);
     try {
-      await customerPort.createTicket('轨迹停滞：请核实下一程装车时间');
+      const created = await customerPort.createTicket('轨迹停滞：请核实下一程装车时间');
+      setIssue({ id: created.id, issueNo: created.issueNo, version: created.version });
       setStep('created');
-      notify('工单 TKT-20260723-086 已创建。');
+      notify(`工单 ${created.issueNo} 已创建。`);
     } catch (error) {
       notify(error instanceof Error ? error.message : '工单创建失败。');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const close = async () => {
+    if (!issue) return;
+    setBusy(true);
+    try {
+      const resolved = await customerPort.resolveIssue(
+        issue.id,
+        issue.version,
+        '客户确认轨迹已恢复'
+      );
+      setIssue({ id: resolved.id, issueNo: resolved.issueNo, version: resolved.version });
+      setStep('closed');
+      notify(`工单 ${resolved.issueNo} 已关闭。`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '工单关闭失败。');
     } finally {
       setBusy(false);
     }
@@ -105,10 +127,14 @@ export function TrackingFlow({
           {step === 'created' ? <Button onClick={() => setStep('close')}>准备关闭</Button> : null}
           {step === 'close' ? (
             <>
-              <Button variant="secondary" onClick={() => setStep('forbidden')}>
-                模拟无权限
+              {mockMode ? (
+                <Button variant="secondary" onClick={() => setStep('forbidden')}>
+                  模拟无权限
+                </Button>
+              ) : null}
+              <Button disabled={busy} onClick={() => void close()}>
+                {busy ? '关闭中…' : '确认关闭'}
               </Button>
-              <Button onClick={() => setStep('closed')}>确认关闭</Button>
             </>
           ) : null}
           {step === 'forbidden' ? <Button onClick={() => setStep('close')}>返回工单</Button> : null}
@@ -135,7 +161,7 @@ export function TrackingFlow({
         </div>
       ) : step === 'created' || step === 'close' ? (
         <div className="customer-workflow__timeline">
-          <strong>TKT-20260723-086</strong>
+          <strong>{issue?.issueNo ?? 'TKT-20260723-086'}</strong>
           <p>
             <time>14:06</time> 工单创建成功
           </p>

@@ -53,9 +53,17 @@ const meta: Record<
   },
 };
 
-export function ExceptionFlow({ notify }: { notify: (message: string) => void }) {
+export function ExceptionFlow({
+  notify,
+  mockMode = false,
+}: {
+  notify: (message: string) => void;
+  mockMode?: boolean;
+}) {
   const [step, setStep] = useState<ExceptionStep>('list');
   const [file, setFile] = useState<File | null>(null);
+  const [contact, setContact] = useState('李楠 139****8712');
+  const [note, setNote] = useState('东门货运通道 B3');
   const [retryComplete, setRetryComplete] = useState(false);
   const [busy, setBusy] = useState(false);
   const current = meta[step];
@@ -64,9 +72,19 @@ export function ExceptionFlow({ notify }: { notify: (message: string) => void })
     if (!file) return;
     setBusy(true);
     try {
-      await customerPort.createTicket('补充异常资料：东门货运通道 B3');
-      setStep('partial');
-      notify('异常资料已保存；短信通知失败，工单不回滚。');
+      const result = await customerPort.submitIssueEvidence('01JISSUE00000000000000001', {
+        fileName: file.name,
+        fileType: file.type || 'application/octet-stream',
+        fileSize: file.size,
+        contact,
+        note,
+      });
+      setStep(result.status === 'PARTIAL' ? 'partial' : 'resolved');
+      notify(
+        result.status === 'PARTIAL'
+          ? '异常资料已保存；短信通知失败，工单不回滚。'
+          : '异常资料与通知已全部提交。'
+      );
     } catch (error) {
       notify(error instanceof Error ? error.message : '资料提交失败。');
       setStep('failed');
@@ -109,9 +127,11 @@ export function ExceptionFlow({ notify }: { notify: (message: string) => void })
           {step === 'detail' ? <Button onClick={() => setStep('upload')}>补充资料</Button> : null}
           {step === 'upload' ? (
             <>
-              <Button variant="secondary" onClick={() => setStep('failed')}>
-                模拟上传失败
-              </Button>
+              {mockMode ? (
+                <Button variant="secondary" onClick={() => setStep('failed')}>
+                  模拟上传失败
+                </Button>
+              ) : null}
               <Button disabled={!file || busy} onClick={() => void submitEvidence()}>
                 {busy ? '提交中…' : '提交资料'}
               </Button>
@@ -130,6 +150,7 @@ export function ExceptionFlow({ notify }: { notify: (message: string) => void })
                       setRetryComplete(true);
                       notify('仅重试失败通知：客户短信已送达。');
                     })
+                    .catch((error: Error) => notify(error.message))
                     .finally(() => setBusy(false));
                 }}
               >
@@ -211,11 +232,11 @@ export function ExceptionFlow({ notify }: { notify: (message: string) => void })
           </label>
           <label>
             现场联系人
-            <input defaultValue="李楠 139****8712" />
+            <input value={contact} onChange={(event) => setContact(event.target.value)} />
           </label>
           <label>
             位置说明
-            <textarea defaultValue="东门货运通道 B3" />
+            <textarea value={note} onChange={(event) => setNote(event.target.value)} />
           </label>
           {file ? <p>待提交：{file.name}</p> : null}
         </div>

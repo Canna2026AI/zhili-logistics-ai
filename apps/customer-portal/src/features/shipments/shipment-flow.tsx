@@ -12,6 +12,7 @@ type ShipmentFlowProps = {
   onDraft: (input: Partial<OrderInput>) => Promise<void>;
   onSubmitted: (input: OrderInput) => Promise<void>;
   onDraftSaved: () => void;
+  mockMode?: boolean;
 };
 
 const defaultInput: OrderInput = {
@@ -33,6 +34,7 @@ export function ShipmentFlow({
   onDraft,
   onSubmitted,
   onDraftSaved,
+  mockMode = false,
 }: ShipmentFlowProps) {
   const [step, setStep] = useState<ShipmentStep>('details');
   const [input, setInput] = useState<OrderInput>(() => ({
@@ -205,9 +207,11 @@ export function ShipmentFlow({
         <>
           {step === 'details' ? (
             <>
-              <Button variant="secondary" onClick={() => setStep('forbidden')}>
-                模拟无权限
-              </Button>
+              {mockMode ? (
+                <Button variant="secondary" onClick={() => setStep('forbidden')}>
+                  模拟无权限
+                </Button>
+              ) : null}
               <Button
                 variant="secondary"
                 onClick={() => {
@@ -232,12 +236,16 @@ export function ShipmentFlow({
             </>
           ) : step === 'quote' ? (
             <>
-              <Button variant="secondary" onClick={() => setStep('stale')}>
-                模拟报价过期
-              </Button>
-              <Button variant="secondary" onClick={() => setStep('failed')}>
-                模拟提交失败
-              </Button>
+              {mockMode ? (
+                <>
+                  <Button variant="secondary" onClick={() => setStep('stale')}>
+                    模拟报价过期
+                  </Button>
+                  <Button variant="secondary" onClick={() => setStep('failed')}>
+                    模拟提交失败
+                  </Button>
+                </>
+              ) : null}
               <Button disabled={busy} onClick={() => void complete()}>
                 {busy ? '提交中…' : '提交运单'}
               </Button>

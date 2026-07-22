@@ -3,13 +3,15 @@ import { Button, StatusTag } from '@zhili/ui';
 import { customerPort } from '../../api';
 import { SummaryItem, SummaryList, WorkflowShell, type WorkflowTone } from '../workflow-shell';
 
-type BillingStep = 'list' | 'detail' | 'pay' | 'partial' | 'conflict' | 'success' | 'failed';
+type BillingStep =
+  'list' | 'detail' | 'pay' | 'pending' | 'partial' | 'conflict' | 'success' | 'failed';
 
 type BillingFlowProps = {
   requestLegacyPayment: () => void;
   paymentCreated: boolean;
   notify: (message: string) => void;
   receiptKey: string;
+  mockMode?: boolean;
 };
 
 const meta: Record<
@@ -36,6 +38,13 @@ const meta: Record<
     active: 1,
     tone: 'info',
     status: '正常 · 支付风控校验通过',
+  },
+  pending: {
+    title: '支付订单已创建',
+    description: '微信支付结果以服务端权威状态为准，当前尚未入账。',
+    active: 1,
+    tone: 'info',
+    status: 'PENDING · 等待微信支付结果',
   },
   partial: {
     title: '付款成功，部分金额待分配',
@@ -72,22 +81,74 @@ export function BillingFlow({
   paymentCreated,
   notify,
   receiptKey,
+  mockMode = false,
 }: BillingFlowProps) {
   const [step, setStep] = useState<BillingStep>('list');
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<File | null>(null);
   const [receiptName, setReceiptName] = useState(() => localStorage.getItem(receiptKey) ?? '');
+  const [paymentOrder, setPaymentOrder] = useState<{
+    id: string;
+    paymentOrderNo: string;
+    status: string;
+    version: number;
+  } | null>(null);
   const current = meta[step];
 
   const pay = async () => {
     setBusy(true);
     try {
-      await customerPort.createPayment();
-      setStep('partial');
-      notify('付款成功：已自动核销 116 个运单。');
+      const created = await customerPort.createPayment({
+        statementId: '01JSTATEMENT00000000000001',
+        statementVersion: 1,
+        amount: '68420.00',
+      });
+      setPaymentOrder(created);
+      setStep('pending');
+      notify(`支付订单已创建：${created.paymentOrderNo}，等待微信支付结果。`);
     } catch (error) {
       notify(error instanceof Error ? error.message : '付款失败。');
       setStep('failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const refreshPayment = async () => {
+    if (!paymentOrder) return;
+    setBusy(true);
+    try {
+      const current = await customerPort.getPaymentOrder(paymentOrder.id);
+      setPaymentOrder(current);
+      if (current.status === 'SUCCEEDED') {
+        setStep('partial');
+        notify('支付已由服务端确认：已自动核销 116 个运单。');
+      } else if (current.status === 'FAILED' || current.status === 'CLOSED') {
+        setStep('failed');
+        notify(`支付订单状态：${current.status}。`);
+      } else {
+        notify(`支付仍在处理中：${current.status}。`);
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '支付状态查询失败。');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const allocateRemaining = async () => {
+    setBusy(true);
+    try {
+      await customerPort.allocateReceipt(
+        '01JRECEIPT0000000000000001',
+        1,
+        '01JSTATEMENT00000000000001',
+        '600.00'
+      );
+      setStep('success');
+      notify('剩余金额已按服务端权威回执完成核销。');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '核销失败。';
+      notify(message);
+      if (/409|冲突|版本|STALE/i.test(message)) setStep('conflict');
     } finally {
       setBusy(false);
     }
@@ -143,20 +204,31 @@ export function BillingFlow({
           {step === 'detail' ? <Button onClick={() => setStep('pay')}>立即支付</Button> : null}
           {step === 'pay' ? (
             <>
-              <Button variant="secondary" onClick={() => setStep('failed')}>
-                模拟支付失败
-              </Button>
+              {mockMode ? (
+                <Button variant="secondary" onClick={() => setStep('failed')}>
+                  模拟支付失败
+                </Button>
+              ) : null}
               <Button disabled={busy} onClick={() => void pay()}>
                 {busy ? '付款中…' : '确认付款'}
               </Button>
             </>
           ) : null}
+          {step === 'pending' ? (
+            <Button disabled={busy} onClick={() => void refreshPayment()}>
+              {busy ? '查询中…' : '查询支付结果'}
+            </Button>
+          ) : null}
           {step === 'partial' ? (
             <>
-              <Button variant="secondary" onClick={() => setStep('conflict')}>
-                模拟并发更新
+              {mockMode ? (
+                <Button variant="secondary" onClick={() => setStep('conflict')}>
+                  模拟并发更新
+                </Button>
+              ) : null}
+              <Button disabled={busy} onClick={() => void allocateRemaining()}>
+                {busy ? '核销中…' : '分配剩余金额'}
               </Button>
-              <Button onClick={() => setStep('success')}>分配剩余金额</Button>
             </>
           ) : null}
           {step === 'conflict' ? (
@@ -309,6 +381,12 @@ export function BillingFlow({
             <strong>收款主体 · 智立科技物流有限公司</strong>
             <span>手续费 ¥0.00</span>
           </div>
+        </div>
+      ) : step === 'pending' ? (
+        <div className="customer-workflow__result">
+          <strong>{paymentOrder?.paymentOrderNo ?? '支付订单'}</strong>
+          <p>{current.status}</p>
+          <p>创建支付订单不会改变账单或余额，只有 SUCCEEDED 回执才会入账。</p>
         </div>
       ) : step === 'conflict' ? (
         <div className="customer-workflow__choice-list">
