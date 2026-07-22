@@ -42,6 +42,7 @@ export function collectControllerOperations(
 
   for (const controller of controllers) {
     const controllerPath = singlePathMetadata(controller, 'controller');
+    assertInternalRuntimePath(controllerPath, `controller ${controller.name}`);
     const prototype = controller.prototype as object;
     for (const methodName of scanner.getAllMethodNames(prototype)) {
       const handler = (prototype as Record<string, unknown>)[methodName];
@@ -53,6 +54,7 @@ export function collectControllerOperations(
       const method = REQUEST_METHOD_NAMES[requestMethod];
       if (!method) throw new Error(`Unsupported Nest request method metadata: ${requestMethod}`);
       const methodPath = singlePathMetadata(handler, `route ${controller.name}.${methodName}`);
+      assertInternalRuntimePath(methodPath, `route ${controller.name}.${methodName}`);
       const contractMetadata = Reflect.getMetadata(CONTRACT_OPERATION_METADATA_KEY, handler) as
         string | readonly ContractOperationMapping[] | undefined;
       const methodPolicy = Reflect.getMetadata(IDEMPOTENT_COMMAND_METADATA_KEY, handler) as
@@ -142,6 +144,19 @@ const REQUEST_METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
   [RequestMethod.HEAD]: 'HEAD',
 };
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function assertInternalRuntimePath(path: string, label: string): void {
+  for (const segment of path.split('/')) {
+    const firstColon = segment.indexOf(':');
+    if (firstColon === -1) continue;
+    const onlyNestParameter = firstColon === 0 && segment.indexOf(':', 1) === -1;
+    if (!onlyNestParameter) {
+      throw new Error(
+        `${label} registers a raw colon-action path; use internalActionPath() and declare the external contractPath`
+      );
+    }
+  }
+}
 
 function operationMappings(
   metadata: string | readonly ContractOperationMapping[] | undefined,

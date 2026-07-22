@@ -7,10 +7,12 @@ import { Test } from '@nestjs/testing';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { IdempotentCommand, SkipIdempotency } from '../src/platform/idempotency';
+import { internalActionPath } from '../src/platform/action-route';
 import {
   ContractOperation,
   assertOpenApiCoverage,
   collectApplicationOperations,
+  collectControllerOperations,
 } from '../src/platform/contract-operation';
 import { API_HEALTH_PROBES, API_READINESS_TIMEOUT_MS } from '../src/health.controller';
 import { API_ENV, AppModule, registerFeatureModule } from '../src/app.module';
@@ -37,8 +39,8 @@ class CoveredFeatureController {
   @SkipIdempotency()
   loginWithPassword(): void {}
 
-  @Post('auth/sessions:refresh')
-  @ContractOperation('refreshSession')
+  @Post(internalActionPath('auth/sessions', 'refresh'))
+  @ContractOperation('refreshSession', 'auth/sessions:refresh')
   @SkipIdempotency()
   refreshSession(): void {}
 }
@@ -172,6 +174,20 @@ describe('OpenAPI controller coverage guard', () => {
     );
     expect(() => assertOpenApiCoverage(document, wrongOperationOperations)).toThrow(
       'getServiceReadiness'
+    );
+  });
+
+  it('rejects raw colon-action runtime paths before Fastify registration', () => {
+    @Controller()
+    class UnsafeActionController {
+      @Post('auth/sessions:refresh')
+      @ContractOperation('refreshSession')
+      @SkipIdempotency()
+      refresh(): void {}
+    }
+
+    expect(() => collectControllerOperations([UnsafeActionController], API_GLOBAL_PREFIX)).toThrow(
+      'use internalActionPath()'
     );
   });
 
