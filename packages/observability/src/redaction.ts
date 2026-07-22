@@ -16,6 +16,7 @@ const SENSITIVE_KEY_NAMES = new Set([
 
 const ADDRESS_KEY_PATTERN = /(?:address|addr|street|location|地址)/i;
 const CHINESE_MOBILE_PATTERN = /(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)/g;
+const COOKIE_HEADER_PATTERN = /\b(cookie)\b\s*([:=])[^\r\n]*/gi;
 const SENSITIVE_MESSAGE_PATTERN =
   /\b(authorization|cookie|password|secret|token|api[ _-]?key|access[ _-]?key|session[ _-]?key|envelope[ _-]?master[ _-]?key)\b\s*([:=])(\s*)(?:Bearer\s+)?[^\s,;]+/gi;
 const ADDRESS_MESSAGE_PATTERN = /\b(address|addr|street|location)\b\s*([:=])\s*[^,;\n]+|地址\s*([:=])\s*[^,;\n]+/gi;
@@ -72,6 +73,7 @@ function redactValue(value: unknown, key: string | undefined, seen: WeakMap<obje
 
 function redactMessage(value: string): string {
   return value
+    .replace(COOKIE_HEADER_PATTERN, '$1$2 [REDACTED]')
     .replace(SENSITIVE_MESSAGE_PATTERN, '$1$2$3[REDACTED]')
     .replace(ADDRESS_MESSAGE_PATTERN, (match, latinKey, latinSeparator, chineseSeparator) => {
       if (latinKey) {

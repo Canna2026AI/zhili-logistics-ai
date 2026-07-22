@@ -97,4 +97,11 @@ describe('redact', () => {
 
     expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ msg: expectedMessage });
   });
+
+  it.each([
+    ['Cookie: session=secret; csrf=secret2', 'Cookie: [REDACTED]'],
+    ['Set-Cookie: session=secret; HttpOnly; Secure', 'Set-Cookie: [REDACTED]'],
+  ])('redacts every value in multi-part cookie header %s', (header, expectedHeader) => {
+    expect(redact(header)).toBe(expectedHeader);
+  });
 });
