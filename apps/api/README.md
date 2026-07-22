@@ -63,6 +63,18 @@ const app = await createApiApplication(rootModule);
 
 每个已实现 handler 必须用 `@ContractOperation('<operationId>')` 声明 OpenAPI operationId。CI 守卫从 Nest `DiscoveryService` 读取已编译 controller 元数据，合并 `/api/v1` + controller path + method path，并同时校验 method、path 和 operationId。
 
+OpenAPI 中的 `资源ID:动作` 路径不能直接作为 Fastify 动态路由注册，否则同一前缀的动作会被判定为重复路由。每个动作仍保持独立 handler，并通过内部动作路径和外部契约路径分别声明：
+
+```ts
+@Post(internalActionPath(':orderId', 'submit'))
+@ContractOperation('submitOrder', ':orderId:submit')
+@RequirePermissions('order.submit')
+@IdempotentCommand()
+submitOrder() {}
+```
+
+Fastify 的 `rewriteUrl` 只把外部 `:动作` 改写到保留命名空间；客户端直接请求内部 `__zhili_action__` 路径固定得到 `404`。不要把不同权限或不同审计事件的动作合并到一个 dispatcher。
+
 所有 `POST`/`PUT`/`PATCH`/`DELETE` handler 还必须显式三态分类：
 
 - `@IdempotentCommand()` 必须对应 OpenAPI 声明 `Idempotency-Key` 的 operation。
