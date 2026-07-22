@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
 import { customerPort, type OrderInput, type QuoteResult, type VersionDifference } from './api';
 
@@ -43,7 +43,7 @@ const navigationContext: Record<Page, string> = {
 
 type SearchResult = {
   id: string;
-  type: '页面' | '运单' | '报价' | '工单' | '账单' | '付款' | '地址';
+  type: '页面' | '运单' | '工单' | '账单' | '付款' | '地址';
   label: string;
   context: string;
   page: Page;
@@ -1133,6 +1133,7 @@ function CustomerPortalApp({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeSearchResult, setActiveSearchResult] = useState(0);
+  const searchFormRef = useRef<HTMLFormElement>(null);
   const [rows, setRows] = useState<WaybillRow[]>(() => readRows(waybillsKey));
   const [paymentCreated, setPaymentCreated] = useState(
     () => localStorage.getItem(paymentKey) === 'created'
@@ -1142,6 +1143,15 @@ function CustomerPortalApp({
   useEffect(() => {
     if (paymentCreated) localStorage.setItem(paymentKey, 'created');
   }, [paymentCreated, paymentKey]);
+  useEffect(() => {
+    if (!searchOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (searchFormRef.current?.contains(event.target as Node)) return;
+      setSearchOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+  }, [searchOpen]);
   const navigate = (next: Page) => {
     setPage(next);
     setScenario('normal');
@@ -1166,13 +1176,6 @@ function CustomerPortalApp({
       page: '轨迹查询',
       waybillNo: row[0],
     })),
-    {
-      id: 'quote-Q2505120042',
-      type: '报价',
-      label: 'Q2505120042',
-      context: '智立海运专线 · CNY 5,320.00 · RATE-DHL-CN-US-2026.05-v3',
-      page: '查价',
-    },
     {
       id: 'issue-T250512001',
       type: '工单',
@@ -1399,6 +1402,7 @@ function CustomerPortalApp({
             ☰
           </button>
           <form
+            ref={searchFormRef}
             className="portal-global-search"
             role="search"
             onSubmit={(event) => {
@@ -1437,57 +1441,57 @@ function CustomerPortalApp({
                   setSearchOpen(false);
                   return;
                 }
+                if (event.key === 'Tab') {
+                  setSearchOpen(false);
+                  return;
+                }
                 if (!searchResults.length) return;
                 if (event.key === 'ArrowDown') {
                   event.preventDefault();
                   setSearchOpen(true);
-                  setActiveSearchResult((current) => (current + 1) % searchResults.length);
+                  setActiveSearchResult((current) =>
+                    Math.min(current + 1, searchResults.length - 1)
+                  );
                 } else if (event.key === 'ArrowUp') {
                   event.preventDefault();
                   setSearchOpen(true);
-                  setActiveSearchResult(
-                    (current) => (current - 1 + searchResults.length) % searchResults.length
-                  );
+                  setActiveSearchResult((current) => Math.max(current - 1, 0));
                 }
               }}
             />
             {searchOpen && normalizedSearchQuery ? (
               <div className="portal-search-surface">
-                {searchResults.length ? (
-                  <div
-                    id="customer-global-search-results"
-                    className="portal-search-results"
-                    role="listbox"
-                    aria-label="全局搜索结果"
-                  >
-                    {searchResults.map((result, index) => (
-                      <button
-                        key={result.id}
-                        id={`customer-search-result-${result.id}`}
-                        type="button"
-                        role="option"
-                        aria-selected={index === activeSearchResult}
-                        onMouseEnter={() => setActiveSearchResult(index)}
-                        onClick={() => selectSearchResult(result)}
-                      >
-                        <strong>
-                          {result.type} {result.label}
-                        </strong>
-                        <span>{result.context}</span>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p
-                    id="customer-global-search-results"
-                    className="portal-search-empty"
-                    role="status"
-                    aria-label="全局搜索状态"
-                  >
+                <div
+                  id="customer-global-search-results"
+                  className="portal-search-results"
+                  role="listbox"
+                  aria-label="全局搜索结果"
+                >
+                  {searchResults.map((result, index) => (
+                    <button
+                      key={result.id}
+                      id={`customer-search-result-${result.id}`}
+                      type="button"
+                      role="option"
+                      tabIndex={-1}
+                      aria-selected={index === activeSearchResult}
+                      onMouseEnter={() => setActiveSearchResult(index)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectSearchResult(result)}
+                    >
+                      <strong>
+                        {result.type} {result.label}
+                      </strong>
+                      <span>{result.context}</span>
+                    </button>
+                  ))}
+                </div>
+                {searchResults.length === 0 ? (
+                  <p className="portal-search-empty" role="status" aria-label="全局搜索状态">
                     未找到匹配结果
                     <span>请检查运单号、业务编号或页面名称。</span>
                   </p>
-                )}
+                ) : null}
               </div>
             ) : null}
           </form>

@@ -148,22 +148,67 @@ test('客户门户全局搜索在移动端打开 canonical 运单并通过 axe',
   await results.getByRole('option', { name: /运单 S2505120004/ }).click();
   await expect(page.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
   await expect(page.getByText('S2505120004')).toBeVisible();
+  await expect(search).toBeFocused();
 });
 
 test('客户门户全局搜索支持键盘选择和零结果关闭', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/');
   const search = page.getByRole('combobox', { name: '全局搜索' });
   await search.fill('S250512000');
+  const results = page.getByRole('listbox', { name: '全局搜索结果' });
+  const options = results.getByRole('option');
+  await expect(options).toHaveCount(5);
+  expect(await options.evaluateAll((items) => items.every((item) => item.tabIndex === -1))).toBe(
+    true
+  );
+  const firstOptionId = await options.nth(0).getAttribute('id');
+  const secondOptionId = await options.nth(1).getAttribute('id');
+  await expect(search).toBeFocused();
+  await expect(search).toHaveAttribute('aria-activedescendant', firstOptionId!);
+  await search.press('ArrowDown');
+  await expect(search).toBeFocused();
+  await expect(search).toHaveAttribute('aria-activedescendant', secondOptionId!);
+  await search.press('ArrowUp');
+  await search.press('ArrowUp');
+  await expect(search).toHaveAttribute('aria-activedescendant', firstOptionId!);
+
+  await search.press('Tab');
+  await expect(results).toBeHidden();
+  await expect(search).not.toHaveAttribute('aria-activedescendant');
+  await expect(page.locator(':focus')).not.toHaveAttribute('role', 'option');
+
+  await search.focus();
+  await expect(results).toBeVisible();
+  await search.press('Shift+Tab');
+  await expect(results).toBeHidden();
+  await expect(page.getByRole('button', { name: '折叠菜单' })).toBeFocused();
+
+  await search.focus();
   await search.press('ArrowDown');
   await search.press('Enter');
   await expect(page.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
   await expect(page.getByText('S2505120002')).toBeVisible();
+  await expect(search).toBeFocused();
+
+  await search.fill('Q2505120042');
+  await expect(page.getByRole('listbox', { name: '全局搜索结果' }).getByRole('option')).toHaveCount(
+    0
+  );
+  await expect(page.getByRole('status', { name: '全局搜索状态' })).toContainText('未找到匹配结果');
 
   await search.fill('NOT-A-CUSTOMER-RECORD');
   await expect(page.getByRole('status', { name: '全局搜索状态' })).toContainText('未找到匹配结果');
+  await expect(page.getByRole('listbox', { name: '全局搜索结果' })).toBeAttached();
+  await expect(search).toHaveAttribute('aria-controls', 'customer-global-search-results');
   await expect(search).toHaveAttribute('aria-expanded', 'true');
   await search.press('Escape');
   await expect(page.getByRole('status', { name: '全局搜索状态' })).toBeHidden();
   await expect(search).toHaveAttribute('aria-expanded', 'false');
   await expect(search).toHaveValue('NOT-A-CUSTOMER-RECORD');
+  await expect(search).toBeFocused();
+
+  await search.fill('S2505120004');
+  await page.mouse.click(200, 600);
+  await expect(page.getByRole('listbox', { name: '全局搜索结果' })).toBeHidden();
 });
