@@ -87,9 +87,9 @@ export const warehouseReceipts = pgTable(
     waybillId: text('waybill_id').notNull(),
     scanId: text('scan_id').notNull(),
     activeMeasurementId: text('active_measurement_id'),
-    status: text().default('RECEIVED').notNull(),
+    status: text().default('SCANNED').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     undoUntil: timestamp('undo_until', { withTimezone: true, mode: 'string' }).notNull(),
     undoneAt: timestamp('undone_at', { withTimezone: true, mode: 'string' }),
     undoReason: text('undo_reason'),
@@ -142,13 +142,13 @@ export const warehouseReceipts = pgTable(
     }),
     check(
       'warehouse_receipts_status_check',
-      sql`status = ANY (ARRAY['RECEIVED'::text, 'UNDONE'::text])`
+      sql`status = ANY (ARRAY['SCANNED'::text, 'CONFIRMED'::text, 'UNDONE'::text])`
     ),
-    check('warehouse_receipts_version_check', sql`version >= 0`),
+    check('warehouse_receipts_version_check', sql`version >= 1`),
     check('warehouse_receipts_undo_window_check', sql`undo_until >= received_at`),
     check(
       'warehouse_receipts_undo_shape_check',
-      sql`((status = 'RECEIVED'::text) AND (undone_at IS NULL) AND (undo_reason IS NULL)) OR ((status = 'UNDONE'::text) AND (undone_at IS NOT NULL) AND (length(btrim(undo_reason)) > 0))`
+      sql`((status = ANY (ARRAY['SCANNED'::text, 'CONFIRMED'::text])) AND (undone_at IS NULL) AND (undo_reason IS NULL)) OR ((status = 'UNDONE'::text) AND (undone_at IS NOT NULL) AND (length(btrim(undo_reason)) > 0))`
     ),
   ]
 ).enableRLS();
@@ -295,7 +295,7 @@ export const inventoryBalances = pgTable(
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     quantityBase: bigint('quantity_base', { mode: 'number' }).default(0).notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -347,7 +347,7 @@ export const inventoryBalances = pgTable(
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
     check('inventory_balances_quantity_check', sql`quantity_base >= 0`),
-    check('inventory_balances_version_check', sql`version >= 0`),
+    check('inventory_balances_version_check', sql`version >= 1`),
     check(
       'inventory_balances_state_check',
       sql`stock_state = ANY (ARRAY['RECEIVED'::text, 'SORTED'::text, 'STAGED'::text, 'LOADED'::text, 'EXCEPTION'::text])`
@@ -486,9 +486,9 @@ export const loadUnits = pgTable(
     loadUnitNo: text('load_unit_no').notNull(),
     originWarehouseId: text('origin_warehouse_id').notNull(),
     destinationWarehouseId: text('destination_warehouse_id').notNull(),
-    status: text().default('DRAFT').notNull(),
+    status: text().default('OPEN').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     sealedAt: timestamp('sealed_at', { withTimezone: true, mode: 'string' }),
     dispatchedAt: timestamp('dispatched_at', { withTimezone: true, mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
@@ -529,14 +529,14 @@ export const loadUnits = pgTable(
       using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
-    check('load_units_version_check', sql`version >= 0`),
+    check('load_units_version_check', sql`version >= 1`),
     check(
       'load_units_status_check',
-      sql`status = ANY (ARRAY['DRAFT'::text, 'SEALED'::text, 'DISPATCHED'::text])`
+      sql`status = ANY (ARRAY['OPEN'::text, 'SEALED'::text, 'DISPATCHED'::text])`
     ),
     check(
       'load_units_state_shape_check',
-      sql`((status = 'DRAFT'::text) AND (sealed_at IS NULL) AND (dispatched_at IS NULL)) OR ((status = 'SEALED'::text) AND (sealed_at IS NOT NULL) AND (dispatched_at IS NULL)) OR ((status = 'DISPATCHED'::text) AND (sealed_at IS NOT NULL) AND (dispatched_at IS NOT NULL))`
+      sql`((status = 'OPEN'::text) AND (sealed_at IS NULL) AND (dispatched_at IS NULL)) OR ((status = 'SEALED'::text) AND (sealed_at IS NOT NULL) AND (dispatched_at IS NULL)) OR ((status = 'DISPATCHED'::text) AND (sealed_at IS NOT NULL) AND (dispatched_at IS NOT NULL))`
     ),
     check(
       'load_units_distinct_warehouses_check',
@@ -616,7 +616,7 @@ export const linehaulBookings = pgTable(
     carrierCode: text('carrier_code').notNull(),
     status: text().default('DRAFT').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     departureAt: timestamp('departure_at', { withTimezone: true, mode: 'string' }),
     arrivalAt: timestamp('arrival_at', { withTimezone: true, mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
@@ -652,10 +652,10 @@ export const linehaulBookings = pgTable(
       using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
-    check('linehaul_bookings_version_check', sql`version >= 0`),
+    check('linehaul_bookings_version_check', sql`version >= 1`),
     check(
       'linehaul_bookings_status_check',
-      sql`status = ANY (ARRAY['DRAFT'::text, 'CONFIRMED'::text, 'DEPARTED'::text, 'ARRIVED'::text, 'CANCELLED'::text])`
+      sql`status = ANY (ARRAY['DRAFT'::text, 'CONFIRMED'::text, 'DEPARTED'::text, 'CLOSED'::text, 'CANCELLED'::text])`
     ),
     check(
       'linehaul_bookings_schedule_check',
@@ -674,7 +674,7 @@ export const billsOfLading = pgTable(
     documentMediaId: text('document_media_id'),
     status: text().default('DRAFT').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     issuedAt: timestamp('issued_at', { withTimezone: true, mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
@@ -714,7 +714,7 @@ export const billsOfLading = pgTable(
       using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
-    check('bills_of_lading_version_check', sql`version >= 0`),
+    check('bills_of_lading_version_check', sql`version >= 1`),
     check(
       'bills_of_lading_status_check',
       sql`status = ANY (ARRAY['DRAFT'::text, 'ISSUED'::text, 'VOID'::text])`
@@ -733,7 +733,7 @@ export const fbaDeliveries = pgTable(
     appointmentReference: text('appointment_reference'),
     status: text().default('PLANNED').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     appointmentAt: timestamp('appointment_at', { withTimezone: true, mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
@@ -774,7 +774,7 @@ export const fbaDeliveries = pgTable(
       using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
-    check('fba_deliveries_version_check', sql`version >= 0`),
+    check('fba_deliveries_version_check', sql`version >= 1`),
     check(
       'fba_deliveries_status_check',
       sql`status = ANY (ARRAY['PLANNED'::text, 'APPOINTED'::text, 'IN_TRANSIT'::text, 'DELIVERED'::text, 'EXCEPTION'::text, 'CANCELLED'::text])`
@@ -794,9 +794,9 @@ export const deliveryTasks = pgTable(
     destinationAddressId: text('destination_address_id').notNull(),
     assignedDeviceId: text('assigned_device_id'),
     partnerCode: text('partner_code'),
-    status: text().default('PENDING').notNull(),
+    status: text().default('PLANNED').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     plannedAt: timestamp('planned_at', { withTimezone: true, mode: 'string' }),
     completedAt: timestamp('completed_at', { withTimezone: true, mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
@@ -858,14 +858,14 @@ export const deliveryTasks = pgTable(
       using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
-    check('delivery_tasks_version_check', sql`version >= 0`),
+    check('delivery_tasks_version_check', sql`version >= 1`),
     check(
       'delivery_tasks_status_check',
-      sql`status = ANY (ARRAY['PENDING'::text, 'ASSIGNED'::text, 'ACCEPTED'::text, 'IN_TRANSIT'::text, 'DELIVERED'::text, 'FAILED'::text, 'CANCELLED'::text])`
+      sql`status = ANY (ARRAY['PLANNED'::text, 'PALLETIZED'::text, 'LOADED'::text, 'OUT_FOR_DELIVERY'::text, 'COMPLETED'::text, 'EXCEPTION'::text])`
     ),
     check(
       'delivery_tasks_completion_check',
-      sql`((status = 'DELIVERED'::text) AND (completed_at IS NOT NULL)) OR (status <> 'DELIVERED'::text)`
+      sql`((status = 'COMPLETED'::text) AND (completed_at IS NOT NULL)) OR (status <> 'COMPLETED'::text)`
     ),
   ]
 ).enableRLS();
@@ -1359,7 +1359,7 @@ export const deviceSyncConflicts = pgTable(
     ),
     check(
       'device_sync_conflicts_resolution_check',
-      sql`(resolution IS NULL) OR (resolution = ANY (ARRAY['SERVER_WINS'::text, 'CLIENT_RETRY'::text, 'MANUAL_MERGE'::text]))`
+      sql`(resolution IS NULL) OR (resolution = ANY (ARRAY['KEEP_SERVER'::text, 'REAPPLY_LOCAL'::text, 'SUBMIT_MANUAL'::text]))`
     ),
   ]
 ).enableRLS();
@@ -1378,7 +1378,7 @@ export const printJobs = pgTable(
     dedupeKey: text('dedupe_key').notNull(),
     status: text().default('QUEUED').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     attempts: integer().default(0).notNull(),
     payload: jsonb().notNull(),
     printedAt: timestamp('printed_at', { withTimezone: true, mode: 'string' }),
@@ -1422,7 +1422,7 @@ export const printJobs = pgTable(
       using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
-    check('print_jobs_version_check', sql`version >= 0`),
+    check('print_jobs_version_check', sql`version >= 1`),
     check('print_jobs_attempts_check', sql`attempts >= 0`),
     check(
       'print_jobs_status_check',

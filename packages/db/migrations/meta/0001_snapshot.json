@@ -1,5 +1,5 @@
 {
-  "id": "4bddc208-fe77-4e63-8705-779c2dde7507",
+  "id": "351f4615-42a5-4a8d-b702-0915ab97b91c",
   "prevId": "5df13a32-ce8b-4416-b8e8-7c638de491d0",
   "version": "7",
   "dialect": "postgresql",
@@ -536,6 +536,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "bound_subject_user_id": {
+          "name": "bound_subject_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
         "status": {
           "name": "status",
           "type": "text",
@@ -643,6 +649,15 @@
           "tableFrom": "device_bindings",
           "tableTo": "users",
           "columnsFrom": ["tenant_id", "bound_by_user_id"],
+          "columnsTo": ["id", "tenant_id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        },
+        "device_bindings_bound_subject_fk": {
+          "name": "device_bindings_bound_subject_fk",
+          "tableFrom": "device_bindings",
+          "tableTo": "users",
+          "columnsFrom": ["tenant_id", "bound_subject_user_id"],
           "columnsTo": ["id", "tenant_id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
@@ -763,10 +778,10 @@
         },
         "priority": {
           "name": "priority",
-          "type": "integer",
+          "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": "'NORMAL'"
         },
         "task_payload": {
           "name": "task_payload",
@@ -799,7 +814,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -825,7 +840,7 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last",
-              "opclass": "int4_ops"
+              "opclass": "text_ops"
             },
             {
               "expression": "assigned_device_id",
@@ -839,14 +854,13 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last",
-              "opclass": "int4_ops"
+              "opclass": "text_ops"
             },
             {
-              "expression": "priority",
-              "isExpression": false,
-              "asc": false,
-              "nulls": "first",
-              "opclass": "int4_ops"
+              "expression": "(CASE priority WHEN 'URGENT' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'NORMAL' THEN 2 ELSE 1 END) DESC",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
             },
             {
               "expression": "available_at",
@@ -860,7 +874,7 @@
               "isExpression": false,
               "asc": true,
               "nulls": "last",
-              "opclass": "int4_ops"
+              "opclass": "text_ops"
             }
           ],
           "isUnique": false,
@@ -941,7 +955,7 @@
         },
         "device_tasks_type_check": {
           "name": "device_tasks_type_check",
-          "value": "task_type = ANY (ARRAY['RECEIVE'::text, 'PUTAWAY'::text, 'PICK'::text, 'LOAD'::text, 'DELIVER'::text, 'COUNT'::text])"
+          "value": "task_type = ANY (ARRAY['RECEIVE'::text, 'MOVE'::text, 'PICK'::text, 'LOAD'::text, 'DISPATCH'::text, 'LAST_MILE_DELIVERY'::text, 'STOCKTAKE'::text])"
         },
         "device_tasks_number_check": {
           "name": "device_tasks_number_check",
@@ -953,7 +967,7 @@
         },
         "device_tasks_priority_check": {
           "name": "device_tasks_priority_check",
-          "value": "(priority >= '-100'::integer) AND (priority <= 100)"
+          "value": "priority = ANY (ARRAY['LOW'::text, 'NORMAL'::text, 'HIGH'::text, 'URGENT'::text])"
         },
         "device_tasks_payload_check": {
           "name": "device_tasks_payload_check",
@@ -969,7 +983,7 @@
         },
         "device_tasks_version_check": {
           "name": "device_tasks_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "device_tasks_timestamps_check": {
           "name": "device_tasks_timestamps_check",
@@ -1560,7 +1574,7 @@
       "checkConstraints": {
         "permission_actions_code_check": {
           "name": "permission_actions_code_check",
-          "value": "action_code ~ '^[a-z][a-z0-9_-]{1,63}:[a-z][a-z0-9_-]{1,63}$'::text"
+          "value": "action_code ~ '^[a-z][a-z0-9_-]*(.[a-z][a-z0-9_-]*)+$'::text"
         },
         "permission_actions_resource_check": {
           "name": "permission_actions_resource_check",
@@ -3005,7 +3019,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -3057,11 +3071,11 @@
         },
         "tenants_status_check": {
           "name": "tenants_status_check",
-          "value": "status = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text, 'CLOSED'::text])"
+          "value": "status = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text, 'EXPIRED'::text])"
         },
         "tenants_version_check": {
           "name": "tenants_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "tenants_timestamps_check": {
           "name": "tenants_timestamps_check",
@@ -3608,6 +3622,1274 @@
         "warehouses_timestamps_check": {
           "name": "warehouses_timestamps_check",
           "value": "updated_at >= created_at"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.customer_credit_policies": {
+      "name": "customer_credit_policies",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "customer_id": {
+          "name": "customer_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "policy_version": {
+          "name": "policy_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "currency": {
+          "name": "currency",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "credit_limit_minor": {
+          "name": "credit_limit_minor",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payment_cycle": {
+          "name": "payment_cycle",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "hold_policy": {
+          "name": "hold_policy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "customer_credit_policies_tenant_fk": {
+          "name": "customer_credit_policies_tenant_fk",
+          "tableFrom": "customer_credit_policies",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        },
+        "customer_credit_policies_customer_fk": {
+          "name": "customer_credit_policies_customer_fk",
+          "tableFrom": "customer_credit_policies",
+          "tableTo": "customers",
+          "columnsFrom": ["tenant_id", "customer_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        },
+        "customer_credit_policies_creator_fk": {
+          "name": "customer_credit_policies_creator_fk",
+          "tableFrom": "customer_credit_policies",
+          "tableTo": "users",
+          "columnsFrom": ["tenant_id", "created_by_user_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "customer_credit_policies_tenant_id_id_unique": {
+          "name": "customer_credit_policies_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        },
+        "customer_credit_policies_customer_version_unique": {
+          "name": "customer_credit_policies_customer_version_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "customer_id", "policy_version"]
+        }
+      },
+      "policies": {
+        "customer_credit_policies_tenant_isolation": {
+          "name": "customer_credit_policies_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "customer_credit_policies_id_ulid_check": {
+          "name": "customer_credit_policies_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "customer_credit_policies_version_check": {
+          "name": "customer_credit_policies_version_check",
+          "value": "policy_version >= 1"
+        },
+        "customer_credit_policies_money_check": {
+          "name": "customer_credit_policies_money_check",
+          "value": "currency ~ '^[A-Z]{3}$' AND credit_limit_minor >= 0"
+        },
+        "customer_credit_policies_cycle_check": {
+          "name": "customer_credit_policies_cycle_check",
+          "value": "payment_cycle IN ('PREPAID', 'WEEKLY', 'SEMIMONTHLY', 'MONTHLY', 'NET_30', 'NET_60')"
+        },
+        "customer_credit_policies_hold_check": {
+          "name": "customer_credit_policies_hold_check",
+          "value": "hold_policy IN ('AUTO_HOLD', 'REVIEW', 'ALLOW')"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.impersonation_sessions": {
+      "name": "impersonation_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_subject_id": {
+          "name": "actor_subject_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ended_reason": {
+          "name": "ended_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "impersonation_sessions_one_active_actor_tenant_idx": {
+          "name": "impersonation_sessions_one_active_actor_tenant_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "actor_subject_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "status = 'ACTIVE'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "impersonation_sessions_tenant_fk": {
+          "name": "impersonation_sessions_tenant_fk",
+          "tableFrom": "impersonation_sessions",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "impersonation_sessions_tenant_id_id_unique": {
+          "name": "impersonation_sessions_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        }
+      },
+      "policies": {
+        "impersonation_sessions_tenant_isolation": {
+          "name": "impersonation_sessions_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "impersonation_sessions_id_ulid_check": {
+          "name": "impersonation_sessions_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "impersonation_sessions_actor_check": {
+          "name": "impersonation_sessions_actor_check",
+          "value": "length(btrim(actor_subject_id)) >= 1"
+        },
+        "impersonation_sessions_reason_check": {
+          "name": "impersonation_sessions_reason_check",
+          "value": "length(btrim(reason)) >= 10"
+        },
+        "impersonation_sessions_status_check": {
+          "name": "impersonation_sessions_status_check",
+          "value": "status IN ('ACTIVE', 'ENDED', 'EXPIRED')"
+        },
+        "impersonation_sessions_duration_check": {
+          "name": "impersonation_sessions_duration_check",
+          "value": "expires_at >= started_at + interval '5 minutes' AND expires_at <= started_at + interval '60 minutes'"
+        },
+        "impersonation_sessions_end_check": {
+          "name": "impersonation_sessions_end_check",
+          "value": "(status = 'ACTIVE' AND ended_at IS NULL AND ended_reason IS NULL) OR (status IN ('ENDED', 'EXPIRED') AND ended_at IS NOT NULL AND length(btrim(ended_reason)) >= 1)"
+        },
+        "impersonation_sessions_version_check": {
+          "name": "impersonation_sessions_version_check",
+          "value": "version >= 1"
+        },
+        "impersonation_sessions_timestamps_check": {
+          "name": "impersonation_sessions_timestamps_check",
+          "value": "updated_at >= created_at"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.oauth_identities": {
+      "name": "oauth_identities",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_subject_hash": {
+          "name": "provider_subject_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "oauth_identities_tenant_fk": {
+          "name": "oauth_identities_tenant_fk",
+          "tableFrom": "oauth_identities",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        },
+        "oauth_identities_user_fk": {
+          "name": "oauth_identities_user_fk",
+          "tableFrom": "oauth_identities",
+          "tableTo": "users",
+          "columnsFrom": ["tenant_id", "user_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "oauth_identities_tenant_id_id_unique": {
+          "name": "oauth_identities_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        },
+        "oauth_identities_provider_subject_unique": {
+          "name": "oauth_identities_provider_subject_unique",
+          "nullsNotDistinct": false,
+          "columns": ["provider", "provider_subject_hash"]
+        },
+        "oauth_identities_user_provider_unique": {
+          "name": "oauth_identities_user_provider_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "user_id", "provider"]
+        }
+      },
+      "policies": {
+        "oauth_identities_tenant_isolation": {
+          "name": "oauth_identities_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "oauth_identities_id_ulid_check": {
+          "name": "oauth_identities_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "oauth_identities_provider_check": {
+          "name": "oauth_identities_provider_check",
+          "value": "provider IN ('WECHAT', 'OIDC')"
+        },
+        "oauth_identities_subject_hash_check": {
+          "name": "oauth_identities_subject_hash_check",
+          "value": "provider_subject_hash ~ '^[0-9a-f]{64}$'"
+        },
+        "oauth_identities_status_check": {
+          "name": "oauth_identities_status_check",
+          "value": "status IN ('ACTIVE', 'REVOKED')"
+        },
+        "oauth_identities_version_check": {
+          "name": "oauth_identities_version_check",
+          "value": "version >= 1"
+        },
+        "oauth_identities_timestamps_check": {
+          "name": "oauth_identities_timestamps_check",
+          "value": "updated_at >= created_at"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.partners": {
+      "name": "partners",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "partner_code": {
+          "name": "partner_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "partner_type": {
+          "name": "partner_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "partners_tenant_fk": {
+          "name": "partners_tenant_fk",
+          "tableFrom": "partners",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "partners_tenant_id_id_unique": {
+          "name": "partners_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        },
+        "partners_tenant_code_unique": {
+          "name": "partners_tenant_code_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "partner_code"]
+        }
+      },
+      "policies": {
+        "partners_tenant_isolation": {
+          "name": "partners_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "partners_id_ulid_check": {
+          "name": "partners_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "partners_code_check": {
+          "name": "partners_code_check",
+          "value": "length(btrim(partner_code)) BETWEEN 1 AND 64"
+        },
+        "partners_name_check": {
+          "name": "partners_name_check",
+          "value": "length(btrim(display_name)) BETWEEN 1 AND 200"
+        },
+        "partners_type_check": {
+          "name": "partners_type_check",
+          "value": "partner_type IN ('CARRIER', 'AGENT', 'SUPPLIER', 'LAST_MILE', 'CUSTOMS_BROKER')"
+        },
+        "partners_status_check": {
+          "name": "partners_status_check",
+          "value": "status IN ('ACTIVE', 'INACTIVE')"
+        },
+        "partners_version_check": {
+          "name": "partners_version_check",
+          "value": "version >= 1"
+        },
+        "partners_timestamps_check": {
+          "name": "partners_timestamps_check",
+          "value": "updated_at >= created_at"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.permission_simulations": {
+      "name": "permission_simulations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_user_id": {
+          "name": "actor_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subject_user_id": {
+          "name": "subject_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "proposed_policy": {
+          "name": "proposed_policy",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "permission_simulations_tenant_fk": {
+          "name": "permission_simulations_tenant_fk",
+          "tableFrom": "permission_simulations",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        },
+        "permission_simulations_actor_fk": {
+          "name": "permission_simulations_actor_fk",
+          "tableFrom": "permission_simulations",
+          "tableTo": "users",
+          "columnsFrom": ["tenant_id", "actor_user_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        },
+        "permission_simulations_subject_fk": {
+          "name": "permission_simulations_subject_fk",
+          "tableFrom": "permission_simulations",
+          "tableTo": "users",
+          "columnsFrom": ["tenant_id", "subject_user_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "permission_simulations_tenant_id_id_unique": {
+          "name": "permission_simulations_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        }
+      },
+      "policies": {
+        "permission_simulations_tenant_isolation": {
+          "name": "permission_simulations_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "permission_simulations_id_ulid_check": {
+          "name": "permission_simulations_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "permission_simulations_policy_check": {
+          "name": "permission_simulations_policy_check",
+          "value": "jsonb_typeof(proposed_policy) = 'object'"
+        },
+        "permission_simulations_status_check": {
+          "name": "permission_simulations_status_check",
+          "value": "status IN ('ACTIVE', 'ENDED', 'EXPIRED')"
+        },
+        "permission_simulations_expiry_check": {
+          "name": "permission_simulations_expiry_check",
+          "value": "expires_at >= created_at + interval '5 minutes' AND expires_at <= created_at + interval '60 minutes'"
+        },
+        "permission_simulations_end_check": {
+          "name": "permission_simulations_end_check",
+          "value": "(status = 'ACTIVE' AND ended_at IS NULL) OR (status IN ('ENDED', 'EXPIRED') AND ended_at IS NOT NULL)"
+        },
+        "permission_simulations_version_check": {
+          "name": "permission_simulations_version_check",
+          "value": "version >= 1"
+        },
+        "permission_simulations_timestamps_check": {
+          "name": "permission_simulations_timestamps_check",
+          "value": "updated_at >= created_at"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.reference_data_items": {
+      "name": "reference_data_items",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reference_data_version_id": {
+          "name": "reference_data_version_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_key": {
+          "name": "item_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_payload": {
+          "name": "item_payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "reference_data_items_tenant_fk": {
+          "name": "reference_data_items_tenant_fk",
+          "tableFrom": "reference_data_items",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        },
+        "reference_data_items_version_fk": {
+          "name": "reference_data_items_version_fk",
+          "tableFrom": "reference_data_items",
+          "tableTo": "reference_data_versions",
+          "columnsFrom": ["tenant_id", "reference_data_version_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "reference_data_items_tenant_id_id_unique": {
+          "name": "reference_data_items_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        },
+        "reference_data_items_version_key_unique": {
+          "name": "reference_data_items_version_key_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "reference_data_version_id", "item_key"]
+        }
+      },
+      "policies": {
+        "reference_data_items_tenant_isolation": {
+          "name": "reference_data_items_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "reference_data_items_id_ulid_check": {
+          "name": "reference_data_items_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "reference_data_items_key_check": {
+          "name": "reference_data_items_key_check",
+          "value": "length(btrim(item_key)) BETWEEN 1 AND 160"
+        },
+        "reference_data_items_payload_check": {
+          "name": "reference_data_items_payload_check",
+          "value": "jsonb_typeof(item_payload) = 'object'"
+        },
+        "reference_data_items_timestamps_check": {
+          "name": "reference_data_items_timestamps_check",
+          "value": "updated_at >= created_at"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.reference_data_sets": {
+      "name": "reference_data_sets",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "set_code": {
+          "name": "set_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "display_name": {
+          "name": "display_name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "current_version_id": {
+          "name": "current_version_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "reference_data_sets_tenant_fk": {
+          "name": "reference_data_sets_tenant_fk",
+          "tableFrom": "reference_data_sets",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "reference_data_sets_tenant_id_id_unique": {
+          "name": "reference_data_sets_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        },
+        "reference_data_sets_tenant_code_unique": {
+          "name": "reference_data_sets_tenant_code_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "set_code"]
+        }
+      },
+      "policies": {
+        "reference_data_sets_tenant_isolation": {
+          "name": "reference_data_sets_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "reference_data_sets_id_ulid_check": {
+          "name": "reference_data_sets_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "reference_data_sets_code_check": {
+          "name": "reference_data_sets_code_check",
+          "value": "set_code ~ '^[A-Z][A-Z0-9_]{1,63}$'"
+        },
+        "reference_data_sets_name_check": {
+          "name": "reference_data_sets_name_check",
+          "value": "length(btrim(display_name)) BETWEEN 1 AND 200"
+        },
+        "reference_data_sets_status_check": {
+          "name": "reference_data_sets_status_check",
+          "value": "status IN ('ACTIVE', 'INACTIVE')"
+        },
+        "reference_data_sets_version_check": {
+          "name": "reference_data_sets_version_check",
+          "value": "version >= 1"
+        },
+        "reference_data_sets_timestamps_check": {
+          "name": "reference_data_sets_timestamps_check",
+          "value": "updated_at >= created_at"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.reference_data_versions": {
+      "name": "reference_data_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reference_data_set_id": {
+          "name": "reference_data_set_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_number": {
+          "name": "version_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'DRAFT'"
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "reference_data_versions_tenant_fk": {
+          "name": "reference_data_versions_tenant_fk",
+          "tableFrom": "reference_data_versions",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        },
+        "reference_data_versions_set_fk": {
+          "name": "reference_data_versions_set_fk",
+          "tableFrom": "reference_data_versions",
+          "tableTo": "reference_data_sets",
+          "columnsFrom": ["tenant_id", "reference_data_set_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        },
+        "reference_data_versions_creator_fk": {
+          "name": "reference_data_versions_creator_fk",
+          "tableFrom": "reference_data_versions",
+          "tableTo": "users",
+          "columnsFrom": ["tenant_id", "created_by_user_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "reference_data_versions_tenant_id_id_unique": {
+          "name": "reference_data_versions_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        },
+        "reference_data_versions_set_version_unique": {
+          "name": "reference_data_versions_set_version_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "reference_data_set_id", "version_number"]
+        },
+        "reference_data_versions_head_key_unique": {
+          "name": "reference_data_versions_head_key_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id", "reference_data_set_id"]
+        }
+      },
+      "policies": {
+        "reference_data_versions_tenant_isolation": {
+          "name": "reference_data_versions_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "reference_data_versions_id_ulid_check": {
+          "name": "reference_data_versions_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "reference_data_versions_number_check": {
+          "name": "reference_data_versions_number_check",
+          "value": "version_number >= 1"
+        },
+        "reference_data_versions_state_check": {
+          "name": "reference_data_versions_state_check",
+          "value": "state IN ('DRAFT', 'PUBLISHED', 'RETIRED')"
+        },
+        "reference_data_versions_publish_check": {
+          "name": "reference_data_versions_publish_check",
+          "value": "(state = 'DRAFT' AND published_at IS NULL) OR (state IN ('PUBLISHED', 'RETIRED') AND published_at IS NOT NULL)"
+        },
+        "reference_data_versions_timestamps_check": {
+          "name": "reference_data_versions_timestamps_check",
+          "value": "updated_at >= created_at"
+        }
+      },
+      "isRLSEnabled": true
+    },
+    "public.tenant_entitlements": {
+      "name": "tenant_entitlements",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "module_code": {
+          "name": "module_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entitlement_version": {
+          "name": "entitlement_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'ACTIVE'"
+        },
+        "quota_limit": {
+          "name": "quota_limit",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "usage_value": {
+          "name": "usage_value",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "valid_from": {
+          "name": "valid_from",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valid_until": {
+          "name": "valid_until",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tenant_entitlements_tenant_fk": {
+          "name": "tenant_entitlements_tenant_fk",
+          "tableFrom": "tenant_entitlements",
+          "tableTo": "tenants",
+          "columnsFrom": ["tenant_id"],
+          "columnsTo": ["id"],
+          "onDelete": "cascade",
+          "onUpdate": "restrict"
+        },
+        "tenant_entitlements_creator_fk": {
+          "name": "tenant_entitlements_creator_fk",
+          "tableFrom": "tenant_entitlements",
+          "tableTo": "users",
+          "columnsFrom": ["tenant_id", "created_by_user_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tenant_entitlements_tenant_id_id_unique": {
+          "name": "tenant_entitlements_tenant_id_id_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "id"]
+        },
+        "tenant_entitlements_module_version_unique": {
+          "name": "tenant_entitlements_module_version_unique",
+          "nullsNotDistinct": false,
+          "columns": ["tenant_id", "module_code", "entitlement_version"]
+        }
+      },
+      "policies": {
+        "tenant_entitlements_tenant_isolation": {
+          "name": "tenant_entitlements_tenant_isolation",
+          "as": "PERMISSIVE",
+          "for": "ALL",
+          "to": ["zhili_app"],
+          "using": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))",
+          "withCheck": "(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))"
+        }
+      },
+      "checkConstraints": {
+        "tenant_entitlements_id_ulid_check": {
+          "name": "tenant_entitlements_id_ulid_check",
+          "value": "id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'"
+        },
+        "tenant_entitlements_module_check": {
+          "name": "tenant_entitlements_module_check",
+          "value": "module_code ~ '^[A-Z][A-Z0-9_]{1,63}$'"
+        },
+        "tenant_entitlements_version_check": {
+          "name": "tenant_entitlements_version_check",
+          "value": "entitlement_version >= 1"
+        },
+        "tenant_entitlements_state_check": {
+          "name": "tenant_entitlements_state_check",
+          "value": "state IN ('ACTIVE', 'RETIRED')"
+        },
+        "tenant_entitlements_usage_check": {
+          "name": "tenant_entitlements_usage_check",
+          "value": "usage_value >= 0 AND (quota_limit IS NULL OR (quota_limit >= 0 AND usage_value <= quota_limit))"
+        },
+        "tenant_entitlements_validity_check": {
+          "name": "tenant_entitlements_validity_check",
+          "value": "valid_until IS NULL OR valid_until > valid_from"
         }
       },
       "isRLSEnabled": true
@@ -4816,7 +6098,7 @@
         },
         "import_jobs_state_check": {
           "name": "import_jobs_state_check",
-          "value": "state = ANY (ARRAY['UPLOADED'::text, 'VALIDATING'::text, 'READY'::text, 'COMMITTING'::text, 'COMMITTED'::text, 'COMMIT_FAILED'::text, 'ROLLING_BACK'::text, 'ROLLED_BACK'::text, 'ROLLBACK_FAILED'::text])"
+          "value": "state = ANY (ARRAY['UPLOADED'::text, 'MAPPING'::text, 'VALIDATING'::text, 'READY'::text, 'COMMITTING'::text, 'COMPLETED'::text, 'FAILED'::text, 'ROLLED_BACK'::text])"
         },
         "import_jobs_counts_check": {
           "name": "import_jobs_counts_check",
@@ -4824,7 +6106,7 @@
         },
         "import_jobs_commit_check": {
           "name": "import_jobs_commit_check",
-          "value": "((state = ANY (ARRAY['COMMITTED'::text, 'ROLLING_BACK'::text, 'ROLLED_BACK'::text, 'ROLLBACK_FAILED'::text])) AND (committed_at IS NOT NULL)) OR ((state <> ALL (ARRAY['COMMITTED'::text, 'ROLLING_BACK'::text, 'ROLLED_BACK'::text, 'ROLLBACK_FAILED'::text])) AND (committed_at IS NULL))"
+          "value": "((state = ANY (ARRAY['COMPLETED'::text, 'ROLLED_BACK'::text])) AND (committed_at IS NOT NULL)) OR ((state <> ALL (ARRAY['COMPLETED'::text, 'ROLLED_BACK'::text])) AND (committed_at IS NULL))"
         },
         "import_jobs_rollback_check": {
           "name": "import_jobs_rollback_check",
@@ -8226,11 +9508,11 @@
         },
         "waybills_state_check": {
           "name": "waybills_state_check",
-          "value": "state = ANY (ARRAY['DRAFT'::text, 'ISSUED'::text, 'IN_TRANSIT'::text, 'DELIVERED'::text, 'VOID'::text])"
+          "value": "state = ANY (ARRAY['DRAFT'::text, 'FORECASTED'::text, 'AWAITING_RECEIPT'::text, 'RECEIVED'::text, 'AWAITING_ROUTING'::text, 'AWAITING_TRANSIT'::text, 'IN_TRANSIT'::text, 'OUT_FOR_DELIVERY'::text, 'DELIVERED'::text, 'AWAITING_RETURN'::text, 'RETURNED'::text, 'CANCELLED'::text])"
         },
         "waybills_issue_check": {
           "name": "waybills_issue_check",
-          "value": "((state = 'DRAFT'::text) AND (issued_at IS NULL)) OR ((state <> 'DRAFT'::text) AND (issued_at IS NOT NULL))"
+          "value": "((state = ANY (ARRAY['DRAFT'::text, 'FORECASTED'::text])) AND (issued_at IS NULL)) OR ((state <> ALL (ARRAY['DRAFT'::text, 'FORECASTED'::text])) AND (issued_at IS NOT NULL))"
         },
         "waybills_version_check": {
           "name": "waybills_version_check",
@@ -8289,7 +9571,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "issued_at": {
           "name": "issued_at",
@@ -8399,7 +9681,7 @@
       "checkConstraints": {
         "bills_of_lading_version_check": {
           "name": "bills_of_lading_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "bills_of_lading_status_check": {
           "name": "bills_of_lading_status_check",
@@ -8633,14 +9915,14 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'PENDING'"
+          "default": "'PLANNED'"
         },
         "version": {
           "name": "version",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "planned_at": {
           "name": "planned_at",
@@ -8783,15 +10065,15 @@
       "checkConstraints": {
         "delivery_tasks_version_check": {
           "name": "delivery_tasks_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "delivery_tasks_status_check": {
           "name": "delivery_tasks_status_check",
-          "value": "status = ANY (ARRAY['PENDING'::text, 'ASSIGNED'::text, 'ACCEPTED'::text, 'IN_TRANSIT'::text, 'DELIVERED'::text, 'FAILED'::text, 'CANCELLED'::text])"
+          "value": "status = ANY (ARRAY['PLANNED'::text, 'PALLETIZED'::text, 'LOADED'::text, 'OUT_FOR_DELIVERY'::text, 'COMPLETED'::text, 'EXCEPTION'::text])"
         },
         "delivery_tasks_completion_check": {
           "name": "delivery_tasks_completion_check",
-          "value": "((status = 'DELIVERED'::text) AND (completed_at IS NOT NULL)) OR (status <> 'DELIVERED'::text)"
+          "value": "((status = 'COMPLETED'::text) AND (completed_at IS NOT NULL)) OR (status <> 'COMPLETED'::text)"
         }
       },
       "isRLSEnabled": true
@@ -9370,7 +10652,7 @@
         },
         "device_sync_conflicts_resolution_check": {
           "name": "device_sync_conflicts_resolution_check",
-          "value": "(resolution IS NULL) OR (resolution = ANY (ARRAY['SERVER_WINS'::text, 'CLIENT_RETRY'::text, 'MANUAL_MERGE'::text]))"
+          "value": "(resolution IS NULL) OR (resolution = ANY (ARRAY['KEEP_SERVER'::text, 'REAPPLY_LOCAL'::text, 'SUBMIT_MANUAL'::text]))"
         }
       },
       "isRLSEnabled": true
@@ -9603,7 +10885,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "appointment_at": {
           "name": "appointment_at",
@@ -9718,7 +11000,7 @@
       "checkConstraints": {
         "fba_deliveries_version_check": {
           "name": "fba_deliveries_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "fba_deliveries_status_check": {
           "name": "fba_deliveries_status_check",
@@ -9779,7 +11061,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -9896,7 +11178,7 @@
         },
         "inventory_balances_version_check": {
           "name": "inventory_balances_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "inventory_balances_state_check": {
           "name": "inventory_balances_state_check",
@@ -10124,7 +11406,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "departure_at": {
           "name": "departure_at",
@@ -10231,11 +11513,11 @@
       "checkConstraints": {
         "linehaul_bookings_version_check": {
           "name": "linehaul_bookings_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "linehaul_bookings_status_check": {
           "name": "linehaul_bookings_status_check",
-          "value": "status = ANY (ARRAY['DRAFT'::text, 'CONFIRMED'::text, 'DEPARTED'::text, 'ARRIVED'::text, 'CANCELLED'::text])"
+          "value": "status = ANY (ARRAY['DRAFT'::text, 'CONFIRMED'::text, 'DEPARTED'::text, 'CLOSED'::text, 'CANCELLED'::text])"
         },
         "linehaul_bookings_schedule_check": {
           "name": "linehaul_bookings_schedule_check",
@@ -10444,14 +11726,14 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'DRAFT'"
+          "default": "'OPEN'"
         },
         "version": {
           "name": "version",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "sealed_at": {
           "name": "sealed_at",
@@ -10567,15 +11849,15 @@
       "checkConstraints": {
         "load_units_version_check": {
           "name": "load_units_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "load_units_status_check": {
           "name": "load_units_status_check",
-          "value": "status = ANY (ARRAY['DRAFT'::text, 'SEALED'::text, 'DISPATCHED'::text])"
+          "value": "status = ANY (ARRAY['OPEN'::text, 'SEALED'::text, 'DISPATCHED'::text])"
         },
         "load_units_state_shape_check": {
           "name": "load_units_state_shape_check",
-          "value": "((status = 'DRAFT'::text) AND (sealed_at IS NULL) AND (dispatched_at IS NULL)) OR ((status = 'SEALED'::text) AND (sealed_at IS NOT NULL) AND (dispatched_at IS NULL)) OR ((status = 'DISPATCHED'::text) AND (sealed_at IS NOT NULL) AND (dispatched_at IS NOT NULL))"
+          "value": "((status = 'OPEN'::text) AND (sealed_at IS NULL) AND (dispatched_at IS NULL)) OR ((status = 'SEALED'::text) AND (sealed_at IS NOT NULL) AND (dispatched_at IS NULL)) OR ((status = 'DISPATCHED'::text) AND (sealed_at IS NOT NULL) AND (dispatched_at IS NOT NULL))"
         },
         "load_units_distinct_warehouses_check": {
           "name": "load_units_distinct_warehouses_check",
@@ -11045,7 +12327,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "attempts": {
           "name": "attempts",
@@ -11179,7 +12461,7 @@
       "checkConstraints": {
         "print_jobs_version_check": {
           "name": "print_jobs_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "print_jobs_attempts_check": {
           "name": "print_jobs_attempts_check",
@@ -11785,14 +13067,14 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'RECEIVED'"
+          "default": "'SCANNED'"
         },
         "version": {
           "name": "version",
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "undo_until": {
           "name": "undo_until",
@@ -11935,11 +13217,11 @@
       "checkConstraints": {
         "warehouse_receipts_status_check": {
           "name": "warehouse_receipts_status_check",
-          "value": "status = ANY (ARRAY['RECEIVED'::text, 'UNDONE'::text])"
+          "value": "status = ANY (ARRAY['SCANNED'::text, 'CONFIRMED'::text, 'UNDONE'::text])"
         },
         "warehouse_receipts_version_check": {
           "name": "warehouse_receipts_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "warehouse_receipts_undo_window_check": {
           "name": "warehouse_receipts_undo_window_check",
@@ -11947,7 +13229,7 @@
         },
         "warehouse_receipts_undo_shape_check": {
           "name": "warehouse_receipts_undo_shape_check",
-          "value": "((status = 'RECEIVED'::text) AND (undone_at IS NULL) AND (undo_reason IS NULL)) OR ((status = 'UNDONE'::text) AND (undone_at IS NOT NULL) AND (length(btrim(undo_reason)) > 0))"
+          "value": "((status = ANY (ARRAY['SCANNED'::text, 'CONFIRMED'::text])) AND (undone_at IS NULL) AND (undo_reason IS NULL)) OR ((status = 'UNDONE'::text) AND (undone_at IS NOT NULL) AND (length(btrim(undo_reason)) > 0))"
         }
       },
       "isRLSEnabled": true

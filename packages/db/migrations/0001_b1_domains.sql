@@ -755,6 +755,537 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   device_bindings,
   device_tasks
 TO zhili_app;
+
+-- Root-owned B1 contract alignment addendum. The reviewed proposal files stay immutable; these
+-- changes resolve cross-domain contract gaps discovered before service implementation.
+ALTER TABLE tenants
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT tenants_status_check,
+  DROP CONSTRAINT tenants_version_check,
+  ADD CONSTRAINT tenants_status_check CHECK (status IN ('ACTIVE', 'SUSPENDED', 'EXPIRED')),
+  ADD CONSTRAINT tenants_version_check CHECK (version >= 1);
+
+ALTER TABLE permission_actions
+  DROP CONSTRAINT permission_actions_code_check,
+  ADD CONSTRAINT permission_actions_code_check CHECK (
+    action_code ~ '^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$'
+  );
+
+ALTER TABLE device_bindings
+  ADD COLUMN bound_subject_user_id text NOT NULL,
+  ADD CONSTRAINT device_bindings_bound_subject_fk
+    FOREIGN KEY (tenant_id, bound_subject_user_id)
+    REFERENCES users (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+DROP INDEX device_tasks_queue_idx;
+ALTER TABLE device_tasks
+  DROP CONSTRAINT device_tasks_type_check,
+  DROP CONSTRAINT device_tasks_priority_check,
+  DROP CONSTRAINT device_tasks_version_check,
+  ALTER COLUMN priority DROP DEFAULT,
+  ALTER COLUMN priority TYPE text USING (
+    CASE priority
+      WHEN 100 THEN 'URGENT'
+      WHEN 50 THEN 'HIGH'
+      WHEN 0 THEN 'NORMAL'
+      ELSE 'LOW'
+    END
+  ),
+  ALTER COLUMN priority SET DEFAULT 'NORMAL',
+  ALTER COLUMN version SET DEFAULT 1,
+  ADD CONSTRAINT device_tasks_type_check CHECK (
+    task_type IN (
+      'RECEIVE', 'MOVE', 'PICK', 'LOAD', 'DISPATCH',
+      'LAST_MILE_DELIVERY', 'STOCKTAKE'
+    )
+  ),
+  ADD CONSTRAINT device_tasks_priority_check CHECK (
+    priority IN ('LOW', 'NORMAL', 'HIGH', 'URGENT')
+  ),
+  ADD CONSTRAINT device_tasks_version_check CHECK (version >= 1);
+
+CREATE INDEX device_tasks_queue_idx ON device_tasks (
+  tenant_id,
+  assigned_device_id,
+  status,
+  (CASE priority WHEN 'URGENT' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'NORMAL' THEN 2 ELSE 1 END) DESC,
+  available_at,
+  id
+);
+
+CREATE TABLE tenant_entitlements (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  module_code text NOT NULL,
+  entitlement_version integer NOT NULL,
+  state text NOT NULL DEFAULT 'ACTIVE',
+  quota_limit bigint,
+  usage_value bigint NOT NULL DEFAULT 0,
+  valid_from timestamptz NOT NULL,
+  valid_until timestamptz,
+  created_by_user_id text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT tenant_entitlements_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT tenant_entitlements_module_check CHECK (module_code ~ '^[A-Z][A-Z0-9_]{1,63}$'),
+  CONSTRAINT tenant_entitlements_version_check CHECK (entitlement_version >= 1),
+  CONSTRAINT tenant_entitlements_state_check CHECK (state IN ('ACTIVE', 'RETIRED')),
+  CONSTRAINT tenant_entitlements_usage_check CHECK (
+    usage_value >= 0 AND (quota_limit IS NULL OR (quota_limit >= 0 AND usage_value <= quota_limit))
+  ),
+  CONSTRAINT tenant_entitlements_validity_check CHECK (
+    valid_until IS NULL OR valid_until > valid_from
+  ),
+  CONSTRAINT tenant_entitlements_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT tenant_entitlements_module_version_unique UNIQUE (
+    tenant_id, module_code, entitlement_version
+  ),
+  CONSTRAINT tenant_entitlements_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT tenant_entitlements_creator_fk FOREIGN KEY (tenant_id, created_by_user_id)
+    REFERENCES users (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+CREATE TABLE impersonation_sessions (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  actor_subject_id text NOT NULL,
+  reason text NOT NULL,
+  status text NOT NULL DEFAULT 'ACTIVE',
+  started_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  ended_at timestamptz,
+  ended_reason text,
+  version bigint NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT impersonation_sessions_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT impersonation_sessions_actor_check CHECK (length(btrim(actor_subject_id)) >= 1),
+  CONSTRAINT impersonation_sessions_reason_check CHECK (length(btrim(reason)) >= 10),
+  CONSTRAINT impersonation_sessions_status_check CHECK (status IN ('ACTIVE', 'ENDED', 'EXPIRED')),
+  CONSTRAINT impersonation_sessions_duration_check CHECK (
+    expires_at >= started_at + interval '5 minutes'
+    AND expires_at <= started_at + interval '60 minutes'
+  ),
+  CONSTRAINT impersonation_sessions_end_check CHECK (
+    (status = 'ACTIVE' AND ended_at IS NULL AND ended_reason IS NULL)
+    OR (status IN ('ENDED', 'EXPIRED') AND ended_at IS NOT NULL AND length(btrim(ended_reason)) >= 1)
+  ),
+  CONSTRAINT impersonation_sessions_version_check CHECK (version >= 1),
+  CONSTRAINT impersonation_sessions_timestamps_check CHECK (updated_at >= created_at),
+  CONSTRAINT impersonation_sessions_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT impersonation_sessions_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE
+);
+
+CREATE UNIQUE INDEX impersonation_sessions_one_active_actor_tenant_idx
+  ON impersonation_sessions (tenant_id, actor_subject_id)
+  WHERE status = 'ACTIVE';
+
+CREATE TABLE oauth_identities (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  user_id text NOT NULL,
+  provider text NOT NULL,
+  provider_subject_hash text NOT NULL,
+  status text NOT NULL DEFAULT 'ACTIVE',
+  version bigint NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT oauth_identities_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT oauth_identities_provider_check CHECK (provider IN ('WECHAT', 'OIDC')),
+  CONSTRAINT oauth_identities_subject_hash_check CHECK (provider_subject_hash ~ '^[0-9a-f]{64}$'),
+  CONSTRAINT oauth_identities_status_check CHECK (status IN ('ACTIVE', 'REVOKED')),
+  CONSTRAINT oauth_identities_version_check CHECK (version >= 1),
+  CONSTRAINT oauth_identities_timestamps_check CHECK (updated_at >= created_at),
+  CONSTRAINT oauth_identities_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT oauth_identities_provider_subject_unique UNIQUE (provider, provider_subject_hash),
+  CONSTRAINT oauth_identities_user_provider_unique UNIQUE (tenant_id, user_id, provider),
+  CONSTRAINT oauth_identities_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT oauth_identities_user_fk FOREIGN KEY (tenant_id, user_id)
+    REFERENCES users (tenant_id, id) ON UPDATE RESTRICT ON DELETE CASCADE
+);
+
+CREATE TABLE partners (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  partner_code text NOT NULL,
+  display_name text NOT NULL,
+  partner_type text NOT NULL,
+  status text NOT NULL DEFAULT 'ACTIVE',
+  version bigint NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT partners_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT partners_code_check CHECK (length(btrim(partner_code)) BETWEEN 1 AND 64),
+  CONSTRAINT partners_name_check CHECK (length(btrim(display_name)) BETWEEN 1 AND 200),
+  CONSTRAINT partners_type_check CHECK (
+    partner_type IN ('CARRIER', 'AGENT', 'SUPPLIER', 'LAST_MILE', 'CUSTOMS_BROKER')
+  ),
+  CONSTRAINT partners_status_check CHECK (status IN ('ACTIVE', 'INACTIVE')),
+  CONSTRAINT partners_version_check CHECK (version >= 1),
+  CONSTRAINT partners_timestamps_check CHECK (updated_at >= created_at),
+  CONSTRAINT partners_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT partners_tenant_code_unique UNIQUE (tenant_id, partner_code),
+  CONSTRAINT partners_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE
+);
+
+CREATE TABLE reference_data_sets (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  set_code text NOT NULL,
+  display_name text NOT NULL,
+  current_version_id text,
+  status text NOT NULL DEFAULT 'ACTIVE',
+  version bigint NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT reference_data_sets_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT reference_data_sets_code_check CHECK (set_code ~ '^[A-Z][A-Z0-9_]{1,63}$'),
+  CONSTRAINT reference_data_sets_name_check CHECK (length(btrim(display_name)) BETWEEN 1 AND 200),
+  CONSTRAINT reference_data_sets_status_check CHECK (status IN ('ACTIVE', 'INACTIVE')),
+  CONSTRAINT reference_data_sets_version_check CHECK (version >= 1),
+  CONSTRAINT reference_data_sets_timestamps_check CHECK (updated_at >= created_at),
+  CONSTRAINT reference_data_sets_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT reference_data_sets_tenant_code_unique UNIQUE (tenant_id, set_code),
+  CONSTRAINT reference_data_sets_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE
+);
+
+CREATE TABLE reference_data_versions (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  reference_data_set_id text NOT NULL,
+  version_number integer NOT NULL,
+  state text NOT NULL DEFAULT 'DRAFT',
+  published_at timestamptz,
+  created_by_user_id text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT reference_data_versions_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT reference_data_versions_number_check CHECK (version_number >= 1),
+  CONSTRAINT reference_data_versions_state_check CHECK (state IN ('DRAFT', 'PUBLISHED', 'RETIRED')),
+  CONSTRAINT reference_data_versions_publish_check CHECK (
+    (state = 'DRAFT' AND published_at IS NULL)
+    OR (state IN ('PUBLISHED', 'RETIRED') AND published_at IS NOT NULL)
+  ),
+  CONSTRAINT reference_data_versions_timestamps_check CHECK (updated_at >= created_at),
+  CONSTRAINT reference_data_versions_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT reference_data_versions_set_version_unique UNIQUE (
+    tenant_id, reference_data_set_id, version_number
+  ),
+  CONSTRAINT reference_data_versions_head_key_unique UNIQUE (
+    tenant_id, id, reference_data_set_id
+  ),
+  CONSTRAINT reference_data_versions_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT reference_data_versions_set_fk FOREIGN KEY (tenant_id, reference_data_set_id)
+    REFERENCES reference_data_sets (tenant_id, id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT reference_data_versions_creator_fk FOREIGN KEY (tenant_id, created_by_user_id)
+    REFERENCES users (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+ALTER TABLE reference_data_sets
+  ADD CONSTRAINT reference_data_sets_current_version_fk FOREIGN KEY (
+    tenant_id, current_version_id, id
+  ) REFERENCES reference_data_versions (tenant_id, id, reference_data_set_id)
+    ON UPDATE RESTRICT ON DELETE RESTRICT;
+
+CREATE TABLE reference_data_items (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  reference_data_version_id text NOT NULL,
+  item_key text NOT NULL,
+  item_payload jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT reference_data_items_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT reference_data_items_key_check CHECK (length(btrim(item_key)) BETWEEN 1 AND 160),
+  CONSTRAINT reference_data_items_payload_check CHECK (jsonb_typeof(item_payload) = 'object'),
+  CONSTRAINT reference_data_items_timestamps_check CHECK (updated_at >= created_at),
+  CONSTRAINT reference_data_items_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT reference_data_items_version_key_unique UNIQUE (
+    tenant_id, reference_data_version_id, item_key
+  ),
+  CONSTRAINT reference_data_items_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT reference_data_items_version_fk FOREIGN KEY (tenant_id, reference_data_version_id)
+    REFERENCES reference_data_versions (tenant_id, id) ON UPDATE RESTRICT ON DELETE CASCADE
+);
+
+CREATE TABLE customer_credit_policies (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  customer_id text NOT NULL,
+  policy_version integer NOT NULL,
+  currency text NOT NULL,
+  credit_limit_minor bigint NOT NULL,
+  payment_cycle text NOT NULL,
+  hold_policy text NOT NULL,
+  created_by_user_id text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT customer_credit_policies_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT customer_credit_policies_version_check CHECK (policy_version >= 1),
+  CONSTRAINT customer_credit_policies_money_check CHECK (
+    currency ~ '^[A-Z]{3}$' AND credit_limit_minor >= 0
+  ),
+  CONSTRAINT customer_credit_policies_cycle_check CHECK (
+    payment_cycle IN ('PREPAID', 'WEEKLY', 'SEMIMONTHLY', 'MONTHLY', 'NET_30', 'NET_60')
+  ),
+  CONSTRAINT customer_credit_policies_hold_check CHECK (
+    hold_policy IN ('AUTO_HOLD', 'REVIEW', 'ALLOW')
+  ),
+  CONSTRAINT customer_credit_policies_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT customer_credit_policies_customer_version_unique UNIQUE (
+    tenant_id, customer_id, policy_version
+  ),
+  CONSTRAINT customer_credit_policies_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT customer_credit_policies_customer_fk FOREIGN KEY (tenant_id, customer_id)
+    REFERENCES customers (tenant_id, id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT customer_credit_policies_creator_fk FOREIGN KEY (tenant_id, created_by_user_id)
+    REFERENCES users (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+CREATE TABLE permission_simulations (
+  id text PRIMARY KEY,
+  tenant_id text NOT NULL,
+  actor_user_id text NOT NULL,
+  subject_user_id text NOT NULL,
+  proposed_policy jsonb NOT NULL,
+  status text NOT NULL DEFAULT 'ACTIVE',
+  expires_at timestamptz NOT NULL,
+  ended_at timestamptz,
+  version bigint NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT permission_simulations_id_ulid_check CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
+  CONSTRAINT permission_simulations_policy_check CHECK (jsonb_typeof(proposed_policy) = 'object'),
+  CONSTRAINT permission_simulations_status_check CHECK (status IN ('ACTIVE', 'ENDED', 'EXPIRED')),
+  CONSTRAINT permission_simulations_expiry_check CHECK (
+    expires_at >= created_at + interval '5 minutes'
+    AND expires_at <= created_at + interval '60 minutes'
+  ),
+  CONSTRAINT permission_simulations_end_check CHECK (
+    (status = 'ACTIVE' AND ended_at IS NULL)
+    OR (status IN ('ENDED', 'EXPIRED') AND ended_at IS NOT NULL)
+  ),
+  CONSTRAINT permission_simulations_version_check CHECK (version >= 1),
+  CONSTRAINT permission_simulations_timestamps_check CHECK (updated_at >= created_at),
+  CONSTRAINT permission_simulations_tenant_id_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT permission_simulations_tenant_fk FOREIGN KEY (tenant_id)
+    REFERENCES tenants (id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT permission_simulations_actor_fk FOREIGN KEY (tenant_id, actor_user_id)
+    REFERENCES users (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+  CONSTRAINT permission_simulations_subject_fk FOREIGN KEY (tenant_id, subject_user_id)
+    REFERENCES users (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
+);
+
+CREATE FUNCTION reject_identity_history_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION '% rows are immutable', TG_TABLE_NAME USING ERRCODE = '55000';
+END;
+$$;
+
+CREATE TRIGGER tenant_entitlements_immutable_update
+BEFORE UPDATE ON tenant_entitlements
+FOR EACH ROW EXECUTE FUNCTION reject_identity_history_mutation();
+CREATE TRIGGER tenant_entitlements_immutable_delete
+BEFORE DELETE ON tenant_entitlements
+FOR EACH ROW EXECUTE FUNCTION reject_identity_history_mutation();
+CREATE TRIGGER customer_credit_policies_immutable_update
+BEFORE UPDATE ON customer_credit_policies
+FOR EACH ROW EXECUTE FUNCTION reject_identity_history_mutation();
+CREATE TRIGGER customer_credit_policies_immutable_delete
+BEFORE DELETE ON customer_credit_policies
+FOR EACH ROW EXECUTE FUNCTION reject_identity_history_mutation();
+
+CREATE FUNCTION guard_reference_data_version_update()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF OLD.state <> 'DRAFT' OR NEW.state <> 'PUBLISHED'
+     OR NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+     OR NEW.reference_data_set_id IS DISTINCT FROM OLD.reference_data_set_id
+     OR NEW.version_number IS DISTINCT FROM OLD.version_number
+     OR NEW.created_by_user_id IS DISTINCT FROM OLD.created_by_user_id
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at
+     OR NEW.published_at IS NULL THEN
+    RAISE EXCEPTION 'reference data versions are immutable except DRAFT to PUBLISHED'
+      USING ERRCODE = '55000';
+  END IF;
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER reference_data_versions_publish_guard
+BEFORE UPDATE ON reference_data_versions
+FOR EACH ROW EXECUTE FUNCTION guard_reference_data_version_update();
+CREATE TRIGGER reference_data_versions_immutable_delete
+BEFORE DELETE ON reference_data_versions
+FOR EACH ROW EXECUTE FUNCTION reject_identity_history_mutation();
+
+CREATE FUNCTION guard_reference_data_item_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  version_state text;
+  scoped_tenant_id text;
+  scoped_version_id text;
+BEGIN
+  scoped_tenant_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.tenant_id ELSE NEW.tenant_id END;
+  scoped_version_id := CASE
+    WHEN TG_OP = 'DELETE' THEN OLD.reference_data_version_id
+    ELSE NEW.reference_data_version_id
+  END;
+
+  SELECT state INTO version_state
+  FROM reference_data_versions
+  WHERE tenant_id = scoped_tenant_id AND id = scoped_version_id
+  FOR UPDATE;
+
+  IF version_state IS DISTINCT FROM 'DRAFT' THEN
+    RAISE EXCEPTION 'published reference data items are immutable' USING ERRCODE = '55000';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+CREATE TRIGGER reference_data_items_mutation_guard
+BEFORE INSERT OR UPDATE OR DELETE ON reference_data_items
+FOR EACH ROW EXECUTE FUNCTION guard_reference_data_item_mutation();
+
+CREATE FUNCTION guard_reference_data_set_head()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.version <> OLD.version + 1 THEN
+    RAISE EXCEPTION 'reference data set version must advance exactly once' USING ERRCODE = '40001';
+  END IF;
+  IF NEW.current_version_id IS DISTINCT FROM OLD.current_version_id THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM reference_data_versions
+      WHERE tenant_id = NEW.tenant_id
+        AND id = NEW.current_version_id
+        AND reference_data_set_id = NEW.id
+        AND state = 'PUBLISHED'
+    ) THEN
+      RAISE EXCEPTION 'reference data head must be a published version' USING ERRCODE = '23514';
+    END IF;
+  END IF;
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER reference_data_sets_head_guard
+BEFORE UPDATE ON reference_data_sets
+FOR EACH ROW EXECUTE FUNCTION guard_reference_data_set_head();
+
+DO $identity_rls$
+DECLARE
+  table_name text;
+BEGIN
+  FOREACH table_name IN ARRAY ARRAY[
+    'tenant_entitlements',
+    'impersonation_sessions',
+    'oauth_identities',
+    'partners',
+    'reference_data_sets',
+    'reference_data_versions',
+    'reference_data_items',
+    'customer_credit_policies',
+    'permission_simulations'
+  ]
+  LOOP
+    EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', table_name);
+    EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', table_name);
+    EXECUTE format(
+      'CREATE POLICY %I ON %I AS PERMISSIVE FOR ALL TO zhili_app '
+      || 'USING (tenant_id = nullif(current_setting(''app.tenant_id'', true), '''')) '
+      || 'WITH CHECK (tenant_id = nullif(current_setting(''app.tenant_id'', true), ''''))',
+      table_name || '_tenant_isolation',
+      table_name
+    );
+  END LOOP;
+END
+$identity_rls$;
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON
+  tenant_entitlements,
+  impersonation_sessions,
+  oauth_identities,
+  partners,
+  reference_data_sets,
+  reference_data_versions,
+  reference_data_items,
+  customer_credit_policies,
+  permission_simulations
+TO zhili_app;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_auth') THEN
+    CREATE ROLE zhili_auth
+      NOLOGIN
+      NOSUPERUSER
+      NOCREATEDB
+      NOCREATEROLE
+      NOINHERIT
+      NOREPLICATION
+      NOBYPASSRLS;
+  ELSE
+    ALTER ROLE zhili_auth
+      NOLOGIN
+      NOSUPERUSER
+      NOCREATEDB
+      NOCREATEROLE
+      NOINHERIT
+      NOREPLICATION
+      NOBYPASSRLS;
+  END IF;
+END
+$$;
+
+CREATE FUNCTION auth_lookup_password(p_account text, p_tenant_hint text)
+RETURNS TABLE (
+  tenant_id text,
+  tenant_status text,
+  user_id text,
+  user_status text,
+  password_hash text
+)
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+  SELECT
+    u.tenant_id,
+    t.status,
+    u.id,
+    u.status,
+    u.password_hash
+  FROM public.users u
+  JOIN public.tenants t ON t.id = u.tenant_id
+  WHERE u.login_name_normalized = lower(btrim(p_account))
+    AND (p_tenant_hint IS NULL OR t.slug = lower(btrim(p_tenant_hint)))
+  ORDER BY u.tenant_id
+  LIMIT 2
+$$;
+
+REVOKE ALL ON FUNCTION auth_lookup_password(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION auth_lookup_password(text, text) TO zhili_auth;
+
 -- B1 rates, quotes, orders, waybills and imports schema proposal.
 -- Ordered prerequisites (owned by other proposals; intentionally not redefined):
 --   packages/db/migrations/0000_foundation.sql
@@ -2855,4 +3386,263 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   device_sync_conflicts,
   print_jobs
 TO zhili_app;
+ALTER TABLE waybills
+  DROP CONSTRAINT waybills_state_check,
+  DROP CONSTRAINT waybills_issue_check,
+  ADD CONSTRAINT waybills_state_check CHECK (
+    state IN (
+      'DRAFT', 'FORECASTED', 'AWAITING_RECEIPT', 'RECEIVED', 'AWAITING_ROUTING',
+      'AWAITING_TRANSIT', 'IN_TRANSIT', 'OUT_FOR_DELIVERY', 'DELIVERED',
+      'AWAITING_RETURN', 'RETURNED', 'CANCELLED'
+    )
+  ),
+  ADD CONSTRAINT waybills_issue_check CHECK (
+    (state IN ('DRAFT', 'FORECASTED') AND issued_at IS NULL)
+    OR (state NOT IN ('DRAFT', 'FORECASTED') AND issued_at IS NOT NULL)
+  );
 
+ALTER TABLE import_jobs
+  DROP CONSTRAINT import_jobs_state_check,
+  DROP CONSTRAINT import_jobs_commit_check,
+  DROP CONSTRAINT import_jobs_rollback_check,
+  ADD CONSTRAINT import_jobs_state_check CHECK (
+    state IN (
+      'UPLOADED', 'MAPPING', 'VALIDATING', 'READY', 'COMMITTING',
+      'COMPLETED', 'FAILED', 'ROLLED_BACK'
+    )
+  ),
+  ADD CONSTRAINT import_jobs_commit_check CHECK (
+    (state IN ('COMPLETED', 'ROLLED_BACK') AND committed_at IS NOT NULL)
+    OR (state NOT IN ('COMPLETED', 'ROLLED_BACK') AND committed_at IS NULL)
+  ),
+  ADD CONSTRAINT import_jobs_rollback_check CHECK (
+    (state = 'ROLLED_BACK' AND rolled_back_at IS NOT NULL)
+    OR (state <> 'ROLLED_BACK' AND rolled_back_at IS NULL)
+  );
+
+CREATE OR REPLACE FUNCTION validate_import_rollback_job()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  original_type text;
+  original_state text;
+  original_rollback_of_job_id text;
+BEGIN
+  IF NEW.rollback_of_job_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT import_type, state, rollback_of_job_id
+    INTO original_type, original_state, original_rollback_of_job_id
+  FROM import_jobs
+  WHERE tenant_id = NEW.tenant_id AND id = NEW.rollback_of_job_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'rollback target does not exist in the tenant' USING ERRCODE = '23503';
+  END IF;
+  IF original_rollback_of_job_id IS NOT NULL THEN
+    RAISE EXCEPTION 'a rollback job cannot itself be rolled back' USING ERRCODE = '23514';
+  END IF;
+  IF original_state <> 'COMPLETED' THEN
+    RAISE EXCEPTION 'only a completed import job can be rolled back' USING ERRCODE = '23514';
+  END IF;
+  IF original_type <> NEW.import_type THEN
+    RAISE EXCEPTION 'rollback import type must match its original job' USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+ALTER TABLE warehouse_receipts
+  ALTER COLUMN status SET DEFAULT 'SCANNED',
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT warehouse_receipts_status_check,
+  DROP CONSTRAINT warehouse_receipts_version_check,
+  DROP CONSTRAINT warehouse_receipts_undo_shape_check,
+  ADD CONSTRAINT warehouse_receipts_status_check CHECK (
+    status IN ('SCANNED', 'CONFIRMED', 'UNDONE')
+  ),
+  ADD CONSTRAINT warehouse_receipts_version_check CHECK (version >= 1),
+  ADD CONSTRAINT warehouse_receipts_undo_shape_check CHECK (
+    (status IN ('SCANNED', 'CONFIRMED') AND undone_at IS NULL AND undo_reason IS NULL)
+    OR (status = 'UNDONE' AND undone_at IS NOT NULL AND length(btrim(undo_reason)) > 0)
+  );
+
+CREATE OR REPLACE FUNCTION guard_warehouse_receipt_update()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.version <> OLD.version + 1 THEN
+    RAISE EXCEPTION 'warehouse receipt version must advance exactly once' USING ERRCODE = '40001';
+  END IF;
+  IF OLD.status = 'UNDONE' THEN
+    RAISE EXCEPTION 'undone warehouse receipt is immutable' USING ERRCODE = '55000';
+  END IF;
+  IF OLD.status = 'SCANNED' AND NEW.status = 'CONFIRMED' THEN
+    NULL;
+  ELSIF OLD.status = 'CONFIRMED' AND NEW.status = 'UNDONE' THEN
+    IF statement_timestamp() > OLD.undo_until THEN
+      RAISE EXCEPTION 'warehouse receipt undo is stale' USING ERRCODE = '40001';
+    END IF;
+  ELSIF NEW.status = OLD.status THEN
+    NULL;
+  ELSE
+    RAISE EXCEPTION 'invalid warehouse receipt state transition' USING ERRCODE = '55000';
+  END IF;
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+ALTER TABLE load_units
+  ALTER COLUMN status SET DEFAULT 'OPEN',
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT load_units_status_check,
+  DROP CONSTRAINT load_units_version_check,
+  DROP CONSTRAINT load_units_state_shape_check,
+  ADD CONSTRAINT load_units_status_check CHECK (status IN ('OPEN', 'SEALED', 'DISPATCHED')),
+  ADD CONSTRAINT load_units_version_check CHECK (version >= 1),
+  ADD CONSTRAINT load_units_state_shape_check CHECK (
+    (status = 'OPEN' AND sealed_at IS NULL AND dispatched_at IS NULL)
+    OR (status = 'SEALED' AND sealed_at IS NOT NULL AND dispatched_at IS NULL)
+    OR (status = 'DISPATCHED' AND sealed_at IS NOT NULL AND dispatched_at IS NOT NULL)
+  );
+
+CREATE OR REPLACE FUNCTION guard_load_unit_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.status <> 'OPEN'
+     OR NEW.version <> 1
+     OR NEW.sealed_at IS NOT NULL
+     OR NEW.dispatched_at IS NOT NULL THEN
+    RAISE EXCEPTION 'load units must be inserted as OPEN at version one'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION guard_load_unit_update()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.version <> OLD.version + 1 THEN
+    RAISE EXCEPTION 'load unit version must advance exactly once' USING ERRCODE = '40001';
+  END IF;
+  IF OLD.status = 'DISPATCHED' THEN
+    RAISE EXCEPTION 'dispatched load unit is immutable' USING ERRCODE = '55000';
+  END IF;
+  IF OLD.status = 'OPEN' AND NEW.status = 'SEALED' THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM load_unit_items
+      WHERE tenant_id = OLD.tenant_id AND load_unit_id = OLD.id
+    ) THEN
+      RAISE EXCEPTION 'empty load unit cannot be sealed' USING ERRCODE = '23514';
+    END IF;
+  ELSIF OLD.status = 'SEALED' AND NEW.status = 'DISPATCHED' THEN
+    NULL;
+  ELSIF OLD.status = 'OPEN' AND NEW.status = 'OPEN' THEN
+    NULL;
+  ELSE
+    RAISE EXCEPTION 'invalid load unit state transition' USING ERRCODE = '55000';
+  END IF;
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION guard_load_unit_item_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  parent_row record;
+  locked_parent_count integer := 0;
+  expected_parent_count integer := 1;
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.tenant_id <> OLD.tenant_id THEN
+      RAISE EXCEPTION 'load item tenant cannot change' USING ERRCODE = '23514';
+    END IF;
+    IF NEW.load_unit_id <> OLD.load_unit_id THEN
+      expected_parent_count := 2;
+    END IF;
+  END IF;
+
+  FOR parent_row IN
+    SELECT tenant_id, id, status
+    FROM load_units
+    WHERE
+      (TG_OP <> 'INSERT' AND tenant_id = OLD.tenant_id AND id = OLD.load_unit_id)
+      OR (TG_OP <> 'DELETE' AND tenant_id = NEW.tenant_id AND id = NEW.load_unit_id)
+    ORDER BY tenant_id, id
+    FOR UPDATE
+  LOOP
+    locked_parent_count := locked_parent_count + 1;
+    IF parent_row.status <> 'OPEN' THEN
+      RAISE EXCEPTION 'sealed or dispatched load unit items are immutable' USING ERRCODE = '55000';
+    END IF;
+  END LOOP;
+
+  IF locked_parent_count <> expected_parent_count THEN
+    RAISE EXCEPTION 'load unit not found' USING ERRCODE = '23503';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+ALTER TABLE linehaul_bookings
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT linehaul_bookings_status_check,
+  DROP CONSTRAINT linehaul_bookings_version_check,
+  ADD CONSTRAINT linehaul_bookings_status_check CHECK (
+    status IN ('DRAFT', 'CONFIRMED', 'DEPARTED', 'CLOSED', 'CANCELLED')
+  ),
+  ADD CONSTRAINT linehaul_bookings_version_check CHECK (version >= 1);
+
+ALTER TABLE delivery_tasks
+  ALTER COLUMN status SET DEFAULT 'PLANNED',
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT delivery_tasks_status_check,
+  DROP CONSTRAINT delivery_tasks_version_check,
+  DROP CONSTRAINT delivery_tasks_completion_check,
+  ADD CONSTRAINT delivery_tasks_status_check CHECK (
+    status IN ('PLANNED', 'PALLETIZED', 'LOADED', 'OUT_FOR_DELIVERY', 'COMPLETED', 'EXCEPTION')
+  ),
+  ADD CONSTRAINT delivery_tasks_version_check CHECK (version >= 1),
+  ADD CONSTRAINT delivery_tasks_completion_check CHECK (
+    (status = 'COMPLETED' AND completed_at IS NOT NULL) OR status <> 'COMPLETED'
+  );
+
+ALTER TABLE device_sync_conflicts
+  DROP CONSTRAINT device_sync_conflicts_resolution_check,
+  ADD CONSTRAINT device_sync_conflicts_resolution_check CHECK (
+    resolution IS NULL OR resolution IN ('KEEP_SERVER', 'REAPPLY_LOCAL', 'SUBMIT_MANUAL')
+  );
+
+ALTER TABLE inventory_balances
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT inventory_balances_version_check,
+  ADD CONSTRAINT inventory_balances_version_check CHECK (version >= 1);
+ALTER TABLE bills_of_lading
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT bills_of_lading_version_check,
+  ADD CONSTRAINT bills_of_lading_version_check CHECK (version >= 1);
+ALTER TABLE fba_deliveries
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT fba_deliveries_version_check,
+  ADD CONSTRAINT fba_deliveries_version_check CHECK (version >= 1);
+ALTER TABLE print_jobs
+  ALTER COLUMN version SET DEFAULT 1,
+  DROP CONSTRAINT print_jobs_version_check,
+  ADD CONSTRAINT print_jobs_version_check CHECK (version >= 1);

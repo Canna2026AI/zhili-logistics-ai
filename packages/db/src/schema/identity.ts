@@ -5,7 +5,6 @@ import {
   foreignKey,
   index,
   inet,
-  integer,
   jsonb,
   pgPolicy,
   pgTable,
@@ -28,7 +27,7 @@ export const tenants = pgTable(
     displayName: text('display_name').notNull(),
     status: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -53,9 +52,9 @@ export const tenants = pgTable(
     ),
     check(
       'tenants_status_check',
-      sql`status = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text, 'CLOSED'::text])`
+      sql`status = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text, 'EXPIRED'::text])`
     ),
-    check('tenants_version_check', sql`version >= 0`),
+    check('tenants_version_check', sql`version >= 1`),
     check('tenants_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -73,7 +72,7 @@ export const permissionActions = pgTable(
   () => [
     check(
       'permission_actions_code_check',
-      sql`action_code ~ '^[a-z][a-z0-9_-]{1,63}:[a-z][a-z0-9_-]{1,63}$'::text`
+      sql`action_code ~ '^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$'::text`
     ),
     check(
       'permission_actions_resource_check',
@@ -1318,6 +1317,7 @@ export const deviceBindings = pgTable(
     deviceId: text('device_id').notNull(),
     warehouseId: text('warehouse_id').notNull(),
     boundByUserId: text('bound_by_user_id').notNull(),
+    boundSubjectUserId: text('bound_subject_user_id').notNull(),
     status: text().default('ACTIVE').notNull(),
     boundAt: timestamp('bound_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'string' }),
@@ -1364,6 +1364,13 @@ export const deviceBindings = pgTable(
       columns: [table.tenantId, table.boundByUserId],
       foreignColumns: [users.id, users.tenantId],
       name: 'device_bindings_bound_by_fk',
+    })
+      .onUpdate('restrict')
+      .onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.boundSubjectUserId],
+      foreignColumns: [users.id, users.tenantId],
+      name: 'device_bindings_bound_subject_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
@@ -1420,7 +1427,7 @@ export const deviceTasks = pgTable(
     taskType: text('task_type').notNull(),
     taskNumber: text('task_number').notNull(),
     status: text().default('READY').notNull(),
-    priority: integer().default(0).notNull(),
+    priority: text().default('NORMAL').notNull(),
     taskPayload: jsonb('task_payload').default({}).notNull(),
     availableAt: timestamp('available_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
@@ -1428,7 +1435,7 @@ export const deviceTasks = pgTable(
     dueAt: timestamp('due_at', { withTimezone: true, mode: 'string' }),
     completedAt: timestamp('completed_at', { withTimezone: true, mode: 'string' }),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -1439,12 +1446,12 @@ export const deviceTasks = pgTable(
   (table) => [
     index('device_tasks_queue_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('int4_ops'),
+      table.tenantId.asc().nullsLast().op('text_ops'),
       table.assignedDeviceId.asc().nullsLast().op('text_ops'),
-      table.status.asc().nullsLast().op('int4_ops'),
-      table.priority.desc().nullsFirst().op('int4_ops'),
+      table.status.asc().nullsLast().op('text_ops'),
+      sql`(CASE priority WHEN 'URGENT' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'NORMAL' THEN 2 ELSE 1 END) DESC`,
       table.availableAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('int4_ops')
+      table.id.asc().nullsLast().op('text_ops')
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1490,7 +1497,7 @@ export const deviceTasks = pgTable(
     ),
     check(
       'device_tasks_type_check',
-      sql`task_type = ANY (ARRAY['RECEIVE'::text, 'PUTAWAY'::text, 'PICK'::text, 'LOAD'::text, 'DELIVER'::text, 'COUNT'::text])`
+      sql`task_type = ANY (ARRAY['RECEIVE'::text, 'MOVE'::text, 'PICK'::text, 'LOAD'::text, 'DISPATCH'::text, 'LAST_MILE_DELIVERY'::text, 'STOCKTAKE'::text])`
     ),
     check(
       'device_tasks_number_check',
@@ -1500,14 +1507,17 @@ export const deviceTasks = pgTable(
       'device_tasks_status_check',
       sql`status = ANY (ARRAY['READY'::text, 'CLAIMED'::text, 'IN_PROGRESS'::text, 'COMPLETED'::text, 'CANCELLED'::text])`
     ),
-    check('device_tasks_priority_check', sql`(priority >= '-100'::integer) AND (priority <= 100)`),
+    check(
+      'device_tasks_priority_check',
+      sql`priority = ANY (ARRAY['LOW'::text, 'NORMAL'::text, 'HIGH'::text, 'URGENT'::text])`
+    ),
     check('device_tasks_payload_check', sql`jsonb_typeof(task_payload) = 'object'::text`),
     check('device_tasks_due_check', sql`(due_at IS NULL) OR (due_at >= available_at)`),
     check(
       'device_tasks_completion_check',
       sql`((status = 'COMPLETED'::text) AND (completed_at IS NOT NULL)) OR (status <> 'COMPLETED'::text)`
     ),
-    check('device_tasks_version_check', sql`version >= 0`),
+    check('device_tasks_version_check', sql`version >= 1`),
     check('device_tasks_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();

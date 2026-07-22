@@ -1182,11 +1182,11 @@ export const waybills = pgTable(
     ),
     check(
       'waybills_state_check',
-      sql`state = ANY (ARRAY['DRAFT'::text, 'ISSUED'::text, 'IN_TRANSIT'::text, 'DELIVERED'::text, 'VOID'::text])`
+      sql`state = ANY (ARRAY['DRAFT'::text, 'FORECASTED'::text, 'AWAITING_RECEIPT'::text, 'RECEIVED'::text, 'AWAITING_ROUTING'::text, 'AWAITING_TRANSIT'::text, 'IN_TRANSIT'::text, 'OUT_FOR_DELIVERY'::text, 'DELIVERED'::text, 'AWAITING_RETURN'::text, 'RETURNED'::text, 'CANCELLED'::text])`
     ),
     check(
       'waybills_issue_check',
-      sql`((state = 'DRAFT'::text) AND (issued_at IS NULL)) OR ((state <> 'DRAFT'::text) AND (issued_at IS NOT NULL))`
+      sql`((state = ANY (ARRAY['DRAFT'::text, 'FORECASTED'::text])) AND (issued_at IS NULL)) OR ((state <> ALL (ARRAY['DRAFT'::text, 'FORECASTED'::text])) AND (issued_at IS NOT NULL))`
     ),
     check('waybills_version_check', sql`version >= 1`),
     check('waybills_timestamps_check', sql`updated_at >= created_at`),
@@ -1594,7 +1594,7 @@ export const importJobs = pgTable(
     ),
     check(
       'import_jobs_state_check',
-      sql`state = ANY (ARRAY['UPLOADED'::text, 'VALIDATING'::text, 'READY'::text, 'COMMITTING'::text, 'COMMITTED'::text, 'COMMIT_FAILED'::text, 'ROLLING_BACK'::text, 'ROLLED_BACK'::text, 'ROLLBACK_FAILED'::text])`
+      sql`state = ANY (ARRAY['UPLOADED'::text, 'MAPPING'::text, 'VALIDATING'::text, 'READY'::text, 'COMMITTING'::text, 'COMPLETED'::text, 'FAILED'::text, 'ROLLED_BACK'::text])`
     ),
     check(
       'import_jobs_counts_check',
@@ -1602,7 +1602,7 @@ export const importJobs = pgTable(
     ),
     check(
       'import_jobs_commit_check',
-      sql`((state = ANY (ARRAY['COMMITTED'::text, 'ROLLING_BACK'::text, 'ROLLED_BACK'::text, 'ROLLBACK_FAILED'::text])) AND (committed_at IS NOT NULL)) OR ((state <> ALL (ARRAY['COMMITTED'::text, 'ROLLING_BACK'::text, 'ROLLED_BACK'::text, 'ROLLBACK_FAILED'::text])) AND (committed_at IS NULL))`
+      sql`((state = ANY (ARRAY['COMPLETED'::text, 'ROLLED_BACK'::text])) AND (committed_at IS NOT NULL)) OR ((state <> ALL (ARRAY['COMPLETED'::text, 'ROLLED_BACK'::text])) AND (committed_at IS NULL))`
     ),
     check(
       'import_jobs_rollback_check',
