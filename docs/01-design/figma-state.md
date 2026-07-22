@@ -27,8 +27,8 @@
 - 已同步 4 个变量集合、61 个变量、9 个文字样式与 2 个阴影样式；变量包含 WEB code syntax 和控件边界宽度。
 - Foundations 已完成颜色、排版、间距、控件/表格/壳层尺寸、圆角与阴影文档，并通过节点边界和截图检查。
 - Components 已完成首批 7 个代码同名核心组件。Button 按类型拆为 4 个组件集；加上 Input、StatusTag、DataTable、Dialog、Drawer 与 AppShell，共 10 个组件集、95 个变体，并保留可编辑文本属性和真实嵌套 Button 实例。
-- 五端已建立 45 个可编辑关键画布：Ops 14 个、Customer 4 个、PDA 9 个、Platform 3 个、Website 15 个；包含 390×844 客户端/PDA/官网移动画布、1280×720 业务端画布与 1440×900 官网桌面画布。
-- 五端共有 104 条真实 Prototype reaction，覆盖详情、确认、查价、收货、核销、搜索、离线冲突与审计、租户授权，以及官网方案、安全与 Open API 往返。
+- 五端交互原型已扩展并锁定为 163 个 `Flow/*` 可编辑画面：Ops 49 个、Customer 50 个、PDA 29 个、Platform 20 个、Website 15 个；包含 390×844 客户端/PDA 移动画布、1280×720 业务端画布，以及官网桌面与移动画布。
+- 五端共有 429 条真实 Prototype reaction：Ops 70 条、Customer 142 条、PDA 74 条、Platform 65 条、Website 78 条；覆盖 10 条核心 Flow 的正常、失败、权限、并发、危险确认与恢复路径。
 - 已订阅 Material 3、Simple Design System 和 Apple 官方设备库。
 - Simple Design System 可检索到 Button、Input Field、Table、Dialog、Tag、Sidebar，以及颜色、边界、间距、圆角和排版变量。
 - 复用决策：智立需要 28/32px 高密控件、4–6px 圆角、石墨导航、青绿主操作和物流专用数据组件；公共库 API 与视觉均不完全匹配，因此本地创建智立组件。外部库只作图标、可访问性和组件结构参考。
@@ -79,10 +79,10 @@
 | --- | --- | --- | --- |
 | 令牌 | 已实现并测试 | 4 集合、61 变量、11 样式已同步 | Foundations 已完成；继续在组件与页面中验证绑定 |
 | 组件 | 7 个共享核心组件已实现 | 10 个组件集、95 变体已完成，首批核心组件闭环 | 继续物流专用组件、关键状态与 Code Connect |
-| 页面 | 五端主要页面已实现 | 45 个五端关键画布已建立 | 以后续迭代需求增量扩展，不再作为当前门槛缺口 |
+| 页面 | 五端主要页面已实现 | 163 个五端 Flow 画面已建立 | 以后续迭代需求增量扩展，不再作为当前门槛缺口 |
 | 状态 | 自动化已覆盖错误、离线、冲突和权限状态 | 已覆盖正常、选择、加载、空、失败、详情、危险确认、搜索、离线冲突/审计和结果反馈 | 当前 10 条核心 Flow 已闭环 |
 | 竞品一致性 | 视觉与交互已在浏览器实现 | Foundations 与 Button 已有节点、截图和元数据证据 | Figma 负责团队评审、标注、映射和后续改版，不反向覆盖已验证代码语义 |
 
 ## Phase gate
 
-Phase 0–3、核心组件、45 个五端关键画布与 10 条核心 Flow 已满足退出条件。稳定证据包括：Cover `8:2`、Getting Started `8:8`、Foundations `9:2`、Components Catalog `19:2`；Button sets 为 Primary `21:56`、Secondary `24:3`、Quiet `26:39`、Danger `28:39`，Input `33:18`、StatusTag `34:33`、Dialog `35:61`、Drawer `36:58`、AppShell `38:109`、DataTable `41:25`。关键屏包括 Ops 查价 `54:564`、收货结果 `64:1044`、应收核销结果 `64:1178`、已取消运单 `81:1120`，Customer 移动工作台 `48:103`，PDA 收货 `50:2`、离线队列/审计 `82:2`/`82:1474`，Platform 租户详情 `52:111`，Website 桌面首页 `53:2`、方案/安全/Open API `85:128`/`86:128`/`87:128` 及对应移动画布。最终受影响页面截图为 `/tmp/zhili-figma-ops-receiving-final.png` 与 `/tmp/zhili-figma-ops-finance-final.png`；独立终审报告 `/tmp/zhili-figma-key-screens-review.md` 为 `Approved — C0 / I0 / M0`。Figma Gate 已通过；Code Connect 因 Organization/Enterprise 与已发布 Library 前置条件保持 `BLOCKED_EXTERNAL`，不伪造映射且不阻塞设计门槛。
+Phase 0–3、核心组件、163 个五端 Flow 画面、429 条点击关系与 10 条核心 Flow 已满足退出条件。稳定证据包括：Cover `8:2`、Getting Started `8:8`、Foundations `9:2`、Components Catalog `19:2`；Button sets 为 Primary `21:56`、Secondary `24:3`、Quiet `26:39`、Danger `28:39`，Input `33:18`、StatusTag `34:33`、Dialog `35:61`、Drawer `36:58`、AppShell `38:109`、DataTable `41:25`。五端 Flow 页面为 Ops `6:7`、Customer `6:8`、PDA `6:9`、Platform `7:2`、Website `7:3`；逐页检查均不存在零点击 Flow 画面，Customer 与 PDA 同时完成移动画布终审。最终抽样截图覆盖 Ops F02/F04/F10、Customer 发票/冲突/移动支付、PDA F09、Platform F08 与 Website 全量链接；Figma Gate 已通过。Code Connect 因 Organization/Enterprise 与已发布 Library 前置条件保持 `BLOCKED_EXTERNAL`，不伪造映射且不阻塞设计门槛。

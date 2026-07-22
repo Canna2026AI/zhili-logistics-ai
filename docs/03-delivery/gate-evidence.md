@@ -2,14 +2,14 @@
 
 只有可复查证据齐全，门槛状态才可从 `OPEN` 改为 `PASSED`。不能只靠概念图或文字声明；必须同时提供机器可检验的规格、真实接口或自动测试。
 
-| Gate         | 状态        | Commit/版本              | 证据                                                                                             | 未关闭例外                                                                  |
-| ------------ | ----------- | ------------------------ | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题                     | 无                                                                          |
-| 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过                      | 无                                                                          |
-| Figma 同步   | PASSED      | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、45 个五端画布、104 条原型 reaction；独立终审 C0/I0/M0 | Code Connect 受方案与发布条件阻塞，记录为 `BLOCKED_EXTERNAL`，不阻塞本门槛  |
-| 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过                     | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                          |
-| 后端         | IN_PROGRESS | `fe56518`                | Foundation、B1 统一 schema/迁移、OpenAPI/适配器公共基线均经独立 C0/I0/M0 审查并合入主线          | 三个领域 repository、service、controller 与 Mock-off 集成仍在独立工作树实现 |
-| 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                                              | 前置门槛未通过                                                              |
+| Gate         | 状态        | Commit/版本              | 证据                                                                                               | 未关闭例外                                                                  |
+| ------------ | ----------- | ------------------------ | -------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题                       | 无                                                                          |
+| 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过                        | 无                                                                          |
+| Figma 同步   | PASSED      | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、163 个五端 Flow 画面、429 条原型 reaction；终审无阻塞项 | Code Connect 受方案与发布条件阻塞，记录为 `BLOCKED_EXTERNAL`，不阻塞本门槛  |
+| 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过                       | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                          |
+| 后端         | IN_PROGRESS | `fe56518`                | Foundation、B1 统一 schema/迁移、OpenAPI/适配器公共基线均经独立 C0/I0/M0 审查并合入主线            | 三个领域 repository、service、controller 与 Mock-off 集成仍在独立工作树实现 |
+| 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                                                | 前置门槛未通过                                                              |
 
 ## UI 门槛与 B 方案决策
 
@@ -25,6 +25,14 @@ Figma 同步已具备以下证据：
 - 独立设计终审无 Critical/Important/Minor 未关闭项；完整报告为 `/tmp/zhili-figma-key-screens-review.md`。
 
 Code Connect 当前是明确的外部门槛：Pro 方案与未发布的本地组件不满足其 Organization/Enterprise + 已发布 Library 前置条件，状态为 `BLOCKED_EXTERNAL`，不会以静态文档或伪映射替代真实连接。
+
+## 2026-07-23 五端交互原型锁定证据
+
+- Figma 主文件 `Mn56UdJSFmLZSmvOZSLIoX` 的五端 Flow 页面完成统一命名、尺寸和点击目标复验。
+- Ops `6:7` 为 49 个 Flow 画面 / 70 条 reaction；Customer `6:8` 为 50 / 142；PDA `6:9` 为 29 / 74；Platform `7:2` 为 20 / 65；Website `7:3` 为 15 / 78。
+- 总计 163 个 Flow 画面 / 429 条真实点击关系，覆盖 10 条核心流程的正常、选择、加载、空、失败、无权限、数据过期、部分成功、并发冲突、危险确认和恢复路径。
+- Ops、Customer、PDA、Platform 与 Website 均完成点击目标审计，不存在零点击 Flow 画面；移动端画布按 390×844 检查，业务端按 1280×720 检查。
+- 本轮交互冻结后才建立四个前端独立工作树；后端工作树保持暂停，继续遵守“交互 → 前端 → 后端”的顺序。
 
 ## 证据记录规则
 
