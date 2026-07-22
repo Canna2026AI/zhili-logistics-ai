@@ -31,7 +31,7 @@ export function createOrderApi(
     async copy(orderId, version) {
       const response = await client.POST('/orders/{orderId}:copy', {
         params: { path: { orderId }, header: headers(version) },
-        body: { id: orderId, version },
+        body: { copyAddresses: true, copyPackages: true },
       });
       if (response.error) throw response.error;
       const data = response.data?.data;

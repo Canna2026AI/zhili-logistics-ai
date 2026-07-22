@@ -1,35 +1,70 @@
 import type { ZhiliApiClient } from '@zhili/api-client';
 import { waybillDetailFixtures, type WaybillDetail } from '../../waybill/model/waybill';
 
-const detailStringFields = [
-  'id',
-  'waybillNo',
-  'masterNo',
-  'customer',
-  'customerCode',
-  'contactName',
-  'contactPhone',
-  'route',
-  'service',
-  'transport',
-  'forecastWeightKg',
-  'actualWeightKg',
-  'volumeM3',
-  'createdAt',
-  'state',
-  'branch',
-] as const;
+const stateLabels = {
+  DRAFT: '待收货',
+  FORECASTED: '待收货',
+  AWAITING_RECEIPT: '待收货',
+  RECEIVED: '待分货',
+  AWAITING_ROUTING: '待分货',
+  AWAITING_TRANSIT: '待转运',
+  IN_TRANSIT: '转运中',
+  OUT_FOR_DELIVERY: '已发货',
+  DELIVERED: '已签收',
+  AWAITING_RETURN: '问题件',
+  RETURNED: '问题件',
+  CANCELLED: '问题件',
+} as const;
 
-function isWaybillDetail(value: unknown): value is WaybillDetail {
-  if (typeof value !== 'object' || value === null) return false;
+function toWaybillDetail(value: unknown): WaybillDetail | null {
+  if (typeof value !== 'object' || value === null) return null;
   const record = value as Record<string, unknown>;
-  return (
-    detailStringFields.every((field) => typeof record[field] === 'string') &&
-    typeof record.pieces === 'number' &&
-    typeof record.version === 'number' &&
-    Array.isArray(record.timeline) &&
-    record.timeline.every((item) => typeof item === 'string')
-  );
+  const state =
+    typeof record.state === 'string'
+      ? stateLabels[record.state as keyof typeof stateLabels]
+      : undefined;
+  if (
+    !state ||
+    typeof record.id !== 'string' ||
+    typeof record.waybillNo !== 'string' ||
+    typeof record.customerName !== 'string' ||
+    typeof record.customerCode !== 'string' ||
+    typeof record.route !== 'string' ||
+    typeof record.service !== 'string' ||
+    typeof record.transport !== 'string' ||
+    typeof record.forecastWeightKg !== 'string' ||
+    typeof record.pieces !== 'number' ||
+    typeof record.createdAt !== 'string' ||
+    typeof record.branch !== 'string' ||
+    typeof record.version !== 'number' ||
+    !Array.isArray(record.timeline) ||
+    !record.timeline.every((item) => typeof item === 'string')
+  ) {
+    return null;
+  }
+  const nullableString = (field: string) =>
+    typeof record[field] === 'string' ? String(record[field]) : '';
+  return {
+    id: record.id,
+    waybillNo: record.waybillNo,
+    masterNo: nullableString('masterNo'),
+    customer: record.customerName,
+    customerCode: record.customerCode,
+    contactName: nullableString('contactName'),
+    contactPhone: nullableString('contactPhone'),
+    route: record.route,
+    service: record.service,
+    transport: record.transport,
+    forecastWeightKg: record.forecastWeightKg,
+    actualWeightKg: nullableString('actualWeightKg'),
+    volumeM3: nullableString('volumeM3'),
+    pieces: record.pieces,
+    createdAt: record.createdAt,
+    state,
+    version: record.version,
+    branch: record.branch,
+    timeline: record.timeline,
+  };
 }
 
 function isWaybillBatchResult(value: unknown): value is WaybillBatchResult {
@@ -65,13 +100,23 @@ export interface WaybillPort {
   createLabel(id: string, version: number, format: 'A4' | '100X150'): Promise<WaybillCommandResult>;
   batch(
     ids: string[],
-    command: string,
+    command: 'SUBMIT' | 'CANCEL' | 'HOLD' | 'RELEASE',
     version: number,
     reason: string
   ): Promise<WaybillBatchResult>;
-  renumber(id: string, version: number, waybillNo: string): Promise<WaybillCommandResult>;
-  split(id: string, version: number, packageRefs: string[]): Promise<WaybillCommandResult>;
-  merge(ids: string[], version: number): Promise<WaybillCommandResult>;
+  renumber(
+    id: string,
+    version: number,
+    waybillNo: string,
+    reason: string
+  ): Promise<WaybillCommandResult>;
+  split(
+    id: string,
+    version: number,
+    packageRefs: string[],
+    reason: string
+  ): Promise<WaybillCommandResult>;
+  merge(ids: string[], version: number, reason: string): Promise<WaybillCommandResult>;
 }
 
 export const memoryWaybillPort: WaybillPort = {
@@ -114,8 +159,8 @@ export function createWaybillApi(
         params: { path: { waybillId } },
       });
       if (response.error) throw response.error;
-      const remote: unknown = response.data?.data;
-      if (!isWaybillDetail(remote)) throw new Error('WAYBILL_DETAIL_CONTRACT_INCOMPLETE');
+      const remote = toWaybillDetail(response.data?.data);
+      if (!remote) throw new Error('WAYBILL_DETAIL_CONTRACT_INCOMPLETE');
       return remote;
     },
     async submit(waybillId, version) {
@@ -128,7 +173,7 @@ export function createWaybillApi(
     async createLabel(waybillId, version, format) {
       const response = await client.POST('/waybills/{waybillId}/label-jobs', {
         params: { path: { waybillId }, header: headers(version) },
-        body: { format, status: 'QUEUED', version },
+        body: { format, copies: 1 },
       });
       if (response.error) throw response.error;
       return { version: Number(response.data?.data.version ?? version + 1) };
@@ -136,39 +181,36 @@ export function createWaybillApi(
     async batch(ids, command, version, reason) {
       const response = await client.POST('/waybills:batch-command', {
         params: { header: headers(version) },
-        body: { ids, command, reason, version },
+        body: { waybillIds: ids, command, reason },
       });
       if (response.error) throw response.error;
       const data: unknown = response.data?.data;
       if (!isWaybillBatchResult(data)) throw new Error('WAYBILL_BATCH_RESULT_CONTRACT_INCOMPLETE');
       return data;
     },
-    async renumber(waybillId, version, waybillNo) {
+    async renumber(waybillId, version, waybillNo, reason) {
       const response = await client.POST('/waybills/{waybillId}:renumber', {
         params: { path: { waybillId }, header: headers(version) },
         body: {
-          id: waybillId,
-          waybillNo,
-          state: 'DRAFT',
-          allowedActions: [],
-          version,
+          newWaybillNo: waybillNo,
+          reason,
         },
       });
       if (response.error) throw response.error;
       return { version: Number(response.data?.data.version ?? version + 1) };
     },
-    async split(waybillId, version, packageRefs) {
+    async split(waybillId, version, packageRefs, reason) {
       const response = await client.POST('/waybills:split', {
         params: { header: headers(version) },
-        body: { id: waybillId, packageRefs, version },
+        body: { waybillId, packageRefs, reason },
       });
       if (response.error) throw response.error;
       return { version: Number(response.data?.data.version ?? version + 1) };
     },
-    async merge(ids, version) {
+    async merge(ids, version, reason) {
       const response = await client.POST('/waybills:merge', {
         params: { header: headers(version) },
-        body: { ids, version },
+        body: { waybillIds: ids, reason },
       });
       if (response.error) throw response.error;
       return { version: Number(response.data?.data.version ?? version + 1) };

@@ -13,7 +13,22 @@ type WaybillResponse = components['schemas']['WaybillResponse'];
 const canonicalWaybill = {
   id: '01J00000000000000000000000',
   waybillNo: 'S2505120004',
+  masterNo: 'MAWB-20260722-01',
+  customerName: '智立华南客户',
+  customerCode: 'CUST-SOUTH-001',
+  contactName: '张伟',
+  contactPhone: '138****2468',
+  route: 'SZX-LAX',
+  service: '智立空运专线',
+  transport: 'AIR',
+  forecastWeightKg: '18.50',
+  actualWeightKg: '18.80',
+  volumeM3: '0.126',
+  pieces: 3,
+  createdAt: '2026-07-22T02:10:00.000Z',
   state: 'RECEIVED',
+  branch: '深圳分公司',
+  timeline: ['10:10 创建运单', '11:20 完成收货'],
   allowedActions: [
     { action: 'warehouse.route', enabled: true },
     { action: 'waybill.cancel', enabled: false, disabledReason: '已完成收货' },
@@ -59,7 +74,7 @@ export function createScenarioHandlers(scenario: MockScenario = 'normal'): HttpH
             { field: 'permission', reason: 'waybill.read' },
           ]);
         case 'stale':
-          return error('STALE_VERSION', '数据已被其他终端更新', 409, [
+          return error('STALE_VERSION', '数据已被其他终端更新', 412, [
             { field: 'version', reason: '本地版本 6，服务端版本 7', rejectedValue: 6 },
           ]);
         case 'partial':

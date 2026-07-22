@@ -210,6 +210,9 @@ importers:
       '@zhili/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@zhili/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@zhili/mocks':
         specifier: workspace:*
         version: link:../../packages/mocks
@@ -316,6 +319,9 @@ importers:
       '@zhili/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@zhili/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@zhili/mocks':
         specifier: workspace:*
         version: link:../../packages/mocks

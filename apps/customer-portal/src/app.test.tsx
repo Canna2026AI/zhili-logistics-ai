@@ -329,9 +329,14 @@ describe('客户门户', () => {
   });
 
   it('创建订单后通过审计 port 关联已接受报价且不丢弃版本', async () => {
-    const linkAcceptedQuote = vi
-      .spyOn(customerPort, 'linkAcceptedQuote')
-      .mockResolvedValue(undefined);
+    const linkAcceptedQuote = vi.spyOn(customerPort, 'linkAcceptedQuote').mockResolvedValue({
+      quoteId: '01JQUOTE000000000000000042',
+      quoteOptionId: '01JQUOTEOPTION0000000000001',
+      orderId: '01JORDER000000000000000006',
+      waybillId: '01JWAYBILL000000000000001',
+      orderVersion: 2,
+      waybillVersion: 1,
+    });
 
     await customerPort.createOrder({
       origin: 'CN-SZX 518000',
@@ -353,7 +358,6 @@ describe('客户门户', () => {
       orderVersion: 1,
       quoteId: '01JQUOTE000000000000000042',
       optionId: '01JQUOTEOPTION0000000000001',
-      quoteVersion: 2,
     });
   });
 
@@ -512,7 +516,10 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '地址簿' }));
     await user.type(screen.getByLabelText('地址名称'), '洛杉矶仓');
     await user.click(screen.getByRole('button', { name: '保存地址' }));
-    expect(screen.getByRole('table', { name: '地址列表' })).toHaveTextContent('洛杉矶仓');
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '请先补全国家、城市、详细地址和邮编'
+    );
+    expect(screen.getByRole('table', { name: '地址列表' })).not.toHaveTextContent('洛杉矶仓');
 
     await user.click(screen.getByRole('button', { name: '账单与付款' }));
     await user.upload(
@@ -619,9 +626,9 @@ describe('客户门户', () => {
     render(<ScopedApp tenantId="tenant-a" customerId="customer-b" companyName="B 客户" />);
     await user.click(screen.getByRole('button', { name: '地址簿' }));
     expect(screen.getByRole('table', { name: '地址列表' })).not.toHaveTextContent('A 客户专属仓');
-    expect(localStorage.getItem('zhili.customer.tenant-a.customer-a.addresses')).toContain(
-      'A 客户专属仓'
-    );
+    expect(
+      localStorage.getItem('zhili.customer.tenant-a.customer-a.addresses') ?? ''
+    ).not.toContain('A 客户专属仓');
     expect(
       localStorage.getItem('zhili.customer.tenant-a.customer-b.addresses') ?? ''
     ).not.toContain('A 客户专属仓');

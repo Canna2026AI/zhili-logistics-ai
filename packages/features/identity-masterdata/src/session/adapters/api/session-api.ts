@@ -21,9 +21,9 @@ export function createSessionApi(client: ZhiliApiClient): SessionPort {
       const response = await client.POST('/auth/sessions:refresh');
       return readSession(response);
     },
-    async reauthenticate(session) {
+    async reauthenticate(proof) {
       const response = await client.POST('/auth/sessions/current:reauthenticate', {
-        body: session,
+        body: proof,
       });
       if (response.error) throw response.error;
     },

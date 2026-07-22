@@ -249,10 +249,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List order projections using a stable cursor */
+    get: operations['listOrders'];
     put?: never;
     /** Create an order draft */
     post: operations['createOrderDraft'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/{orderId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one order projection */
+    get: operations['getOrder'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -283,10 +301,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List quote projections using a stable cursor */
+    get: operations['listQuotes'];
     put?: never;
     /** Calculate a versioned multi-channel quote */
     post: operations['createQuote'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/quotes/{quoteId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one quote projection */
+    get: operations['getQuote'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -321,6 +357,43 @@ export interface paths {
     put?: never;
     /** Accept one quote option */
     post: operations['acceptQuote'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/{orderId}:link-accepted-quote': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Link an accepted quote option to an order and create its draft waybill
+     * @description Atomically proves the quote option is accepted and unexpired, links it to the order, and creates or replays exactly one draft waybill identity.
+     */
+    post: operations['linkAcceptedQuoteToOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/waybills': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List operational waybill projections using a stable cursor */
+    get: operations['listWaybills'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -372,6 +445,40 @@ export interface paths {
     put?: never;
     /** Record an idempotent receiving scan */
     post: operations['receiveScan'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/warehouse/receipts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List warehouse receipts using a stable cursor */
+    get: operations['listWarehouseReceipts'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/warehouse/receipts/{receiptId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one warehouse receipt */
+    get: operations['getWarehouseReceipt'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -564,10 +671,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List linehaul bookings using a stable cursor */
+    get: operations['listBookings'];
     put?: never;
     /** Create a linehaul booking */
     post: operations['createBooking'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/linehaul/bookings/{bookingId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one linehaul booking */
+    get: operations['getBooking'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -581,10 +706,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List load units using a stable cursor */
+    get: operations['listLoadUnits'];
     put?: never;
     /** Create a bag pallet or container */
     post: operations['createLoadUnit'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/linehaul/load-units/{loadUnitId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one load unit */
+    get: operations['getLoadUnit'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -666,10 +809,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List last-mile intake batches using a stable cursor */
+    get: operations['listLastMileIntakes'];
     put?: never;
     /** Create a last-mile intake batch */
     post: operations['createLastMileIntake'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/last-mile/intakes/{intakeId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one last-mile intake batch */
+    get: operations['getLastMileIntake'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -683,10 +844,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List delivery tasks using a stable cursor */
+    get: operations['listDeliveryTasks'];
     put?: never;
     /** Create a driver or partner delivery task */
     post: operations['createDeliveryTask'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/last-mile/delivery-tasks/{deliveryTaskId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one delivery task */
+    get: operations['getDeliveryTask'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1162,10 +1341,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List import jobs using a stable cursor */
+    get: operations['listImports'];
     put?: never;
     /** Create a durable import job */
     post: operations['createImportJob'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/imports/{importId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one import job projection */
+    get: operations['getImportJob'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1423,7 +1620,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a versioned organization node */
+    /**
+     * Create or update a versioned organization node
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertOrganizationNode'];
     delete?: never;
     options?: never;
@@ -1440,7 +1640,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update an employee and assignments */
+    /**
+     * Create or update an employee and assignments
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertUser'];
     delete?: never;
     options?: never;
@@ -1459,7 +1662,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a customer address in data scope */
+    /**
+     * Create or update a customer address in data scope
+     * @description The path customerId is authoritative. CREATE forbids If-Match; UPDATE requires a strong If-Match and an address id already owned by that path customer.
+     */
     post: operations['upsertCustomerAddress'];
     delete?: never;
     options?: never;
@@ -1476,7 +1682,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update an agent supplier or last-mile partner */
+    /**
+     * Create or update an agent supplier or last-mile partner
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertPartner'];
     delete?: never;
     options?: never;
@@ -1565,7 +1774,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a versioned channel product */
+    /**
+     * Create or update a versioned channel product
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertChannelProduct'];
     delete?: never;
     options?: never;
@@ -1601,7 +1813,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a versioned cost or sell price */
+    /**
+     * Create or update a versioned cost or sell price
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertRatePriceVersion'];
     delete?: never;
     options?: never;
@@ -1618,7 +1833,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a surcharge calculation rule */
+    /**
+     * Create or update a surcharge calculation rule
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertSurchargeRule'];
     delete?: never;
     options?: never;
@@ -2929,6 +3147,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @enum {string} */
+    PreconditionProblemCode: 'PRECONDITION_REQUIRED' | 'PRECONDITION_INVALID' | 'STALE_VERSION';
     /** @example 01JY8Z8F6ME4F0Y9QH2X6D4R7A */
     Ulid: string;
     /** @example 123.50 */
@@ -3286,6 +3506,21 @@ export interface components {
       id: components['schemas']['Ulid'];
       /** @example S2505120004 */
       waybillNo: string;
+      masterNo: string | null;
+      customerName: string;
+      customerCode: string;
+      contactName: string | null;
+      contactPhone: string | null;
+      route: string;
+      service: string;
+      /** @enum {string} */
+      transport: 'AIR' | 'SEA' | 'RAIL' | 'ROAD' | 'EXPRESS';
+      forecastWeightKg: components['schemas']['Decimal'];
+      actualWeightKg: components['schemas']['Decimal'] | null;
+      volumeM3: components['schemas']['Decimal'] | null;
+      pieces: number;
+      /** Format: date-time */
+      createdAt: string;
       /** @enum {string} */
       state:
         | 'DRAFT'
@@ -3300,6 +3535,8 @@ export interface components {
         | 'AWAITING_RETURN'
         | 'RETURNED'
         | 'CANCELLED';
+      branch: string;
+      timeline: string[];
       allowedActions: components['schemas']['AllowedAction'][];
       version: number;
     };
@@ -3720,16 +3957,6 @@ export interface components {
       vehicleId?: string;
       exceptionCode?: string;
       note?: string;
-    };
-    /** @description Client-authored device event intent for a canonical delivery task transition. deviceEventId is persisted and audited by the server; targetStatus is validated against DeliveryTaskStatus and the current authoritative aggregate version. */
-    DeliveryEvent: {
-      deviceEventId: components['schemas']['Ulid'];
-      targetStatus: components['schemas']['DeliveryTaskStatus'];
-      /** Format: date-time */
-      occurredAt: string;
-      /** @description Scoped reservations whose eventId must equal deviceEventId. */
-      mediaRefs: string[];
-      scanEvidence: components['schemas']['DeliveryScanEvidence'];
     };
     /** @enum {string} */
     LastMileDeviceCommandDisposition: 'APPLIED' | 'DUPLICATE';
@@ -4186,6 +4413,423 @@ export interface components {
       data: components['schemas']['AiAction'];
       meta: components['schemas']['Meta'];
     };
+    UpdateTenantEntitlementsRequest: {
+      modules: components['schemas']['TenantModuleEntitlementInput'][];
+    };
+    TenantModuleEntitlementInput: {
+      moduleCode: string;
+      enabled: boolean;
+      /** Format: date-time */
+      expiresAt?: string | null;
+      quotas: {
+        [key: string]: number;
+      };
+    };
+    StartWechatLoginRequest: {
+      /** Format: uri */
+      redirectUri: string;
+      clientNonce: string;
+      tenantHint?: string;
+    };
+    CompleteWechatLoginRequest: {
+      code: string;
+      state: string;
+      /** Format: uri */
+      redirectUri: string;
+    };
+    WechatAuthorization: {
+      /** Format: uri */
+      authorizationUrl: string;
+      /** Format: date-time */
+      stateExpiresAt: string;
+    };
+    WechatAuthorizationResponse: {
+      data: components['schemas']['WechatAuthorization'];
+      meta: components['schemas']['Meta'];
+    };
+    ReauthenticateWithPasswordRequest: {
+      /** @constant */
+      method: 'PASSWORD';
+      password: string;
+    };
+    ReauthenticateWithChallengeRequest: {
+      /** @constant */
+      method: 'CHALLENGE';
+      challengeToken: string;
+    };
+    ReauthenticateCurrentSessionRequest: {
+      /** @enum {string} */
+      method: 'PASSWORD' | 'CHALLENGE';
+      password?: string;
+      challengeToken?: string;
+    } & (
+      | components['schemas']['ReauthenticateWithPasswordRequest']
+      | components['schemas']['ReauthenticateWithChallengeRequest']
+    );
+    ReauthenticationGrant: {
+      grantId: components['schemas']['Ulid'];
+      /** Format: date-time */
+      expiresAt: string;
+      actionClasses: string[];
+    };
+    ReauthenticationResponse: {
+      data: components['schemas']['ReauthenticationGrant'];
+      meta: components['schemas']['Meta'];
+    };
+    FieldPolicyInput: {
+      resource: string;
+      field: string;
+      /** @enum {string} */
+      decision: 'READ' | 'MASK' | 'DENY';
+      contexts: ('VIEW' | 'EDIT' | 'COPY' | 'EXPORT' | 'AUDIT')[];
+    };
+    PreviewFieldPolicyRequest: {
+      subjectId: components['schemas']['Ulid'];
+      proposedPolicies: components['schemas']['FieldPolicyInput'][];
+      sampleResourceId?: string;
+    };
+    FieldPolicyPreview: {
+      subjectId: components['schemas']['Ulid'];
+      effectivePolicies: components['schemas']['FieldPolicyInput'][];
+      differences: string[];
+    };
+    FieldPolicyPreviewResponse: {
+      data: components['schemas']['FieldPolicyPreview'];
+      meta: components['schemas']['Meta'];
+    };
+    UpsertOrganizationNodeRequest: {
+      /** @enum {string} */
+      mode: 'CREATE' | 'UPDATE';
+      id?: components['schemas']['Ulid'];
+      code: string;
+      name: string;
+      /** @enum {string} */
+      nodeType: 'COMPANY' | 'DEPARTMENT' | 'SITE' | 'WAREHOUSE' | 'LOCATION';
+      parentId?: components['schemas']['Ulid'] | null;
+      /** @enum {string} */
+      status: 'ACTIVE' | 'INACTIVE';
+    };
+    UpsertUserRequest: {
+      /** @enum {string} */
+      mode: 'CREATE' | 'UPDATE';
+      id?: components['schemas']['Ulid'];
+      loginName: string;
+      displayName: string;
+      /** Format: email */
+      email?: string;
+      mobile?: string;
+      /** @enum {string} */
+      status: 'ACTIVE' | 'DISABLED' | 'LOCKED';
+      roleIds: components['schemas']['Ulid'][];
+      organizationNodeIds: components['schemas']['Ulid'][];
+    };
+    UpsertCustomerAddressRequest: {
+      /** @enum {string} */
+      mode: 'CREATE' | 'UPDATE';
+      id?: components['schemas']['Ulid'];
+      label: string;
+      address: components['schemas']['Address'];
+      isDefault: boolean;
+    };
+    UpsertPartnerRequest: {
+      /** @enum {string} */
+      mode: 'CREATE' | 'UPDATE';
+      id?: components['schemas']['Ulid'];
+      partnerCode: string;
+      name: string;
+      /** @enum {string} */
+      partnerType: 'AGENT' | 'SUPPLIER' | 'CARRIER' | 'LAST_MILE';
+      /** @enum {string} */
+      status: 'ACTIVE' | 'INACTIVE';
+      contactName?: string;
+      contactPhone?: string;
+    };
+    ReferenceDataItemInput: {
+      code: string;
+      label: string;
+      value: string;
+    };
+    PublishReferenceDataVersionRequest: {
+      /** @enum {string} */
+      dataSetCode: 'COUNTRY' | 'PORT' | 'CURRENCY' | 'FEE' | 'COMMODITY';
+      versionLabel: string;
+      items: components['schemas']['ReferenceDataItemInput'][];
+      reason: string;
+    };
+    UpdateCustomerCreditPolicyRequest: {
+      /** @enum {string} */
+      tier: 'STANDARD' | 'SILVER' | 'GOLD' | 'STRATEGIC';
+      creditLimit: components['schemas']['Money'];
+      paymentCycleDays: number;
+      holdOnExceed: boolean;
+      reason: string;
+    };
+    UpsertChannelProductRequest: {
+      /** @enum {string} */
+      mode: 'CREATE' | 'UPDATE';
+      id?: components['schemas']['Ulid'];
+      productCode: string;
+      name: string;
+      /** @enum {string} */
+      transportMode: 'AIR' | 'SEA' | 'RAIL' | 'ROAD' | 'EXPRESS';
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    PublishRateCardRequest: {
+      versionLabel: string;
+      /** Format: date-time */
+      effectiveFrom: string;
+      /** Format: date-time */
+      effectiveUntil?: string | null;
+      currency: components['schemas']['CurrencyCode'];
+      reason: string;
+    };
+    UpsertRatePriceVersionRequest: {
+      /** @enum {string} */
+      mode: 'CREATE' | 'UPDATE';
+      id?: components['schemas']['Ulid'];
+      channelProductId: components['schemas']['Ulid'];
+      /** @enum {string} */
+      priceType: 'COST' | 'AGENT' | 'CUSTOMER' | 'SPECIAL';
+      currency: components['schemas']['CurrencyCode'];
+      amount: components['schemas']['Decimal'];
+      /** Format: date-time */
+      effectiveFrom: string;
+      /** Format: date-time */
+      effectiveUntil?: string | null;
+    };
+    UpsertSurchargeRuleRequest: {
+      /** @enum {string} */
+      mode: 'CREATE' | 'UPDATE';
+      id?: components['schemas']['Ulid'];
+      ruleCode: string;
+      chargeCode: string;
+      /** @enum {string} */
+      calculation: 'FLAT' | 'PER_KG' | 'PERCENTAGE';
+      amount?: components['schemas']['Decimal'];
+      priority: number;
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    ValidateShipmentRestrictionsRequest: {
+      channelProductId?: components['schemas']['Ulid'];
+      origin: components['schemas']['Address'];
+      destination: components['schemas']['Address'];
+      packages: components['schemas']['PackageInput'][];
+      commodityCodes?: string[];
+    };
+    CopyOrderRequest: {
+      copyAddresses: boolean;
+      copyPackages: boolean;
+      customerId?: components['schemas']['Ulid'];
+    };
+    RollbackImportBatchRequest: {
+      reason: string;
+    };
+    UpsertWaybillPackagesRequest: {
+      packages: components['schemas']['PackageInput'][];
+    };
+    DeclarationItemInput: {
+      description: string;
+      quantity: number;
+      unitValue: components['schemas']['Decimal'];
+      currency: components['schemas']['CurrencyCode'];
+      countryOfOrigin: string;
+      hsCode?: string;
+    };
+    UpdateWaybillDeclarationRequest: {
+      items: components['schemas']['DeclarationItemInput'][];
+      insured: boolean;
+      insuredValue?: components['schemas']['Money'];
+      attachments: string[];
+    };
+    CreateLabelJobRequest: {
+      /** @enum {string} */
+      format: 'A4' | '100X150';
+      copies: number;
+    };
+    CancelWaybillRequest: {
+      reason: string;
+    };
+    RenumberWaybillRequest: {
+      newWaybillNo: string;
+      reason: string;
+    };
+    SplitWaybillRequest: {
+      waybillId: components['schemas']['Ulid'];
+      packageRefs: string[];
+      reason: string;
+    };
+    MergeWaybillsRequest: {
+      waybillIds: components['schemas']['Ulid'][];
+      reason: string;
+    };
+    BatchWaybillCommandRequest: {
+      waybillIds: components['schemas']['Ulid'][];
+      /** @enum {string} */
+      command: 'SUBMIT' | 'CANCEL' | 'HOLD' | 'RELEASE';
+      reason: string;
+    };
+    RecordMeasurementRequest: {
+      deviceEventId: components['schemas']['Ulid'];
+      actualWeightKg: components['schemas']['Decimal'];
+      lengthCm: components['schemas']['Decimal'];
+      widthCm: components['schemas']['Decimal'];
+      heightCm: components['schemas']['Decimal'];
+      /** Format: date-time */
+      measuredAt: string;
+    };
+    ReceiptMediaReference: {
+      mediaId: components['schemas']['Ulid'];
+      objectRef: string;
+      sha256: string;
+      /** @enum {string} */
+      kind: 'PHOTO' | 'VIDEO' | 'DOCUMENT';
+      /** Format: date-time */
+      capturedAt: string;
+    };
+    AttachReceiptMediaRequest: {
+      media: components['schemas']['ReceiptMediaReference'][];
+    };
+    UndoReceiptRequest: {
+      reason: string;
+    };
+    MoveInventoryRequest: {
+      warehouseId: components['schemas']['Ulid'];
+      sku: string;
+      fromLocationId?: components['schemas']['Ulid'] | null;
+      toLocationId: components['schemas']['Ulid'];
+      quantity: number;
+      reason: string;
+    };
+    StocktakeItemInput: {
+      sku: string;
+      countedQuantity: number;
+    };
+    CommitStocktakeRequest: {
+      warehouseId: components['schemas']['Ulid'];
+      locationId: components['schemas']['Ulid'];
+      /** Format: date-time */
+      countedAt: string;
+      items: components['schemas']['StocktakeItemInput'][];
+    };
+    CreatePrintJobRequest: {
+      /** @enum {string} */
+      resourceType: 'WAYBILL' | 'RECEIPT' | 'LOAD_UNIT' | 'BILL_OF_LADING';
+      resourceId: components['schemas']['Ulid'];
+      templateId: components['schemas']['Ulid'];
+      copies: number;
+    };
+    ReprintDocumentRequest: {
+      sourcePrintJobId: components['schemas']['Ulid'];
+      reason: string;
+      copies: number;
+    };
+    ValidateLoadCompatibilityRequest: {
+      loadUnitId?: components['schemas']['Ulid'];
+      waybillIds: components['schemas']['Ulid'][];
+    };
+    LinkFbaShipmentRequest: {
+      loadUnitId: components['schemas']['Ulid'];
+      amazonShipmentId: string;
+      cartonRefs: string[];
+    };
+    ScanLastMileIntakeRequest: {
+      deviceEventId: components['schemas']['Ulid'];
+      waybillId: components['schemas']['Ulid'];
+      /** Format: date-time */
+      scannedAt: string;
+      /** @enum {string} */
+      condition: 'ACCEPTED' | 'DAMAGED' | 'MISSING';
+      note?: string;
+    };
+    UpdateDeliveryTaskStatusRequest: {
+      deviceEventId: components['schemas']['Ulid'];
+      targetStatus: components['schemas']['DeliveryTaskStatus'];
+      /** Format: date-time */
+      occurredAt: string;
+      mediaRefs: string[];
+      scanEvidence: components['schemas']['DeliveryScanEvidence'];
+      exceptionReason?: string;
+    };
+    AmendProofOfDeliveryRequest: {
+      proofOfDeliveryId: components['schemas']['Ulid'];
+      reason: string;
+      recipientName: string;
+      /** Format: date-time */
+      signedAt: string;
+      evidenceRefs: string[];
+    };
+    SyncLastMilePartnerRequest: {
+      partnerId: components['schemas']['Ulid'];
+      externalEventId: string;
+      eventType: string;
+      /** Format: date-time */
+      occurredAt: string;
+      payloadRef: string;
+    };
+    ReplayPartnerEventRequest: {
+      partnerEventId: components['schemas']['Ulid'];
+      reason: string;
+    };
+    GenerateLastMileChargesRequest: {
+      deliveryTaskIds: components['schemas']['Ulid'][];
+      /** Format: date */
+      billingDate: string;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    LinkAcceptedQuoteToOrderRequest: {
+      quoteId: components['schemas']['Ulid'];
+      quoteOptionId: components['schemas']['Ulid'];
+    };
+    AcceptedQuoteOrderLink: {
+      quoteId: components['schemas']['Ulid'];
+      quoteOptionId: components['schemas']['Ulid'];
+      orderId: components['schemas']['Ulid'];
+      waybillId: components['schemas']['Ulid'];
+      orderVersion: number;
+      waybillVersion: number;
+    };
+    AcceptedQuoteOrderLinkResponse: {
+      data: components['schemas']['AcceptedQuoteOrderLink'];
+      meta: components['schemas']['Meta'];
+    };
+    QuoteListResponse: {
+      data: components['schemas']['Quote'][];
+      meta: components['schemas']['Meta'];
+    };
+    OrderListResponse: {
+      data: components['schemas']['Order'][];
+      meta: components['schemas']['Meta'];
+    };
+    WaybillListResponse: {
+      data: components['schemas']['Waybill'][];
+      meta: components['schemas']['Meta'];
+    };
+    ImportJobListResponse: {
+      data: components['schemas']['ImportJob'][];
+      meta: components['schemas']['Meta'];
+    };
+    WarehouseReceiptListResponse: {
+      data: components['schemas']['WarehouseReceipt'][];
+      meta: components['schemas']['Meta'];
+    };
+    LoadUnitListResponse: {
+      data: components['schemas']['LoadUnit'][];
+      meta: components['schemas']['Meta'];
+    };
+    BookingListResponse: {
+      data: components['schemas']['Booking'][];
+      meta: components['schemas']['Meta'];
+    };
+    LastMileIntakeListResponse: {
+      data: components['schemas']['LastMileIntake'][];
+      meta: components['schemas']['Meta'];
+    };
+    DeliveryTaskListResponse: {
+      data: components['schemas']['DeliveryTask'][];
+      meta: components['schemas']['Meta'];
+    };
     /** @description Extensible contract shape refined by the owning domain module. */
     DomainRecord: {
       id?: components['schemas']['Ulid'];
@@ -4208,66 +4852,16 @@ export interface components {
       | components['schemas']['PaymentRefund']
       | components['schemas']['PaymentReconciliation']
       | components['schemas']['Approval'];
-    /** @description Tenant module, expiry, quota and usage entitlement. */
-    TenantEntitlement: components['schemas']['DomainRecord'];
-    /** @description Official WeChat OAuth identity binding or callback payload. */
-    OAuthBinding: components['schemas']['DomainRecord'];
-    /** @description Field read, write, masking, copy and export decision. */
-    FieldPolicy: components['schemas']['DomainRecord'];
-    /** @description Versioned company, department, site, warehouse or location node. */
-    OrganizationNode: components['schemas']['DomainRecord'];
-    /** @description Employee identity, roles, data scopes and assignments. */
-    User: components['schemas']['DomainRecord'];
     /** @description Managed PDA device and warehouse binding. */
     Device: components['schemas']['DomainRecord'];
-    /** @description Agent, supplier or last-mile partner master record. */
-    Partner: components['schemas']['DomainRecord'];
-    /** @description Published country, port, currency, fee or commodity reference set. */
-    ReferenceDataVersion: components['schemas']['DomainRecord'];
-    /** @description Customer tier, credit limit, payment cycle and hold policy. */
-    CreditPolicy: components['schemas']['DomainRecord'];
     /** @description Audited shipment hold or authorized release command. */
     ShipmentHold: components['schemas']['DomainRecord'];
-    /** @description Versioned carrier channel product and service coverage. */
-    ChannelProduct: components['schemas']['DomainRecord'];
-    /** @description Published zone, weight break, volumetric and minimum-charge rules. */
-    RateCardVersion: components['schemas']['DomainRecord'];
-    /** @description Versioned cost, agent, customer or special selling price. */
-    RatePriceVersion: components['schemas']['DomainRecord'];
-    /** @description Versioned fuel, remote, oversize or handling surcharge rule. */
-    SurchargeRule: components['schemas']['DomainRecord'];
-    /** @description Restriction validation result with unavailable reasons and alternatives. */
-    RestrictionResult: components['schemas']['DomainRecord'];
-    /** @description Editable standard or FBA order draft snapshot. */
-    OrderDraft: components['schemas']['DomainRecord'];
-    /** @description Import validation and atomic or partial commit decision. */
-    ImportCommit: components['schemas']['DomainRecord'];
-    /** @description Waybill package dimensions, weight and commodity lines. */
-    Package: components['schemas']['DomainRecord'];
-    /** @description Customs declaration, insurance and attachment version. */
-    Declaration: components['schemas']['DomainRecord'];
-    /** @description Immutable carrier label generation job. */
-    LabelJob: components['schemas']['DomainRecord'];
-    /** @description Batch command input and per-item outcome. */
-    BatchCommand: components['schemas']['DomainRecord'];
     /** @description Idempotent warehouse scan event and matched forecast. */
     WarehouseScan: components['schemas']['DomainRecord'];
-    /** @description Scale, dimensions, volumetric and chargeable-weight evidence. */
-    Measurement: components['schemas']['DomainRecord'];
-    /** @description Putaway, movement or stocktake variance record. */
-    InventoryMovement: components['schemas']['DomainRecord'];
     /** @description Chosen channel, alternatives and unavailable explanation. */
     RoutingDecision: components['schemas']['DomainRecord'];
     /** @description Dispatch preflight result and handover snapshot. */
     DispatchResult: components['schemas']['DomainRecord'];
-    /** @description Browser or local-agent print job and source lineage. */
-    PrintJob: components['schemas']['DomainRecord'];
-    /** @description Customs, packaging and load compatibility decision. */
-    CompatibilityResult: components['schemas']['DomainRecord'];
-    /** @description Amazon shipment and FBA carton linkage. */
-    FbaShipmentLink: components['schemas']['DomainRecord'];
-    /** @description Checkpointed partner command, callback or reconciliation event. */
-    PartnerSyncEvent: components['schemas']['DomainRecord'];
     /** @description Tracking stall detection evidence and automation outcome. */
     TrackingStall: components['schemas']['DomainRecord'];
     /** @description Customer-visible material request and submitted evidence. */
@@ -4494,6 +5088,31 @@ export interface components {
         'application/problem+json': components['schemas']['ErrorEnvelope'];
       };
     };
+    /** @description Missing, malformed or stale strong If-Match precondition. The error code is PRECONDITION_REQUIRED for a missing required header and STALE_VERSION for a mismatch. */
+    PreconditionFailed: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        /**
+         * @example {
+         *       "code": "STALE_VERSION",
+         *       "message": "Data changed after this screen was loaded.",
+         *       "details": [
+         *         {
+         *           "field": "If-Match",
+         *           "reason": "expected \"7\", current \"8\""
+         *         }
+         *       ],
+         *       "remediation": "Refresh the resource, compare changes, then retry with its latest ETag.",
+         *       "requestId": "req_01JY8Z8F"
+         *     }
+         */
+        'application/problem+json': components['schemas']['ErrorEnvelope'] & {
+          code?: components['schemas']['PreconditionProblemCode'];
+        };
+      };
+    };
     /** @description Field, restriction or compatibility validation failed. */
     ValidationFailed: {
       headers: {
@@ -4573,6 +5192,17 @@ export interface components {
         'application/json': components['schemas']['JobResponse'];
       };
     };
+    /** @description Durable asynchronous job accepted for a versioned aggregate. */
+    JobAcceptedWithEtag: {
+      headers: {
+        Location?: string;
+        ETag: components['headers']['ETag'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['JobResponse'];
+      };
+    };
     /** @description Command committed with its resulting aggregate version. */
     CommandSucceeded: {
       headers: {
@@ -4589,6 +5219,8 @@ export interface components {
     IdempotencyKey: string;
     /** @description ETag returned by the latest resource representation. */
     IfMatch: string;
+    /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+    OptionalIfMatch: string;
     Cursor: string;
     Limit: number;
     OrderId: components['schemas']['Ulid'];
@@ -4985,6 +5617,30 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  listOrders: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable order page ordered by updatedAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+    };
+  };
   createOrderDraft: {
     parameters: {
       query?: never;
@@ -5015,6 +5671,30 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  getOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        orderId: components['parameters']['OrderId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current order projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
   validateOrder: {
     parameters: {
       query?: never;
@@ -5034,14 +5714,39 @@ export interface operations {
       /** @description Address, commodity and restriction validation. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['OrderValidationResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  listQuotes: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable quote page ordered by createdAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QuoteListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
     };
   };
   createQuote: {
@@ -5072,6 +5777,30 @@ export interface operations {
       };
       403: components['responses']['Forbidden'];
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  getQuote: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        quoteId: components['parameters']['QuoteId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current quote projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QuoteResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
     };
   };
   getQuoteExplanation: {
@@ -5127,8 +5856,77 @@ export interface operations {
           'application/json': components['schemas']['QuoteResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
       410: components['responses']['Expired'];
+      412: components['responses']['PreconditionFailed'];
+    };
+  };
+  linkAcceptedQuoteToOrder: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable key for the same intended command, retained for at least 24 hours. */
+        'Idempotency-Key': components['parameters']['IdempotencyKey'];
+        /** @description ETag returned by the latest resource representation. */
+        'If-Match': components['parameters']['IfMatch'];
+      };
+      path: {
+        orderId: components['parameters']['OrderId'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LinkAcceptedQuoteToOrderRequest'];
+      };
+    };
+    responses: {
+      /** @description Existing idempotent link replayed. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AcceptedQuoteOrderLinkResponse'];
+        };
+      };
+      /** @description Quote linked and draft waybill created. */
+      201: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AcceptedQuoteOrderLinkResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+      412: components['responses']['PreconditionFailed'];
+      422: components['responses']['StateTransitionFailed'];
+    };
+  };
+  listWaybills: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable waybill page ordered by updatedAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
     };
   };
   getWaybill: {
@@ -5154,7 +5952,6 @@ export interface operations {
       };
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['StaleVersion'];
       500: components['responses']['InternalError'];
     };
   };
@@ -5184,7 +5981,7 @@ export interface operations {
           'application/json': components['schemas']['WaybillResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -5219,6 +6016,54 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  listWarehouseReceipts: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable receipt page ordered by scannedAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WarehouseReceiptListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+    };
+  };
+  getWarehouseReceipt: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        receiptId: components['parameters']['ReceiptId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current warehouse receipt projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WarehouseReceiptResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
   confirmReceipt: {
     parameters: {
       query?: never;
@@ -5249,7 +6094,7 @@ export interface operations {
           'application/json': components['schemas']['WarehouseReceiptResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -5276,13 +6121,14 @@ export interface operations {
       /** @description Routing decision with rule explanation. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['RoutingDecisionResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -5348,7 +6194,10 @@ export interface operations {
   };
   getDeviceTasks: {
     parameters: {
-      query?: never;
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
       header?: never;
       path: {
         deviceId: components['parameters']['DeviceId'];
@@ -5521,13 +6370,38 @@ export interface operations {
       /** @description Conflict resolution result. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['DeviceConflictResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
+    };
+  };
+  listBookings: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable booking page ordered by plannedDepartureAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BookingListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
     };
   };
   createBooking: {
@@ -5559,6 +6433,54 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  getBooking: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bookingId: components['schemas']['Ulid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current booking projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BookingResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
+  listLoadUnits: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable load-unit page ordered by updatedAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoadUnitListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+    };
+  };
   createLoadUnit: {
     parameters: {
       query?: never;
@@ -5586,6 +6508,30 @@ export interface operations {
         };
       };
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  getLoadUnit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        loadUnitId: components['parameters']['LoadUnitId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current load-unit projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoadUnitResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
     };
   };
   createBillOfLading: {
@@ -5640,13 +6586,14 @@ export interface operations {
       /** @description Attach results; individual failures are explicit. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['BatchLoadResultResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -5673,13 +6620,14 @@ export interface operations {
       /** @description Dispatched after credit, issue and print preflight. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['LoadUnitResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -5706,14 +6654,39 @@ export interface operations {
       /** @description Sealed load unit. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['LoadUnitResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
+    };
+  };
+  listLastMileIntakes: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable intake page ordered by createdAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LastMileIntakeListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
     };
   };
   createLastMileIntake: {
@@ -5745,6 +6718,54 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  getLastMileIntake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        intakeId: components['schemas']['Ulid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current intake projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LastMileIntakeResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
+  listDeliveryTasks: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable task page ordered by planned window and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeliveryTaskListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+    };
+  };
   createDeliveryTask: {
     parameters: {
       query?: never;
@@ -5772,6 +6793,30 @@ export interface operations {
         };
       };
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  getDeliveryTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deliveryTaskId: components['schemas']['Ulid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current delivery-task projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeliveryTaskResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
     };
   };
   captureProofOfDelivery: {
@@ -5806,7 +6851,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6531,6 +7576,30 @@ export interface operations {
       422: components['responses']['InvariantFailed'];
     };
   };
+  listImports: {
+    parameters: {
+      query?: {
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable import-job page ordered by createdAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportJobListResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+    };
+  };
   createImportJob: {
     parameters: {
       query?: never;
@@ -6559,6 +7628,30 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  getImportJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        importId: components['parameters']['ImportId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current import job projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportJobResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
   validateImportRows: {
     parameters: {
       query?: never;
@@ -6575,8 +7668,8 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      202: components['responses']['JobAccepted'];
-      409: components['responses']['StaleVersion'];
+      202: components['responses']['JobAcceptedWithEtag'];
+      412: components['responses']['PreconditionFailed'];
     };
   };
   commitImport: {
@@ -6599,8 +7692,8 @@ export interface operations {
       };
     };
     responses: {
-      202: components['responses']['JobAccepted'];
-      409: components['responses']['StaleVersion'];
+      202: components['responses']['JobAcceptedWithEtag'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -6823,13 +7916,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['TenantEntitlement'];
+        'application/json': components['schemas']['UpdateTenantEntitlementsRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6842,11 +7935,19 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['OAuthBinding'];
+        'application/json': components['schemas']['StartWechatLoginRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authorization URL and expiry; the PKCE verifier remains server-side. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WechatAuthorizationResponse'];
+        };
+      };
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -6859,11 +7960,19 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['OAuthBinding'];
+        'application/json': components['schemas']['CompleteWechatLoginRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description OAuth callback completed and a cookie-backed session created. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SessionResponse'];
+        };
+      };
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -6876,34 +7985,46 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Session'];
+        'application/json': components['schemas']['ReauthenticateCurrentSessionRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description A short-lived reauthentication grant bound to the current session. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReauthenticationResponse'];
+        };
+      };
       401: components['responses']['Unauthorized'];
     };
   };
   previewFieldPolicy: {
     parameters: {
       query?: never;
-      header: {
-        /** @description Stable key for the same intended command, retained for at least 24 hours. */
-        'Idempotency-Key': components['parameters']['IdempotencyKey'];
-      };
+      header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['FieldPolicy'];
+        'application/json': components['schemas']['PreviewFieldPolicyRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Non-mutating field-policy projection. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FieldPolicyPreviewResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
-      422: components['responses']['StateTransitionFailed'];
+      422: components['responses']['ValidationFailed'];
     };
   };
   upsertOrganizationNode: {
@@ -6912,21 +8033,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['OrganizationNode'];
+        'application/json': components['schemas']['UpsertOrganizationNodeRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6936,21 +8057,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['User'];
+        'application/json': components['schemas']['UpsertUserRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6960,8 +8081,8 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path: {
         customerId: components['schemas']['Ulid'];
@@ -6970,13 +8091,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Customer'];
+        'application/json': components['schemas']['UpsertCustomerAddressRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6986,21 +8107,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Partner'];
+        'application/json': components['schemas']['UpsertPartnerRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7018,13 +8139,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ReferenceDataVersion'];
+        'application/json': components['schemas']['PublishReferenceDataVersionRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7044,13 +8165,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CreditPolicy'];
+        'application/json': components['schemas']['UpdateCustomerCreditPolicyRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7110,21 +8231,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ChannelProduct'];
+        'application/json': components['schemas']['UpsertChannelProductRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7144,13 +8265,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['RateCardVersion'];
+        'application/json': components['schemas']['PublishRateCardRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7160,21 +8281,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['RatePriceVersion'];
+        'application/json': components['schemas']['UpsertRatePriceVersionRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7184,21 +8305,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['SurchargeRule'];
+        'application/json': components['schemas']['UpsertSurchargeRuleRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7214,7 +8335,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['RestrictionResult'];
+        'application/json': components['schemas']['ValidateShipmentRestrictionsRequest'];
       };
     };
     responses: {
@@ -7240,13 +8361,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['OrderDraft'];
+        'application/json': components['schemas']['CopyOrderRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7266,13 +8387,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ImportCommit'];
+        'application/json': components['schemas']['RollbackImportBatchRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7292,13 +8413,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Package'];
+        'application/json': components['schemas']['UpsertWaybillPackagesRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7318,13 +8439,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Declaration'];
+        'application/json': components['schemas']['UpdateWaybillDeclarationRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7344,13 +8465,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['LabelJob'];
+        'application/json': components['schemas']['CreateLabelJobRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7370,13 +8491,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Waybill'];
+        'application/json': components['schemas']['CancelWaybillRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7396,13 +8517,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Waybill'];
+        'application/json': components['schemas']['RenumberWaybillRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7420,13 +8541,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchCommand'];
+        'application/json': components['schemas']['SplitWaybillRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7444,13 +8565,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchCommand'];
+        'application/json': components['schemas']['MergeWaybillsRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7468,13 +8589,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchCommand'];
+        'application/json': components['schemas']['BatchWaybillCommandRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7494,13 +8615,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Measurement'];
+        'application/json': components['schemas']['RecordMeasurementRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7520,13 +8641,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Measurement'];
+        'application/json': components['schemas']['AttachReceiptMediaRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7546,13 +8667,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Receipt'];
+        'application/json': components['schemas']['UndoReceiptRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7570,13 +8691,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['InventoryMovement'];
+        'application/json': components['schemas']['MoveInventoryRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7594,13 +8715,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['InventoryMovement'];
+        'application/json': components['schemas']['CommitStocktakeRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7618,13 +8739,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['PrintJob'];
+        'application/json': components['schemas']['CreatePrintJobRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7642,13 +8763,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['PrintJob'];
+        'application/json': components['schemas']['ReprintDocumentRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7664,7 +8785,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CompatibilityResult'];
+        'application/json': components['schemas']['ValidateLoadCompatibilityRequest'];
       };
     };
     responses: {
@@ -7688,13 +8809,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['FbaShipmentLink'];
+        'application/json': components['schemas']['LinkFbaShipmentRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7714,13 +8835,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['LastMileIntake'];
+        'application/json': components['schemas']['ScanLastMileIntakeRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7740,7 +8861,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['DeliveryEvent'];
+        'application/json': components['schemas']['UpdateDeliveryTaskStatusRequest'];
       };
     };
     responses: {
@@ -7756,7 +8877,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7776,13 +8897,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ProofOfDelivery'];
+        'application/json': components['schemas']['AmendProofOfDeliveryRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7800,13 +8921,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['PartnerSyncEvent'];
+        'application/json': components['schemas']['SyncLastMilePartnerRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7824,13 +8945,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['PartnerSyncEvent'];
+        'application/json': components['schemas']['ReplayPartnerEventRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7848,13 +8969,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Charge'];
+        'application/json': components['schemas']['GenerateLastMileChargesRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };

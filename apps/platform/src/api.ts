@@ -1,4 +1,5 @@
 import { createZhiliClient } from '@zhili/api-client';
+import type { components } from '@zhili/contracts';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -77,6 +78,12 @@ const ensure = <T>(data: T | undefined, error: unknown): T => {
   if (!data || error) throw new Error('平台命令失败，输入已保留，请重试。');
   return data;
 };
+const entitlementCode = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'core';
 
 export const platformPort = {
   async createTenant(name: string, slug: string, plan: string) {
@@ -85,7 +92,15 @@ export const platformPort = {
       body: { name, slug, defaultTimezone: 'Asia/Shanghai', defaultCurrency: 'CNY' },
     });
     const created = ensure(response.data, response.error).data;
-    await this.saveEntitlements(created.id, { plan, waybillLimit: 200000, initialized: true });
+    await this.saveEntitlements(created.id, {
+      modules: [
+        {
+          moduleCode: entitlementCode(plan),
+          enabled: true,
+          quotas: { monthlyWaybills: 200000 },
+        },
+      ],
+    });
     return created;
   },
   async startImpersonation(tenantId: string, reason: string) {
@@ -109,7 +124,10 @@ export const platformPort = {
     });
     ensure(response.data, response.error);
   },
-  async saveEntitlements(tenantId: string, body: Record<string, unknown>) {
+  async saveEntitlements(
+    tenantId: string,
+    body: components['schemas']['UpdateTenantEntitlementsRequest']
+  ) {
     const response = await client.PUT('/platform/tenants/{tenantId}/entitlements', {
       params: {
         path: { tenantId },
@@ -119,11 +137,25 @@ export const platformPort = {
     });
     return ensure(response.data, response.error).data.version;
   },
+  setModuleEntitlement(tenantId: string, module: string, enabled: boolean) {
+    return this.saveEntitlements(tenantId, {
+      modules: [{ moduleCode: entitlementCode(module), enabled, quotas: {} }],
+    });
+  },
   saveTenantConfiguration(
     tenantId: string,
     body: { plan: string; waybillLimit: number; expires: string }
   ) {
-    return this.saveEntitlements(tenantId, body);
+    return this.saveEntitlements(tenantId, {
+      modules: [
+        {
+          moduleCode: entitlementCode(body.plan),
+          enabled: true,
+          expiresAt: new Date(`${body.expires}T23:59:59.999Z`).toISOString(),
+          quotas: { monthlyWaybills: body.waybillLimit },
+        },
+      ],
+    });
   },
   async createPlan(name: string) {
     await platformCommand('/api/v1/platform/plans', { name });

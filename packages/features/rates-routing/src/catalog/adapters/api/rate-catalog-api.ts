@@ -15,7 +15,12 @@ export function createRateCatalogApi(
             'If-Match': `"${version}"`,
           },
         },
-        body: { id: rateCardId, version: version + 1, status: 'ACTIVE', reason },
+        body: {
+          versionLabel: `v${version + 1}`,
+          effectiveFrom: new Date().toISOString(),
+          currency: 'CNY',
+          reason,
+        },
       });
       if (response.error) throw response.error;
       const data = response.data?.data;

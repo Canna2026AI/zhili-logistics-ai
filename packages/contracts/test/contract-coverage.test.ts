@@ -74,6 +74,264 @@ function operationBlock(operationId: string): string {
   return contract.slice(start, end === -1 ? undefined : end);
 }
 
+function schemaBlock(schemaName: string): string {
+  const start = contract.indexOf(`    ${schemaName}:`);
+  if (start === -1) return "";
+  const remainder = contract.slice(start + 5);
+  const next = remainder.search(/^    [A-Za-z][A-Za-z0-9]+:/m);
+  return contract.slice(start, next === -1 ? undefined : start + 5 + next);
+}
+
+describe("Backend B1 hardened operation contracts", () => {
+  const explicitRequests = {
+    updateTenantEntitlements: "UpdateTenantEntitlementsRequest",
+    startWechatLogin: "StartWechatLoginRequest",
+    completeWechatLogin: "CompleteWechatLoginRequest",
+    reauthenticate: "ReauthenticateCurrentSessionRequest",
+    previewFieldPolicy: "PreviewFieldPolicyRequest",
+    upsertOrganizationNode: "UpsertOrganizationNodeRequest",
+    upsertUser: "UpsertUserRequest",
+    upsertCustomerAddress: "UpsertCustomerAddressRequest",
+    upsertPartner: "UpsertPartnerRequest",
+    publishReferenceDataVersion: "PublishReferenceDataVersionRequest",
+    updateCustomerCreditPolicy: "UpdateCustomerCreditPolicyRequest",
+    upsertChannelProduct: "UpsertChannelProductRequest",
+    publishRateCard: "PublishRateCardRequest",
+    upsertRatePriceVersion: "UpsertRatePriceVersionRequest",
+    upsertSurchargeRule: "UpsertSurchargeRuleRequest",
+    validateShipmentRestrictions: "ValidateShipmentRestrictionsRequest",
+    copyOrder: "CopyOrderRequest",
+    rollbackImportBatch: "RollbackImportBatchRequest",
+    upsertWaybillPackages: "UpsertWaybillPackagesRequest",
+    updateWaybillDeclaration: "UpdateWaybillDeclarationRequest",
+    createLabelJob: "CreateLabelJobRequest",
+    cancelWaybill: "CancelWaybillRequest",
+    renumberWaybill: "RenumberWaybillRequest",
+    splitWaybill: "SplitWaybillRequest",
+    mergeWaybills: "MergeWaybillsRequest",
+    batchWaybillCommand: "BatchWaybillCommandRequest",
+    recordMeasurement: "RecordMeasurementRequest",
+    attachReceiptMedia: "AttachReceiptMediaRequest",
+    undoReceipt: "UndoReceiptRequest",
+    moveInventory: "MoveInventoryRequest",
+    commitStocktake: "CommitStocktakeRequest",
+    createPrintJob: "CreatePrintJobRequest",
+    reprintDocument: "ReprintDocumentRequest",
+    validateLoadCompatibility: "ValidateLoadCompatibilityRequest",
+    linkFbaShipment: "LinkFbaShipmentRequest",
+    scanLastMileIntake: "ScanLastMileIntakeRequest",
+    updateDeliveryTaskStatus: "UpdateDeliveryTaskStatusRequest",
+    amendProofOfDelivery: "AmendProofOfDeliveryRequest",
+    syncLastMilePartner: "SyncLastMilePartnerRequest",
+    replayPartnerEvent: "ReplayPartnerEventRequest",
+    generateLastMileCharges: "GenerateLastMileChargesRequest",
+  } as const;
+
+  it("uses closed, operation-specific request schemas for every B1 placeholder command", () => {
+    for (const [operationId, schemaName] of Object.entries(explicitRequests)) {
+      const operation = operationBlock(operationId);
+      expect(operation, `${operationId} operation`).toContain(
+        `$ref: '#/components/schemas/${schemaName}'`,
+      );
+      expect(operation, `${operationId} must not accept DomainRecord`).not.toContain(
+        "$ref: '#/components/schemas/DomainRecord'",
+      );
+      const schema = schemaBlock(schemaName);
+      expect(schema, `${schemaName} schema`).toContain("additionalProperties: false");
+      expect(schema, `${schemaName} required fields`).toContain("required:");
+    }
+  });
+
+  it("separates OAuth start and callback and never returns a PKCE verifier", () => {
+    const start = operationBlock("startWechatLogin");
+    const callback = operationBlock("completeWechatLogin");
+    expect(start).toContain("#/components/schemas/WechatAuthorizationResponse");
+    expect(callback).toContain("#/components/schemas/SessionResponse");
+    expect(schemaBlock("WechatAuthorization")).not.toMatch(/verifier/i);
+    expect(schemaBlock("StartWechatLoginRequest")).not.toMatch(/verifier/i);
+    expect(schemaBlock("CompleteWechatLoginRequest")).not.toMatch(/verifier/i);
+  });
+
+  it("models reauthentication as a credential or challenge proof", () => {
+    const schema = schemaBlock("ReauthenticateCurrentSessionRequest");
+    expect(schema).toContain("oneOf:");
+    expect(schema).toContain("ReauthenticateWithPasswordRequest");
+    expect(schema).toContain("ReauthenticateWithChallengeRequest");
+    expect(operationBlock("reauthenticate")).not.toContain(
+      "#/components/schemas/Session'",
+    );
+  });
+
+  it("keeps field-policy preview read-only and returns a preview projection", () => {
+    const preview = operationBlock("previewFieldPolicy");
+    expect(preview).not.toContain("x-audit-event:");
+    expect(preview).not.toContain("#/components/parameters/IdempotencyKey");
+    expect(preview).not.toContain("#/components/responses/StaleVersion");
+    expect(preview).toContain("#/components/schemas/FieldPolicyPreviewResponse");
+  });
+
+  it("documents create versus update preconditions for UI-compatible upserts", () => {
+    for (const operationId of [
+      "upsertOrganizationNode",
+      "upsertUser",
+      "upsertCustomerAddress",
+      "upsertPartner",
+      "upsertChannelProduct",
+      "upsertRatePriceVersion",
+      "upsertSurchargeRule",
+    ]) {
+      const operation = operationBlock(operationId);
+      expect(operation).toContain("#/components/parameters/OptionalIfMatch");
+      expect(operation).toMatch(
+        /CREATE forbids If-Match; UPDATE requires\s+a\s+strong If-Match/,
+      );
+    }
+  });
+
+  it("links an accepted quote to an order and returns the created waybill identity", () => {
+    const link = operationBlock("linkAcceptedQuoteToOrder");
+    expect(link).toContain("#/components/schemas/LinkAcceptedQuoteToOrderRequest");
+    expect(link).toContain("#/components/schemas/AcceptedQuoteOrderLinkResponse");
+    const result = schemaBlock("AcceptedQuoteOrderLink");
+    for (const field of [
+      "quoteId",
+      "quoteOptionId",
+      "orderId",
+      "waybillId",
+      "orderVersion",
+      "waybillVersion",
+    ]) {
+      expect(result).toContain(field);
+    }
+  });
+
+  it("provides cursor lists and detail reads for every B1 workbench", () => {
+    const reads = {
+      listQuotes: "QuoteListResponse",
+      getQuote: "QuoteResponse",
+      listOrders: "OrderListResponse",
+      getOrder: "OrderResponse",
+      listWaybills: "WaybillListResponse",
+      getWaybill: "WaybillResponse",
+      listImports: "ImportJobListResponse",
+      getImportJob: "ImportJobResponse",
+      listWarehouseReceipts: "WarehouseReceiptListResponse",
+      getWarehouseReceipt: "WarehouseReceiptResponse",
+      listLoadUnits: "LoadUnitListResponse",
+      getLoadUnit: "LoadUnitResponse",
+      listBookings: "BookingListResponse",
+      getBooking: "BookingResponse",
+      listLastMileIntakes: "LastMileIntakeListResponse",
+      getLastMileIntake: "LastMileIntakeResponse",
+      listDeliveryTasks: "DeliveryTaskListResponse",
+      getDeliveryTask: "DeliveryTaskResponse",
+    } as const;
+    for (const [operationId, responseSchema] of Object.entries(reads)) {
+      const operation = operationBlock(operationId);
+      expect(operation, `${operationId} response`).toContain(
+        `#/components/schemas/${responseSchema}`,
+      );
+      if (operationId.startsWith("list")) {
+        expect(operation, `${operationId} cursor`).toContain(
+          "#/components/parameters/Cursor",
+        );
+        expect(operation, `${operationId} limit`).toContain(
+          "#/components/parameters/Limit",
+        );
+      }
+    }
+    const deviceTasks = operationBlock("getDeviceTasks");
+    expect(deviceTasks).toContain("#/components/parameters/Cursor");
+    expect(deviceTasks).toContain("#/components/parameters/Limit");
+  });
+
+  it("exposes the operational waybill detail used by Ops without fixture fields", () => {
+    const waybill = schemaBlock("Waybill");
+    for (const field of [
+      "masterNo",
+      "customerName",
+      "customerCode",
+      "contactName",
+      "contactPhone",
+      "route",
+      "service",
+      "transport",
+      "forecastWeightKg",
+      "actualWeightKg",
+      "volumeM3",
+      "pieces",
+      "createdAt",
+      "branch",
+      "timeline",
+    ]) {
+      expect(waybill).toContain(field);
+    }
+  });
+
+  it("returns ETags and 412 precondition errors for B1 versioned writes", () => {
+    for (const operationId of [
+      "updateTenantEntitlements",
+      "upsertOrganizationNode",
+      "upsertUser",
+      "upsertCustomerAddress",
+      "upsertPartner",
+      "publishReferenceDataVersion",
+      "updateCustomerCreditPolicy",
+      "acceptQuote",
+      "linkAcceptedQuoteToOrder",
+      "validateOrder",
+      "submitWaybill",
+      "confirmReceipt",
+      "recordMeasurement",
+      "routeWaybill",
+      "resolveDeviceConflict",
+      "attachWaybills",
+      "sealLoadUnit",
+      "dispatchLoadUnit",
+      "updateDeliveryTaskStatus",
+      "captureProofOfDelivery",
+      "validateImportRows",
+      "commitImport",
+      "upsertChannelProduct",
+      "publishRateCard",
+      "upsertRatePriceVersion",
+      "upsertSurchargeRule",
+      "copyOrder",
+      "rollbackImportBatch",
+      "upsertWaybillPackages",
+      "updateWaybillDeclaration",
+      "createLabelJob",
+      "cancelWaybill",
+      "renumberWaybill",
+      "splitWaybill",
+      "mergeWaybills",
+      "batchWaybillCommand",
+      "attachReceiptMedia",
+      "undoReceipt",
+      "moveInventory",
+      "commitStocktake",
+      "createPrintJob",
+      "reprintDocument",
+      "linkFbaShipment",
+      "scanLastMileIntake",
+      "amendProofOfDelivery",
+      "syncLastMilePartner",
+      "replayPartnerEvent",
+      "generateLastMileCharges",
+    ]) {
+      const operation = operationBlock(operationId);
+      expect(operation, `${operationId} ETag`).toMatch(
+        /#\/components\/(?:responses\/[A-Za-z]+WithEtag|schemas\/[A-Za-z]+Response|responses\/CommandSucceeded)/i,
+      );
+      expect(operation, `${operationId} precondition`).toContain(
+        "#/components/responses/PreconditionFailed",
+      );
+    }
+    expect(schemaBlock("PreconditionProblemCode")).toContain("PRECONDITION_REQUIRED");
+    expect(schemaBlock("PreconditionProblemCode")).toContain("STALE_VERSION");
+  });
+});
+
 describe("OpenAPI UI-foundation gate", () => {
   it("covers every operation used by the ten core flows", () => {
     const operationIds = new Set(

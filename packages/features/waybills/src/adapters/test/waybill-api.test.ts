@@ -9,19 +9,19 @@ describe('waybill OpenAPI adapter', () => {
           id: 'waybill-1',
           waybillNo: 'S2505120004',
           masterNo: 'HBL2505120004',
-          customer: '深圳鑫源贸易有限公司',
+          customerName: '深圳鑫源贸易有限公司',
           customerCode: 'CUST00256',
           contactName: '王志强',
           contactPhone: '139 2654 8800',
           route: 'CN-SZX → US-LAX',
           service: 'DHL Express Worldwide',
-          transport: '海运整箱',
+          transport: 'SEA',
           pieces: 18,
           forecastWeightKg: '122.00',
           actualWeightKg: '123.50',
           volumeM3: '0.48',
           createdAt: '2025-05-12 08:16',
-          state: '待分货',
+          state: 'RECEIVED',
           version: 7,
           branch: '深圳分公司',
           timeline: ['待分货 · 深圳仓库'],
@@ -38,9 +38,9 @@ describe('waybill OpenAPI adapter', () => {
     await adapter.submit('waybill-1', 7);
     await adapter.createLabel('waybill-1', 7, 'A4');
     await adapter.batch(['waybill-1'], 'CANCEL', 7, '客户书面申请取消');
-    await adapter.renumber('waybill-1', 7, 'S2505129999');
-    await adapter.split('waybill-1', 7, ['PKG-01']);
-    await adapter.merge(['waybill-1', 'waybill-2'], 7);
+    await adapter.renumber('waybill-1', 7, 'S2505129999', '客户要求修正运单号');
+    await adapter.split('waybill-1', 7, ['PKG-01'], '包裹需分开运输');
+    await adapter.merge(['waybill-1', 'waybill-2'], 7, '同路线运单合并');
     expect(GET).toHaveBeenCalledWith('/waybills/{waybillId}', {
       params: { path: { waybillId: 'waybill-1' } },
     });
@@ -62,7 +62,7 @@ describe('waybill OpenAPI adapter', () => {
     );
     expect(POST).toHaveBeenCalledWith(
       '/waybills/{waybillId}:renumber',
-      expect.objectContaining({ body: expect.objectContaining({ waybillNo: 'S2505129999' }) })
+      expect.objectContaining({ body: expect.objectContaining({ newWaybillNo: 'S2505129999' }) })
     );
     expect(POST).toHaveBeenCalledWith(
       '/waybills:split',
@@ -71,7 +71,7 @@ describe('waybill OpenAPI adapter', () => {
     expect(POST).toHaveBeenCalledWith(
       '/waybills:merge',
       expect.objectContaining({
-        body: expect.objectContaining({ ids: ['waybill-1', 'waybill-2'] }),
+        body: expect.objectContaining({ waybillIds: ['waybill-1', 'waybill-2'] }),
       })
     );
   });

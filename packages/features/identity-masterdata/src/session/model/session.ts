@@ -5,11 +5,12 @@ export type SessionInfo = Pick<
   components['schemas']['Session'],
   'id' | 'subjectId' | 'tenantId' | 'expiresAt' | 'permissionsVersion'
 >;
+export type ReauthenticationProof = components['schemas']['ReauthenticateCurrentSessionRequest'];
 
 export interface SessionPort {
   login(credentials: LoginCredentials): Promise<SessionInfo>;
   refresh(): Promise<SessionInfo>;
-  reauthenticate(session: SessionInfo): Promise<void>;
+  reauthenticate(proof: ReauthenticationProof): Promise<void>;
   logout(): Promise<void>;
 }
 

@@ -7,57 +7,57 @@ Owner 缩写：`ROOT` 为集成/契约，`UI` 为令牌与共享组件，`FO` �
 | ID | P | 可独立验收的行为 | Page | Flow | operationId | Schema | Permission | Test | Owner | Evidence / Status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PLT-01 | P0 | 创建、停用、恢复租户 | PLT-TENANTS | — | `createTenant` / `changeTenantStatus` | Tenant | `platform.tenant.manage` | PLT-E2E-01 | FP/BI | `page-matrix.md` / PLANNED |
-| PLT-02 | P0 | 配置模块授权、到期和配额 | PLT-TENANT-DETAIL | — | `updateTenantEntitlements` | TenantEntitlement | `platform.entitlement.write` | PLT-E2E-02 | FP/BI | `product-spec.md` / PLANNED |
+| PLT-02 | P0 | 配置模块授权、到期和配额 | PLT-TENANT-DETAIL | — | `updateTenantEntitlements` | UpdateTenantEntitlementsRequest | `platform.entitlement.write` | PLT-E2E-02 | FP/BI | `product-spec.md` / PLANNED |
 | PLT-03 | P0 | 限时代入、必填原因、退出和超时 | PLT-IMPERSONATION | — | `startImpersonation` / `endImpersonation` | ImpersonationSession | `platform.impersonate` | PLT-SEC-03 | FP/BI | `app-shell-spec.md` / PLANNED |
 | IAM-01 | P0 | 账号密码登录、注销和 Argon2id 校验 | ALL-LOGIN | — | `loginWithPassword` / `logout` | Session | `public` | IAM-SEC-01 | FP/BI | `product-spec.md` / PLANNED |
-| IAM-02 | P0 | 官方微信 OAuth 登录与账号绑定 | ALL-LOGIN | — | `startWechatLogin` / `completeWechatLogin` | OAuthBinding | `public` | IAM-E2E-02 | FP/BI | `scope-decisions.md` / PLANNED |
+| IAM-02 | P0 | 官方微信 OAuth 登录与账号绑定 | ALL-LOGIN | — | `startWechatLogin` / `completeWechatLogin` | StartWechatLoginRequest / CompleteWechatLoginRequest | `public` | IAM-E2E-02 | FP/BI | `scope-decisions.md` / PLANNED |
 | IAM-03 | P0 | 刷新会话轮换、撤权失效和再认证 | ALL-SESSION | F08 | `refreshSession` / `reauthenticate` | Session | `session.active` | IAM-SEC-03 | FP/BI | `interaction-state-matrix.md` / PLANNED |
 | IAM-04 | P0 | 资源动作和数据范围鉴权 | OPS-PERMISSIONS | F08 | `updateRolePolicy` | RolePolicy | `iam.policy.write` | IAM-PROP-04 | FO/BI | `product-spec.md` / PLANNED |
-| IAM-05 | P0 | 字段读写、脱敏、复制和导出策略 | OPS-PERMISSIONS | F02/F05 | `previewFieldPolicy` | FieldPolicy | `iam.policy.read` | IAM-SEC-05 | FO/BI | `app-shell-spec.md` / PLANNED |
+| IAM-05 | P0 | 字段读写、脱敏、复制和导出策略 | OPS-PERMISSIONS | F02/F05 | `previewFieldPolicy` | PreviewFieldPolicyRequest / FieldPolicyPreviewResponse | `iam.policy.read` | IAM-SEC-05 | FO/BI | `app-shell-spec.md` / PLANNED |
 | IAM-06 | P0 | 模板差异、最终权限预览与用户视角模拟 | OPS-PERMISSION-SIM | F08 | `previewEffectivePermissions` / `startPermissionSimulation` | PermissionPreview | `iam.simulate` | F08-NORMAL | FO/BI | `interaction-state-matrix.md` / PLANNED |
-| MDM-01 | P0 | 公司、部门、站点、仓库与库位版本化维护 | OPS-ORGANIZATION | — | `upsertOrganizationNode` | OrganizationNode | `masterdata.organization.write` | MDM-E2E-01 | FO/BI | `page-matrix.md` / PLANNED |
-| MDM-02 | P0 | 员工、设备和仓库绑定 | OPS-USERS | F09 | `upsertUser` / `bindDevice` | User / Device | `identity.user.write` | MDM-E2E-02 | FO/BI | `product-spec.md` / PLANNED |
+| MDM-01 | P0 | 公司、部门、站点、仓库与库位版本化维护 | OPS-ORGANIZATION | — | `upsertOrganizationNode` | UpsertOrganizationNodeRequest | `masterdata.organization.write` | MDM-E2E-01 | FO/BI | `page-matrix.md` / PLANNED |
+| MDM-02 | P0 | 员工、设备和仓库绑定 | OPS-USERS | F09 | `upsertUser` / `bindDevice` | UpsertUserRequest / Device | `identity.user.write` | MDM-E2E-02 | FO/BI | `product-spec.md` / PLANNED |
 | MDM-03 | P0 | 客户、联系人和地址簿按数据范围维护 | OPS-CUSTOMERS | F01 | `createCustomer` / `upsertCustomerAddress` | Customer | `customer.write` | MDM-SCOPE-03 | FO/BI | `page-matrix.md` / PLANNED |
-| MDM-04 | P0 | 代理、供应商和合作尾程服务商维护 | OPS-PARTNERS | F04 | `upsertPartner` | Partner | `partner.write` | MDM-E2E-04 | FO/BI | `product-spec.md` / PLANNED |
-| MDM-05 | P0 | 国家、港口、机场、币种、费用和品名引用约束 | OPS-REFERENCE | — | `publishReferenceDataVersion` | ReferenceDataVersion | `masterdata.reference.publish` | MDM-INT-05 | FO/BI | `page-matrix.md` / PLANNED |
-| CRM-01 | P0 | 客户等级、信用额度和付款周期策略 | OPS-CUSTOMER-CREDIT | F04 | `updateCustomerCreditPolicy` | CreditPolicy | `customer.credit.write` | CRM-PROP-01 | FO/BI | `product-spec.md` / PLANNED |
+| MDM-04 | P0 | 代理、供应商和合作尾程服务商维护 | OPS-PARTNERS | F04 | `upsertPartner` | UpsertPartnerRequest | `partner.write` | MDM-E2E-04 | FO/BI | `product-spec.md` / PLANNED |
+| MDM-05 | P0 | 国家、港口、机场、币种、费用和品名引用约束 | OPS-REFERENCE | — | `publishReferenceDataVersion` | PublishReferenceDataVersionRequest | `masterdata.reference.publish` | MDM-INT-05 | FO/BI | `page-matrix.md` / PLANNED |
+| CRM-01 | P0 | 客户等级、信用额度和付款周期策略 | OPS-CUSTOMER-CREDIT | F04 | `updateCustomerCreditPolicy` | UpdateCustomerCreditPolicyRequest | `customer.credit.write` | CRM-PROP-01 | FO/BI | `product-spec.md` / PLANNED |
 | CRM-02 | P0 | 出仓扣货与授权放货 | OPS-DISPATCH-CHECK | F04 | `placeShipmentHold` / `releaseShipmentHold` | ShipmentHold | `hold.place` / `hold.release` | F04-FORBIDDEN-RELEASE | FW/BF | `interaction-state-matrix.md` / PLANNED |
-| RATE-01 | P0 | 渠道、产品、服务范围与版本维护 | OPS-CHANNELS | F02 | `upsertChannelProduct` | ChannelProduct | `rate.channel.write` | RATE-INT-01 | FO/BR | `page-matrix.md` / PLANNED |
-| RATE-02 | P0 | 分区、重量段、材积、进位和最低消费 | OPS-RATECARD | F02 | `publishRateCard` | RateCardVersion | `rate.card.publish` | RATE-PROP-02 | FO/BR | `product-spec.md` / PLANNED |
-| RATE-03 | P0 | 成本、代理、客户、特殊价和有效期 | OPS-RATECARD | F02 | `upsertRatePriceVersion` | RatePriceVersion | `rate.price.write` | RATE-PROP-03 | FO/BR | `product-spec.md` / PLANNED |
-| RATE-04 | P0 | 燃油、偏远、超长和操作附加费逐项计算 | OPS-SURCHARGES | F02 | `upsertSurchargeRule` | SurchargeRule | `rate.surcharge.write` | RATE-GOLD-04 | FO/BR | `canonical-fixtures.md` / PLANNED |
-| RATE-05 | P0 | 渠道限制、不可用原因和替代建议 | OPS-RESTRICTIONS | F01/F02 | `validateShipmentRestrictions` | RestrictionResult | `quote.create` | F01-FAILED-LIMIT | FO/BR | `interaction-state-matrix.md` / PLANNED |
+| RATE-01 | P0 | 渠道、产品、服务范围与版本维护 | OPS-CHANNELS | F02 | `upsertChannelProduct` | UpsertChannelProductRequest | `rate.channel.write` | RATE-INT-01 | FO/BR | `page-matrix.md` / PLANNED |
+| RATE-02 | P0 | 分区、重量段、材积、进位和最低消费 | OPS-RATECARD | F02 | `publishRateCard` | PublishRateCardRequest | `rate.card.publish` | RATE-PROP-02 | FO/BR | `product-spec.md` / PLANNED |
+| RATE-03 | P0 | 成本、代理、客户、特殊价和有效期 | OPS-RATECARD | F02 | `upsertRatePriceVersion` | UpsertRatePriceVersionRequest | `rate.price.write` | RATE-PROP-03 | FO/BR | `product-spec.md` / PLANNED |
+| RATE-04 | P0 | 燃油、偏远、超长和操作附加费逐项计算 | OPS-SURCHARGES | F02 | `upsertSurchargeRule` | UpsertSurchargeRuleRequest | `rate.surcharge.write` | RATE-GOLD-04 | FO/BR | `canonical-fixtures.md` / PLANNED |
+| RATE-05 | P0 | 渠道限制、不可用原因和替代建议 | OPS-RESTRICTIONS | F01/F02 | `validateShipmentRestrictions` | ValidateShipmentRestrictionsRequest | `quote.create` | F01-FAILED-LIMIT | FO/BR | `interaction-state-matrix.md` / PLANNED |
 | RATE-06 | P0 | 多渠道查价、排序和成本字段脱敏 | OPS-QUOTE | F02 | `createQuote` | Quote | `quote.create` | F02-NORMAL | FO/BR | `canonical-fixtures.md` / PLANNED |
 | RATE-07 | P0 | 报价解释、接受和不可变快照 | OPS-QUOTE-DETAIL | F02 | `getQuoteExplanation` / `acceptQuote` | QuoteExplanation | `quote.accept` | F02-STALE-RATE | FO/BR | `interaction-state-matrix.md` / PLANNED |
-| ORD-01 | P0 | 标准/FBA 订单草稿、新建和复制 | OPS-ORDER-EDIT | F01 | `createOrderDraft` / `copyOrder` | OrderDraft | `order.create` | ORD-E2E-01 | FO/BR | `page-matrix.md` / PLANNED |
+| ORD-01 | P0 | 标准/FBA 订单草稿、新建和复制 | OPS-ORDER-EDIT | F01 | `createOrderDraft` / `copyOrder` | CreateOrderDraftRequest / CopyOrderRequest | `order.create` | ORD-E2E-01 | FO/BR | `page-matrix.md` / PLANNED |
 | ORD-02 | P0 | 地址、品名、报关和渠道限制预校验 | OPS-ORDER-EDIT | F01 | `validateOrder` | OrderValidation | `order.validate` | F01-FAILED-LIMIT | FO/BR | `interaction-state-matrix.md` / PLANNED |
 | ORD-03 | P0 | Excel 上传/粘贴、映射、预校验和错误报告 | OPS-ORDER-IMPORT | F10 | `createImportJob` / `validateImportRows` | ImportJob | `order.import` | F10-NORMAL | FO/BX | `interaction-state-matrix.md` / PLANNED |
-| ORD-04 | P0 | 导入提交、部分成功选择和批次回滚 | OPS-ORDER-IMPORT | F07/F10 | `commitImport` / `rollbackImportBatch` | ImportCommit | `order.import.commit` | F07-PARTIAL | FO/BX | `interaction-state-matrix.md` / PLANNED |
-| ORD-05 | P0 | 包裹、重量、尺寸和品名行编辑 | OPS-WAYBILL-DETAIL | F01 | `upsertWaybillPackages` | Package | `waybill.package.write` | ORD-INT-05 | FO/BR | `canonical-fixtures.md` / PLANNED |
-| ORD-06 | P0 | 报关、保险、附件和面单版本 | OPS-WAYBILL-DETAIL | F01 | `updateWaybillDeclaration` / `createLabelJob` | Declaration / LabelJob | `waybill.declaration.write` | ORD-INT-06 | FO/BR | `page-matrix.md` / PLANNED |
+| ORD-04 | P0 | 导入提交、部分成功选择和批次回滚 | OPS-ORDER-IMPORT | F07/F10 | `commitImport` / `rollbackImportBatch` | CommitImportRequest / RollbackImportBatchRequest | `order.import.commit` | F07-PARTIAL | FO/BX | `interaction-state-matrix.md` / PLANNED |
+| ORD-05 | P0 | 包裹、重量、尺寸和品名行编辑 | OPS-WAYBILL-DETAIL | F01 | `upsertWaybillPackages` | UpsertWaybillPackagesRequest | `waybill.package.write` | ORD-INT-05 | FO/BR | `canonical-fixtures.md` / PLANNED |
+| ORD-06 | P0 | 报关、保险、附件和面单版本 | OPS-WAYBILL-DETAIL | F01 | `updateWaybillDeclaration` / `createLabelJob` | UpdateWaybillDeclarationRequest / CreateLabelJobRequest | `waybill.declaration.write` | ORD-INT-06 | FO/BR | `page-matrix.md` / PLANNED |
 | ORD-07 | P0 | 提交预报、取消和改号的状态命令 | OPS-WAYBILL-DETAIL | F01 | `submitWaybill` / `cancelWaybill` / `renumberWaybill` | Waybill | `waybill.submit` | F01-STALE | FO/BR | `app-shell-spec.md` / PLANNED |
-| ORD-08 | P0 | 拆单、合单和批量部分成功 | OPS-WAYBILLS | — | `splitWaybill` / `mergeWaybills` / `batchWaybillCommand` | BatchCommand | `waybill.batch` | UI-PARTIAL-08 | FO/BR | `design-system.md` / PLANNED |
+| ORD-08 | P0 | 拆单、合单和批量部分成功 | OPS-WAYBILLS | — | `splitWaybill` / `mergeWaybills` / `batchWaybillCommand` | SplitWaybillRequest / MergeWaybillsRequest / BatchWaybillCommandRequest | `waybill.batch` | UI-PARTIAL-08 | FO/BR | `design-system.md` / PLANNED |
 | WH-01 | P0 | 扫码匹配预报并幂等生成收货事件 | OPS-RECEIVE | F01 | `receiveScan` | WarehouseScan | `warehouse.receive` | F01-OFFLINE | FW/BW | `canonical-fixtures.md` / PLANNED |
-| WH-02 | P0 | 复重、量方、照片和计费重比较 | OPS-RECEIVE | F01/F03 | `recordMeasurement` / `attachReceiptMedia` | Measurement | `warehouse.measure` | WH-PROP-02 | FW/BW | `canonical-fixtures.md` / PLANNED |
+| WH-02 | P0 | 复重、量方、照片和计费重比较 | OPS-RECEIVE | F01/F03 | `recordMeasurement` / `attachReceiptMedia` | RecordMeasurementRequest / AttachReceiptMediaRequest | `warehouse.measure` | WH-PROP-02 | FW/BW | `canonical-fixtures.md` / PLANNED |
 | WH-03 | P0 | 收货差异、确认收货和授权撤销 | OPS-RECEIVE | F03 | `confirmReceipt` / `undoReceipt` | Receipt | `warehouse.receipt.confirm` | F03-NORMAL | FW/BW | `interaction-state-matrix.md` / PLANNED |
-| WH-04 | P0 | 上架、移库、盘点和库存一致性 | OPS-INVENTORY | — | `moveInventory` / `commitStocktake` | InventoryMovement | `warehouse.inventory.write` | WH-PROP-04 | FW/BW | `page-matrix.md` / PLANNED |
+| WH-04 | P0 | 上架、移库、盘点和库存一致性 | OPS-INVENTORY | — | `moveInventory` / `commitStocktake` | MoveInventoryRequest / CommitStocktakeRequest | `warehouse.inventory.write` | WH-PROP-04 | FW/BW | `page-matrix.md` / PLANNED |
 | WH-05 | P0 | 分货、替代渠道和不可用解释 | OPS-ROUTING | F03 | `routeWaybill` | RoutingDecision | `warehouse.route` | F03-NORMAL | FW/BW | `interaction-state-matrix.md` / PLANNED |
 | WH-06 | P0 | 袋/托/柜扫描加入、拆除和封装 | OPS-LOAD-UNIT | F04 | `createLoadUnit` / `attachWaybills` / `sealLoadUnit` | LoadUnit | `warehouse.load.write` | F04-STALE-LOAD | FW/BW | `interaction-state-matrix.md` / PLANNED |
 | WH-07 | P0 | 拣货、出仓检查和交接 | OPS-DISPATCH | F04 | `dispatchLoadUnit` | DispatchResult | `warehouse.dispatch` | F04-DANGER-DISPATCH | FW/BW | `interaction-state-matrix.md` / PLANNED |
-| WH-08 | P0 | 浏览器/本地代理打印、队列、重打和幂等 | OPS-PRINT-JOBS | F04 | `createPrintJob` / `reprintDocument` | PrintJob | `document.print` | DOC-E2E-08 | FW/BW | `scope-decisions.md` / PLANNED |
+| WH-08 | P0 | 浏览器/本地代理打印、队列、重打和幂等 | OPS-PRINT-JOBS | F04 | `createPrintJob` / `reprintDocument` | CreatePrintJobRequest / ReprintDocumentRequest | `document.print` | DOC-E2E-08 | FW/BW | `scope-decisions.md` / PLANNED |
 | PDA-01 | P0 | PDA 登录、设备与仓库绑定、扫码广播/相机 | PDA-HOME | F09 | `bindDevice` / `getDeviceTasks` | DeviceSession | `pda.use` | PDA-DEVICE-01 | FD/BI | `frontend-pda.md` / FRONTEND |
 | PDA-02 | P0 | 离线事件持久化、重启恢复、去重和批量同步 | PDA-OFFLINE | F09 | `syncDeviceEvents` | DeviceEventEnvelope | `pda.sync` | F09-RESTART | FD/BW | `frontend-pda.md` / FRONTEND |
 | PDA-03 | P0 | 媒体补传、冲突详情和逐条解决 | PDA-CONFLICT | F09 | `uploadDeviceMedia` / `getDeviceConflict` / `resolveDeviceConflict` | DeviceConflict | `pda.sync` / `pda.conflict.resolve` | F09-CONFLICT | FD/BW | `frontend-pda.md` / FRONTEND |
 | PDA-04 | P0 | 管理员授权、加密全量事件/媒体导出与可验证接管 | PDA-OFFLINE | F09 | `authorizeDeviceTakeoverExport` / `uploadEncryptedDeviceTakeoverExport` | DeviceTakeoverExportAuthorization / DeviceTakeoverExportReceipt | `pda.takeover.export` | F09-TAKEOVER-UPLOAD | FD/BW | `frontend-pda.md` / FRONTEND |
 | LINE-01 | P0 | 创建订舱、班次与提货计划 | OPS-BOOKING | F04 | `createBooking` | Booking | `linehaul.booking.create` | LINE-E2E-01 | FW/BW | `page-matrix.md` / PLANNED |
 | LINE-02 | P0 | 提单主从关系与运单归集 | OPS-BOL | F04 | `createBillOfLading` | BillOfLading | `linehaul.bol.write` | F04-NORMAL | FW/BW | `interaction-state-matrix.md` / PLANNED |
-| LINE-03 | P0 | 报关、集包、卡板和装柜兼容检查 | OPS-LOAD-UNIT | F04 | `validateLoadCompatibility` | CompatibilityResult | `linehaul.load.validate` | F04-FAILED-INCOMPATIBLE | FW/BW | `interaction-state-matrix.md` / PLANNED |
-| LINE-04 | P0 | FBA 箱号和 Amazon 货件关联 | OPS-FBA | — | `linkFbaShipment` | FbaShipmentLink | `linehaul.fba.write` | LINE-INT-04 | FW/BX | `scope-decisions.md` / PLANNED |
+| LINE-03 | P0 | 报关、集包、卡板和装柜兼容检查 | OPS-LOAD-UNIT | F04 | `validateLoadCompatibility` | ValidateLoadCompatibilityRequest | `linehaul.load.validate` | F04-FAILED-INCOMPATIBLE | FW/BW | `interaction-state-matrix.md` / PLANNED |
+| LINE-04 | P0 | FBA 箱号和 Amazon 货件关联 | OPS-FBA | — | `linkFbaShipment` | LinkFbaShipmentRequest | `linehaul.fba.write` | LINE-INT-04 | FW/BX | `scope-decisions.md` / PLANNED |
 | LM-01 | P0 | 尾程接货批次、清单与实扫差异 | OPS-LM-INTAKE | — | `createLastMileIntake` / `scanLastMileIntake` | LastMileIntake | `lastmile.intake` | LM-E2E-01 | FW/BW | `product-spec.md` / PLANNED |
 | LM-02 | P0 | 派送任务、路线、司机/合作方和时间窗 | OPS-LM-DELIVERY | — | `createDeliveryTask` | DeliveryTask | `lastmile.delivery.plan` | LM-E2E-02 | FW/BW | `product-spec.md` / PLANNED |
-| LM-03 | P0 | 打托、装车、派送和异常扫描；权威状态/版本回执 | PDA-LM-DELIVERY | F09 | `updateDeliveryTaskStatus` | DeliveryEvent / DeliveryTaskTransitionReceipt | `lastmile.delivery.execute` | LM-DEVICE-03 | FD/BW | `frontend-pda.md` / FRONTEND |
+| LM-03 | P0 | 打托、装车、派送和异常扫描；权威状态/版本回执 | PDA-LM-DELIVERY | F09 | `updateDeliveryTaskStatus` | UpdateDeliveryTaskStatusRequest / DeliveryTaskTransitionReceipt | `lastmile.delivery.execute` | LM-DEVICE-03 | FD/BW | `frontend-pda.md` / FRONTEND |
 | LM-04 | P0 | 签收姓名、位置、照片/签名、POD 版本和权威任务回执 | PDA-POD | F09 | `captureProofOfDelivery` / `amendProofOfDelivery` | ProofOfDelivery / ProofOfDeliveryCaptureReceipt | `lastmile.pod.write` | LM-INT-04 | FD/BW | `frontend-pda.md` / FRONTEND |
-| LM-05 | P0 | 合作方下发、回传、状态对账和重放 | OPS-LM-PARTNER | — | `syncLastMilePartner` / `replayPartnerEvent` | PartnerSyncEvent | `integration.lastmile.manage` | LM-CONTRACT-05 | FW/BX | `scope-decisions.md` / PLANNED |
+| LM-05 | P0 | 合作方下发、回传、状态对账和重放 | OPS-LM-PARTNER | — | `syncLastMilePartner` / `replayPartnerEvent` | SyncLastMilePartnerRequest / ReplayPartnerEventRequest | `integration.lastmile.manage` | LM-CONTRACT-05 | FW/BX | `scope-decisions.md` / PLANNED |
 | LM-06 | P0 | 尾程应收应付和合作方对账 | OPS-LM-FINANCE | F07 | `generateLastMileCharges` | Charge | `finance.charge.generate` | LM-FIN-06 | FW/BF | `product-spec.md` / PLANNED |
 | TRK-01 | P0 | 承运商轨迹去重、乱序和来源时间 | OPS-TRACKING | F05 | `ingestTrackingEvent` | TrackingEvent | `tracking.ingest` | F05-OUT-OF-ORDER | FW/BT | `interaction-state-matrix.md` / PLANNED |
 | TRK-02 | P0 | 人工轨迹、签收和 POD 读取 | OPS-TRACKING | F05 | `appendManualTrackingEvent` | TrackingEvent | `tracking.manual.write` | TRK-AUDIT-02 | FW/BT | `product-spec.md` / PLANNED |

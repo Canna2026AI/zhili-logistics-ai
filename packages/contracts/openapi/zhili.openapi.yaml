@@ -373,6 +373,24 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
   /orders:
+    get:
+      tags: [Orders]
+      operationId: listOrders
+      summary: List order projections using a stable cursor
+      x-feature-id: ORD-01
+      x-permission: order.read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable order page ordered by updatedAt and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [Orders]
       operationId: createOrderDraft
@@ -402,6 +420,27 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /orders/{orderId}:
+    get:
+      tags: [Orders]
+      operationId: getOrder
+      summary: Get one order projection
+      x-feature-id: ORD-01
+      x-permission: order.read
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Current order projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /orders/{orderId}:validate:
     post:
       tags: [Orders]
@@ -416,15 +455,36 @@ paths:
       responses:
         '200':
           description: Address, commodity and restriction validation.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrderValidationResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/ValidationFailed'
   /quotes:
+    get:
+      tags: [Quotes]
+      operationId: listQuotes
+      summary: List quote projections using a stable cursor
+      x-feature-id: RATE-06
+      x-permission: quote.read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable quote page ordered by createdAt and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [Quotes]
       operationId: createQuote
@@ -454,6 +514,27 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /quotes/{quoteId}:
+    get:
+      tags: [Quotes]
+      operationId: getQuote
+      summary: Get one quote projection
+      x-feature-id: RATE-06
+      x-permission: quote.read
+      parameters:
+        - $ref: '#/components/parameters/QuoteId'
+      responses:
+        '200':
+          description: Current quote projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /quotes/{quoteId}/explanation:
     get:
       tags: [Quotes]
@@ -500,10 +581,75 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QuoteResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '410':
           $ref: '#/components/responses/Expired'
+  /orders/{orderId}:link-accepted-quote:
+    post:
+      tags: [Orders]
+      operationId: linkAcceptedQuoteToOrder
+      summary: Link an accepted quote option to an order and create its draft waybill
+      description: >-
+        Atomically proves the quote option is accepted and unexpired, links it to the order,
+        and creates or replays exactly one draft waybill identity.
+      x-feature-ids: [RATE-07, ORD-05]
+      x-permission: order.quote.link
+      x-audit-event: order.accepted-quote.linked
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LinkAcceptedQuoteToOrderRequest'
+      responses:
+        '200':
+          description: Existing idempotent link replayed.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedQuoteOrderLinkResponse'
+        '201':
+          description: Quote linked and draft waybill created.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedQuoteOrderLinkResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/StateTransitionFailed'
+  /waybills:
+    get:
+      tags: [Waybills]
+      operationId: listWaybills
+      summary: List operational waybill projections using a stable cursor
+      x-feature-id: ORD-05
+      x-permission: waybill.read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable waybill page ordered by updatedAt and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaybillListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
   /waybills/{waybillId}:
     get:
       tags: [Waybills]
@@ -527,8 +673,6 @@ paths:
           $ref: '#/components/responses/NotFound'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
         '500':
           $ref: '#/components/responses/InternalError'
   /waybills/{waybillId}:submit:
@@ -553,8 +697,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WaybillResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /warehouse/scans:receive:
@@ -589,6 +733,46 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /warehouse/receipts:
+    get:
+      tags: [Warehouse]
+      operationId: listWarehouseReceipts
+      summary: List warehouse receipts using a stable cursor
+      x-feature-id: WH-03
+      x-permission: warehouse.receipt.read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable receipt page ordered by scannedAt and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehouseReceiptListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /warehouse/receipts/{receiptId}:
+    get:
+      tags: [Warehouse]
+      operationId: getWarehouseReceipt
+      summary: Get one warehouse receipt
+      x-feature-id: WH-03
+      x-permission: warehouse.receipt.read
+      parameters:
+        - $ref: '#/components/parameters/ReceiptId'
+      responses:
+        '200':
+          description: Current warehouse receipt projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehouseReceiptResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /warehouse/receipts/{receiptId}:confirm:
     post:
       tags: [Warehouse]
@@ -617,8 +801,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WarehouseReceiptResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /warehouse/waybills/{waybillId}:route:
@@ -642,12 +826,15 @@ paths:
       responses:
         '200':
           description: Routing decision with rule explanation.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RoutingDecisionResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/ValidationFailed'
   /devices/events:sync:
@@ -715,6 +902,8 @@ paths:
       x-permission: pda.use
       parameters:
         - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
       responses:
         '200':
           description: Tasks filtered by the device warehouse and subject scope.
@@ -890,13 +1079,34 @@ paths:
       responses:
         '200':
           description: Conflict resolution result.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceConflictResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
   /linehaul/bookings:
+    get:
+      tags: [Linehaul]
+      operationId: listBookings
+      summary: List linehaul bookings using a stable cursor
+      x-feature-id: LINE-01
+      x-permission: linehaul.booking.read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable booking page ordered by plannedDepartureAt and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [Linehaul]
       operationId: createBooking
@@ -924,7 +1134,49 @@ paths:
                 $ref: '#/components/schemas/BookingResponse'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /linehaul/bookings/{bookingId}:
+    get:
+      tags: [Linehaul]
+      operationId: getBooking
+      summary: Get one linehaul booking
+      x-feature-id: LINE-01
+      x-permission: linehaul.booking.read
+      parameters:
+        - name: bookingId
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/Ulid'}
+      responses:
+        '200':
+          description: Current booking projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BookingResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /linehaul/load-units:
+    get:
+      tags: [Linehaul]
+      operationId: listLoadUnits
+      summary: List load units using a stable cursor
+      x-feature-id: WH-06
+      x-permission: warehouse.load.read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable load-unit page ordered by updatedAt and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadUnitListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [Linehaul]
       operationId: createLoadUnit
@@ -952,6 +1204,27 @@ paths:
                 $ref: '#/components/schemas/LoadUnitResponse'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /linehaul/load-units/{loadUnitId}:
+    get:
+      tags: [Linehaul]
+      operationId: getLoadUnit
+      summary: Get one load unit
+      x-feature-id: WH-06
+      x-permission: warehouse.load.read
+      parameters:
+        - $ref: '#/components/parameters/LoadUnitId'
+      responses:
+        '200':
+          description: Current load-unit projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadUnitResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /linehaul/bills-of-lading:
     post:
       tags: [Linehaul]
@@ -1001,12 +1274,15 @@ paths:
       responses:
         '200':
           description: Attach results; individual failures are explicit.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/BatchLoadResultResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/ValidationFailed'
   /linehaul/load-units/{loadUnitId}:dispatch:
@@ -1030,12 +1306,15 @@ paths:
       responses:
         '200':
           description: Dispatched after credit, issue and print preflight.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoadUnitResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /linehaul/load-units/{loadUnitId}:seal:
@@ -1059,15 +1338,36 @@ paths:
       responses:
         '200':
           description: Sealed load unit.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoadUnitResponse'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /last-mile/intakes:
+    get:
+      tags: [LastMile]
+      operationId: listLastMileIntakes
+      summary: List last-mile intake batches using a stable cursor
+      x-feature-id: LM-01
+      x-permission: lastmile.intake
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable intake page ordered by createdAt and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LastMileIntakeListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [LastMile]
       operationId: createLastMileIntake
@@ -1095,7 +1395,49 @@ paths:
                 $ref: '#/components/schemas/LastMileIntakeResponse'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /last-mile/intakes/{intakeId}:
+    get:
+      tags: [LastMile]
+      operationId: getLastMileIntake
+      summary: Get one last-mile intake batch
+      x-feature-id: LM-01
+      x-permission: lastmile.intake
+      parameters:
+        - name: intakeId
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/Ulid'}
+      responses:
+        '200':
+          description: Current intake projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LastMileIntakeResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /last-mile/delivery-tasks:
+    get:
+      tags: [LastMile]
+      operationId: listDeliveryTasks
+      summary: List delivery tasks using a stable cursor
+      x-feature-id: LM-02
+      x-permission: lastmile.delivery.read
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable task page ordered by planned window and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryTaskListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [LastMile]
       operationId: createDeliveryTask
@@ -1123,6 +1465,30 @@ paths:
                 $ref: '#/components/schemas/DeliveryTaskResponse'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /last-mile/delivery-tasks/{deliveryTaskId}:
+    get:
+      tags: [LastMile]
+      operationId: getDeliveryTask
+      summary: Get one delivery task
+      x-feature-id: LM-02
+      x-permission: lastmile.delivery.read
+      parameters:
+        - name: deliveryTaskId
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/Ulid'}
+      responses:
+        '200':
+          description: Current delivery-task projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryTaskResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /last-mile/delivery-tasks/{deliveryTaskId}/proof-of-delivery:
     post:
       tags: [LastMile]
@@ -1160,8 +1526,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /tracking/events:ingest:
@@ -1842,6 +2208,24 @@ paths:
         '422':
           $ref: '#/components/responses/InvariantFailed'
   /imports:
+    get:
+      tags: [Imports]
+      operationId: listImports
+      summary: List import jobs using a stable cursor
+      x-feature-id: ORD-03
+      x-permission: order.import
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: Stable import-job page ordered by createdAt and id.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJobListResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
     post:
       tags: [Imports]
       operationId: createImportJob
@@ -1866,6 +2250,27 @@ paths:
                 $ref: '#/components/schemas/ImportJobResponse'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /imports/{importId}:
+    get:
+      tags: [Imports]
+      operationId: getImportJob
+      summary: Get one import job projection
+      x-feature-id: ORD-03
+      x-permission: order.import
+      parameters:
+        - $ref: '#/components/parameters/ImportId'
+      responses:
+        '200':
+          description: Current import job projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportJobResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /imports/{importId}:validate:
     post:
       tags: [Imports]
@@ -1879,9 +2284,9 @@ paths:
         - $ref: '#/components/parameters/IfMatch'
       responses:
         '202':
-          $ref: '#/components/responses/JobAccepted'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+          $ref: '#/components/responses/JobAcceptedWithEtag'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
   /imports/{importId}:commit:
     post:
       tags: [Imports]
@@ -1902,9 +2307,9 @@ paths:
               $ref: '#/components/schemas/CommitImportRequest'
       responses:
         '202':
-          $ref: '#/components/responses/JobAccepted'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+          $ref: '#/components/responses/JobAcceptedWithEtag'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/ValidationFailed'
   /ai/imports/{importId}/mapping-proposals:
@@ -2118,14 +2523,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TenantEntitlement'
+              $ref: '#/components/schemas/UpdateTenantEntitlementsRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /auth/wechat/authorization:
@@ -2141,10 +2546,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OAuthBinding'
+              $ref: '#/components/schemas/StartWechatLoginRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Authorization URL and expiry; the PKCE verifier remains server-side.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WechatAuthorizationResponse'
         '422':
           $ref: '#/components/responses/ValidationFailed'
   /auth/wechat/callback:
@@ -2160,10 +2569,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OAuthBinding'
+              $ref: '#/components/schemas/CompleteWechatLoginRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: OAuth callback completed and a cookie-backed session created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
         '422':
           $ref: '#/components/responses/ValidationFailed'
   /auth/sessions/current:reauthenticate:
@@ -2178,10 +2591,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Session'
+              $ref: '#/components/schemas/ReauthenticateCurrentSessionRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: A short-lived reauthentication grant bound to the current session.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReauthenticationResponse'
         '401':
           $ref: '#/components/responses/Unauthorized'
   /iam/field-policy:preview:
@@ -2191,48 +2608,48 @@ paths:
       summary: Preview field visibility edit copy and export policy
       x-feature-id: IAM-05
       x-permission: iam.policy.read
-      x-audit-event: iam.field-policy.previewed
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/FieldPolicy'
+              $ref: '#/components/schemas/PreviewFieldPolicyRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Non-mutating field-policy projection.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FieldPolicyPreviewResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
         '422':
-          $ref: '#/components/responses/StateTransitionFailed'
+          $ref: '#/components/responses/ValidationFailed'
   /master-data/organization-nodes:upsert:
     post:
       tags: [MasterData]
       operationId: upsertOrganizationNode
       summary: Create or update a versioned organization node
+      description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
       x-feature-id: MDM-01
       x-permission: masterdata.organization.write
       x-audit-event: masterdata.organization-node.upserted
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIfMatch'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OrganizationNode'
+              $ref: '#/components/schemas/UpsertOrganizationNodeRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /master-data/users:upsert:
@@ -2240,25 +2657,26 @@ paths:
       tags: [MasterData]
       operationId: upsertUser
       summary: Create or update an employee and assignments
+      description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
       x-feature-id: MDM-02
       x-permission: identity.user.write
       x-audit-event: identity.user.upserted
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIfMatch'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/User'
+              $ref: '#/components/schemas/UpsertUserRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /customers/{customerId}/addresses:upsert:
@@ -2271,25 +2689,28 @@ paths:
       tags: [Customers]
       operationId: upsertCustomerAddress
       summary: Create or update a customer address in data scope
+      description: >-
+        The path customerId is authoritative. CREATE forbids If-Match; UPDATE requires a
+        strong If-Match and an address id already owned by that path customer.
       x-feature-id: MDM-03
       x-permission: customer.write
       x-audit-event: customer.address.upserted
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIfMatch'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Customer'
+              $ref: '#/components/schemas/UpsertCustomerAddressRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /master-data/partners:upsert:
@@ -2297,25 +2718,26 @@ paths:
       tags: [MasterData]
       operationId: upsertPartner
       summary: Create or update an agent supplier or last-mile partner
+      description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
       x-feature-id: MDM-04
       x-permission: partner.write
       x-audit-event: masterdata.partner.upserted
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIfMatch'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Partner'
+              $ref: '#/components/schemas/UpsertPartnerRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /master-data/reference-data:publish:
@@ -2334,14 +2756,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ReferenceDataVersion'
+              $ref: '#/components/schemas/PublishReferenceDataVersionRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /customers/{customerId}/credit-policy:
@@ -2365,14 +2787,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreditPolicy'
+              $ref: '#/components/schemas/UpdateCustomerCreditPolicyRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /shipment-holds:
@@ -2437,25 +2859,26 @@ paths:
       tags: [Rates]
       operationId: upsertChannelProduct
       summary: Create or update a versioned channel product
+      description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
       x-feature-id: RATE-01
       x-permission: rate.channel.write
       x-audit-event: rate.channel-product.upserted
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIfMatch'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ChannelProduct'
+              $ref: '#/components/schemas/UpsertChannelProductRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /rates/rate-cards/{rateCardId}:publish:
@@ -2479,14 +2902,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RateCardVersion'
+              $ref: '#/components/schemas/PublishRateCardRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /rates/price-versions:upsert:
@@ -2494,25 +2917,26 @@ paths:
       tags: [Rates]
       operationId: upsertRatePriceVersion
       summary: Create or update a versioned cost or sell price
+      description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
       x-feature-id: RATE-03
       x-permission: rate.price.write
       x-audit-event: rate.price-version.upserted
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIfMatch'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RatePriceVersion'
+              $ref: '#/components/schemas/UpsertRatePriceVersionRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /rates/surcharge-rules:upsert:
@@ -2520,25 +2944,26 @@ paths:
       tags: [Rates]
       operationId: upsertSurchargeRule
       summary: Create or update a surcharge calculation rule
+      description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
       x-feature-id: RATE-04
       x-permission: rate.surcharge.write
       x-audit-event: rate.surcharge-rule.upserted
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
+        - $ref: '#/components/parameters/OptionalIfMatch'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SurchargeRule'
+              $ref: '#/components/schemas/UpsertSurchargeRuleRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /rates/restrictions:validate:
@@ -2556,7 +2981,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/RestrictionResult'
+              $ref: '#/components/schemas/ValidateShipmentRestrictionsRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
@@ -2587,14 +3012,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/OrderDraft'
+              $ref: '#/components/schemas/CopyOrderRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /imports/{importId}:rollback:
@@ -2618,14 +3043,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ImportCommit'
+              $ref: '#/components/schemas/RollbackImportBatchRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /waybills/{waybillId}/packages:
@@ -2649,14 +3074,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Package'
+              $ref: '#/components/schemas/UpsertWaybillPackagesRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /waybills/{waybillId}/declaration:
@@ -2680,14 +3105,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Declaration'
+              $ref: '#/components/schemas/UpdateWaybillDeclarationRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /waybills/{waybillId}/label-jobs:
@@ -2711,14 +3136,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LabelJob'
+              $ref: '#/components/schemas/CreateLabelJobRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /waybills/{waybillId}:cancel:
@@ -2742,14 +3167,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Waybill'
+              $ref: '#/components/schemas/CancelWaybillRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /waybills/{waybillId}:renumber:
@@ -2773,14 +3198,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Waybill'
+              $ref: '#/components/schemas/RenumberWaybillRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /waybills:split:
@@ -2799,14 +3224,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BatchCommand'
+              $ref: '#/components/schemas/SplitWaybillRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /waybills:merge:
@@ -2825,14 +3250,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BatchCommand'
+              $ref: '#/components/schemas/MergeWaybillsRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /waybills:batch-command:
@@ -2851,14 +3276,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BatchCommand'
+              $ref: '#/components/schemas/BatchWaybillCommandRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /warehouse/receipts/{receiptId}/measurements:
@@ -2882,14 +3307,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Measurement'
+              $ref: '#/components/schemas/RecordMeasurementRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /warehouse/receipts/{receiptId}/media:
@@ -2913,14 +3338,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Measurement'
+              $ref: '#/components/schemas/AttachReceiptMediaRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /warehouse/receipts/{receiptId}:undo:
@@ -2944,14 +3369,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Receipt'
+              $ref: '#/components/schemas/UndoReceiptRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /warehouse/inventory:move:
@@ -2970,14 +3395,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InventoryMovement'
+              $ref: '#/components/schemas/MoveInventoryRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /warehouse/stocktakes:commit:
@@ -2996,14 +3421,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/InventoryMovement'
+              $ref: '#/components/schemas/CommitStocktakeRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /documents/print-jobs:
@@ -3022,14 +3447,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PrintJob'
+              $ref: '#/components/schemas/CreatePrintJobRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /documents/print-jobs:reprint:
@@ -3048,14 +3473,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PrintJob'
+              $ref: '#/components/schemas/ReprintDocumentRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /linehaul/load-compatibility:validate:
@@ -3073,7 +3498,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CompatibilityResult'
+              $ref: '#/components/schemas/ValidateLoadCompatibilityRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
@@ -3099,14 +3524,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/FbaShipmentLink'
+              $ref: '#/components/schemas/LinkFbaShipmentRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /last-mile/intakes/{intakeId}:scan:
@@ -3130,14 +3555,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/LastMileIntake'
+              $ref: '#/components/schemas/ScanLastMileIntakeRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /last-mile/delivery-tasks/{deliveryTaskId}:transition:
@@ -3167,7 +3592,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DeliveryEvent'
+              $ref: '#/components/schemas/UpdateDeliveryTaskStatusRequest'
       responses:
         '200':
           description: Transition applied with the authoritative delivery task version.
@@ -3182,8 +3607,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /last-mile/delivery-tasks/{deliveryTaskId}/proof-of-delivery:amend:
@@ -3207,14 +3632,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ProofOfDelivery'
+              $ref: '#/components/schemas/AmendProofOfDeliveryRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /last-mile/partners:sync:
@@ -3233,14 +3658,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PartnerSyncEvent'
+              $ref: '#/components/schemas/SyncLastMilePartnerRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /last-mile/partner-events:replay:
@@ -3259,14 +3684,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PartnerSyncEvent'
+              $ref: '#/components/schemas/ReplayPartnerEventRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /last-mile/charges:generate:
@@ -3285,14 +3710,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Charge'
+              $ref: '#/components/schemas/GenerateLastMileChargesRequest'
       responses:
         '200':
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /tracking/events:manual:
@@ -4571,6 +4996,16 @@ components:
       description: ETag returned by the latest resource representation.
       schema:
         type: string
+        pattern: '^"[1-9][0-9]*"$'
+    OptionalIfMatch:
+      name: If-Match
+      in: header
+      required: false
+      description: >-
+        Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode.
+      schema:
+        type: string
+        pattern: '^"[1-9][0-9]*"$'
     Cursor:
       name: cursor
       in: query
@@ -4753,6 +5188,24 @@ components:
             details: [{field: version, reason: 'expected 7, current 8'}]
             remediation: Compare the current server version, refresh, then retry the command.
             requestId: req_01JY8Z8F
+    PreconditionFailed:
+      description: >-
+        Missing, malformed or stale strong If-Match precondition. The error code is
+        PRECONDITION_REQUIRED for a missing required header and STALE_VERSION for a mismatch.
+      content:
+        application/problem+json:
+          schema:
+            allOf:
+              - $ref: '#/components/schemas/ErrorEnvelope'
+              - type: object
+                properties:
+                  code: {$ref: '#/components/schemas/PreconditionProblemCode'}
+          example:
+            code: STALE_VERSION
+            message: Data changed after this screen was loaded.
+            details: [{field: If-Match, reason: 'expected "7", current "8"'}]
+            remediation: Refresh the resource, compare changes, then retry with its latest ETag.
+            requestId: req_01JY8Z8F
     ValidationFailed:
       description: Field, restriction or compatibility validation failed.
       content:
@@ -4800,6 +5253,16 @@ components:
       content:
         application/json:
           schema: {$ref: '#/components/schemas/JobResponse'}
+    JobAcceptedWithEtag:
+      description: Durable asynchronous job accepted for a versioned aggregate.
+      headers:
+        Location:
+          schema: {type: string, format: uri-reference}
+        ETag:
+          $ref: '#/components/headers/ETag'
+      content:
+        application/json:
+          schema: {$ref: '#/components/schemas/JobResponse'}
     CommandSucceeded:
       description: Command committed with its resulting aggregate version.
       headers:
@@ -4809,6 +5272,9 @@ components:
         application/json:
           schema: {$ref: '#/components/schemas/CommandResultResponse'}
   schemas:
+    PreconditionProblemCode:
+      type: string
+      enum: [PRECONDITION_REQUIRED, PRECONDITION_INVALID, STALE_VERSION]
     Ulid:
       type: string
       pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
@@ -5299,13 +5765,29 @@ components:
         reason: {type: string, minLength: 2}
     Waybill:
       type: object
-      required: [id, waybillNo, state, allowedActions, version]
+      additionalProperties: false
+      required: [id, waybillNo, masterNo, customerName, customerCode, contactName, contactPhone, route, service, transport, forecastWeightKg, actualWeightKg, volumeM3, pieces, createdAt, state, branch, timeline, allowedActions, version]
       properties:
         id: {$ref: '#/components/schemas/Ulid'}
         waybillNo: {type: string, examples: [S2505120004]}
+        masterNo: {type: [string, 'null']}
+        customerName: {type: string}
+        customerCode: {type: string}
+        contactName: {type: [string, 'null']}
+        contactPhone: {type: [string, 'null']}
+        route: {type: string}
+        service: {type: string}
+        transport: {type: string, enum: [AIR, SEA, RAIL, ROAD, EXPRESS]}
+        forecastWeightKg: {$ref: '#/components/schemas/Decimal'}
+        actualWeightKg: {oneOf: [{$ref: '#/components/schemas/Decimal'}, {type: 'null'}]}
+        volumeM3: {oneOf: [{$ref: '#/components/schemas/Decimal'}, {type: 'null'}]}
+        pieces: {type: integer, minimum: 1}
+        createdAt: {type: string, format: date-time}
         state:
           type: string
           enum: [DRAFT, FORECASTED, AWAITING_RECEIPT, RECEIVED, AWAITING_ROUTING, AWAITING_TRANSIT, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, AWAITING_RETURN, RETURNED, CANCELLED]
+        branch: {type: string}
+        timeline: {type: array, items: {type: string}}
         allowedActions:
           type: array
           items: {$ref: '#/components/schemas/AllowedAction'}
@@ -5861,24 +6343,6 @@ components:
         vehicleId: {type: string}
         exceptionCode: {type: string}
         note: {type: string, maxLength: 500}
-    DeliveryEvent:
-      type: object
-      additionalProperties: false
-      description: >-
-        Client-authored device event intent for a canonical delivery task transition.
-        deviceEventId is persisted and audited by the server; targetStatus is validated
-        against DeliveryTaskStatus and the current authoritative aggregate version.
-      required: [deviceEventId, targetStatus, occurredAt, mediaRefs, scanEvidence]
-      properties:
-        deviceEventId: {$ref: '#/components/schemas/Ulid'}
-        targetStatus: {$ref: '#/components/schemas/DeliveryTaskStatus'}
-        occurredAt: {type: string, format: date-time}
-        mediaRefs:
-          type: array
-          uniqueItems: true
-          description: Scoped reservations whose eventId must equal deviceEventId.
-          items: {type: string}
-        scanEvidence: {$ref: '#/components/schemas/DeliveryScanEvidence'}
     LastMileDeviceCommandDisposition:
       type: string
       enum: [APPLIED, DUPLICATE]
@@ -6411,6 +6875,588 @@ components:
       properties:
         data: {$ref: '#/components/schemas/AiAction'}
         meta: {$ref: '#/components/schemas/Meta'}
+    UpdateTenantEntitlementsRequest:
+      type: object
+      additionalProperties: false
+      required: [modules]
+      properties:
+        modules:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/TenantModuleEntitlementInput'
+    TenantModuleEntitlementInput:
+      type: object
+      additionalProperties: false
+      required: [moduleCode, enabled, quotas]
+      properties:
+        moduleCode: {type: string, minLength: 2, maxLength: 80, pattern: '^[a-z0-9.-]+$'}
+        enabled: {type: boolean}
+        expiresAt: {type: [string, 'null'], format: date-time}
+        quotas:
+          type: object
+          additionalProperties: {type: integer, minimum: 0}
+    StartWechatLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [redirectUri, clientNonce]
+      properties:
+        redirectUri: {type: string, format: uri, pattern: '^https://'}
+        clientNonce: {type: string, minLength: 16, maxLength: 128}
+        tenantHint: {type: string, minLength: 2, maxLength: 120}
+    CompleteWechatLoginRequest:
+      type: object
+      additionalProperties: false
+      required: [code, state, redirectUri]
+      properties:
+        code: {type: string, minLength: 8, maxLength: 2048}
+        state: {type: string, minLength: 32, maxLength: 512}
+        redirectUri: {type: string, format: uri, pattern: '^https://'}
+    WechatAuthorization:
+      type: object
+      additionalProperties: false
+      required: [authorizationUrl, stateExpiresAt]
+      properties:
+        authorizationUrl: {type: string, format: uri}
+        stateExpiresAt: {type: string, format: date-time}
+    WechatAuthorizationResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/WechatAuthorization'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    ReauthenticateWithPasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [method, password]
+      properties:
+        method: {type: string, const: PASSWORD}
+        password: {type: string, minLength: 8, maxLength: 1024, writeOnly: true}
+    ReauthenticateWithChallengeRequest:
+      type: object
+      additionalProperties: false
+      required: [method, challengeToken]
+      properties:
+        method: {type: string, const: CHALLENGE}
+        challengeToken: {type: string, minLength: 32, maxLength: 4096, writeOnly: true}
+    ReauthenticateCurrentSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [method]
+      properties:
+        method: {type: string, enum: [PASSWORD, CHALLENGE]}
+        password: {type: string, minLength: 8, maxLength: 1024, writeOnly: true}
+        challengeToken: {type: string, minLength: 32, maxLength: 4096, writeOnly: true}
+      oneOf:
+        - $ref: '#/components/schemas/ReauthenticateWithPasswordRequest'
+        - $ref: '#/components/schemas/ReauthenticateWithChallengeRequest'
+    ReauthenticationGrant:
+      type: object
+      additionalProperties: false
+      required: [grantId, expiresAt, actionClasses]
+      properties:
+        grantId: {$ref: '#/components/schemas/Ulid'}
+        expiresAt: {type: string, format: date-time}
+        actionClasses: {type: array, minItems: 1, items: {type: string}}
+    ReauthenticationResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/ReauthenticationGrant'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    FieldPolicyInput:
+      type: object
+      additionalProperties: false
+      required: [resource, field, decision, contexts]
+      properties:
+        resource: {type: string, minLength: 1, maxLength: 120}
+        field: {type: string, minLength: 1, maxLength: 160}
+        decision: {type: string, enum: [READ, MASK, DENY]}
+        contexts:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items: {type: string, enum: [VIEW, EDIT, COPY, EXPORT, AUDIT]}
+    PreviewFieldPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [subjectId, proposedPolicies]
+      properties:
+        subjectId: {$ref: '#/components/schemas/Ulid'}
+        proposedPolicies:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/FieldPolicyInput'}
+        sampleResourceId: {type: string, minLength: 1, maxLength: 160}
+    FieldPolicyPreview:
+      type: object
+      additionalProperties: false
+      required: [subjectId, effectivePolicies, differences]
+      properties:
+        subjectId: {$ref: '#/components/schemas/Ulid'}
+        effectivePolicies: {type: array, items: {$ref: '#/components/schemas/FieldPolicyInput'}}
+        differences: {type: array, items: {type: string}}
+    FieldPolicyPreviewResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/FieldPolicyPreview'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    UpsertOrganizationNodeRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, code, name, nodeType, status]
+      properties:
+        mode: {type: string, enum: [CREATE, UPDATE]}
+        id: {$ref: '#/components/schemas/Ulid'}
+        code: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        nodeType: {type: string, enum: [COMPANY, DEPARTMENT, SITE, WAREHOUSE, LOCATION]}
+        parentId: {oneOf: [{$ref: '#/components/schemas/Ulid'}, {type: 'null'}]}
+        status: {type: string, enum: [ACTIVE, INACTIVE]}
+    UpsertUserRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, loginName, displayName, status, roleIds, organizationNodeIds]
+      properties:
+        mode: {type: string, enum: [CREATE, UPDATE]}
+        id: {$ref: '#/components/schemas/Ulid'}
+        loginName: {type: string, minLength: 3, maxLength: 120}
+        displayName: {type: string, minLength: 1, maxLength: 120}
+        email: {type: string, format: email}
+        mobile: {type: string, minLength: 6, maxLength: 32}
+        status: {type: string, enum: [ACTIVE, DISABLED, LOCKED]}
+        roleIds: {type: array, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+        organizationNodeIds: {type: array, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+    UpsertCustomerAddressRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, label, address, isDefault]
+      properties:
+        mode: {type: string, enum: [CREATE, UPDATE]}
+        id: {$ref: '#/components/schemas/Ulid'}
+        label: {type: string, minLength: 1, maxLength: 80}
+        address: {$ref: '#/components/schemas/Address'}
+        isDefault: {type: boolean}
+    UpsertPartnerRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, partnerCode, name, partnerType, status]
+      properties:
+        mode: {type: string, enum: [CREATE, UPDATE]}
+        id: {$ref: '#/components/schemas/Ulid'}
+        partnerCode: {type: string, minLength: 1, maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 160}
+        partnerType: {type: string, enum: [AGENT, SUPPLIER, CARRIER, LAST_MILE]}
+        status: {type: string, enum: [ACTIVE, INACTIVE]}
+        contactName: {type: string, maxLength: 120}
+        contactPhone: {type: string, maxLength: 32}
+    ReferenceDataItemInput:
+      type: object
+      additionalProperties: false
+      required: [code, label, value]
+      properties:
+        code: {type: string, minLength: 1, maxLength: 80}
+        label: {type: string, minLength: 1, maxLength: 160}
+        value: {type: string, minLength: 1, maxLength: 2048}
+    PublishReferenceDataVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [dataSetCode, versionLabel, items, reason]
+      properties:
+        dataSetCode: {type: string, enum: [COUNTRY, PORT, CURRENCY, FEE, COMMODITY]}
+        versionLabel: {type: string, minLength: 1, maxLength: 80}
+        items: {type: array, minItems: 1, items: {$ref: '#/components/schemas/ReferenceDataItemInput'}}
+        reason: {type: string, minLength: 5, maxLength: 500}
+    UpdateCustomerCreditPolicyRequest:
+      type: object
+      additionalProperties: false
+      required: [tier, creditLimit, paymentCycleDays, holdOnExceed, reason]
+      properties:
+        tier: {type: string, enum: [STANDARD, SILVER, GOLD, STRATEGIC]}
+        creditLimit: {$ref: '#/components/schemas/Money'}
+        paymentCycleDays: {type: integer, minimum: 0, maximum: 365}
+        holdOnExceed: {type: boolean}
+        reason: {type: string, minLength: 5, maxLength: 500}
+    UpsertChannelProductRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, productCode, name, transportMode, status]
+      properties:
+        mode: {type: string, enum: [CREATE, UPDATE]}
+        id: {$ref: '#/components/schemas/Ulid'}
+        productCode: {type: string, minLength: 1, maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 160}
+        transportMode: {type: string, enum: [AIR, SEA, RAIL, ROAD, EXPRESS]}
+        status: {type: string, enum: [DRAFT, ACTIVE, INACTIVE]}
+    PublishRateCardRequest:
+      type: object
+      additionalProperties: false
+      required: [versionLabel, effectiveFrom, currency, reason]
+      properties:
+        versionLabel: {type: string, minLength: 1, maxLength: 80}
+        effectiveFrom: {type: string, format: date-time}
+        effectiveUntil: {type: [string, 'null'], format: date-time}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+        reason: {type: string, minLength: 5, maxLength: 500}
+    UpsertRatePriceVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, channelProductId, priceType, currency, amount, effectiveFrom]
+      properties:
+        mode: {type: string, enum: [CREATE, UPDATE]}
+        id: {$ref: '#/components/schemas/Ulid'}
+        channelProductId: {$ref: '#/components/schemas/Ulid'}
+        priceType: {type: string, enum: [COST, AGENT, CUSTOMER, SPECIAL]}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+        amount: {$ref: '#/components/schemas/Decimal'}
+        effectiveFrom: {type: string, format: date-time}
+        effectiveUntil: {type: [string, 'null'], format: date-time}
+    UpsertSurchargeRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, ruleCode, chargeCode, calculation, priority, status]
+      properties:
+        mode: {type: string, enum: [CREATE, UPDATE]}
+        id: {$ref: '#/components/schemas/Ulid'}
+        ruleCode: {type: string, minLength: 1, maxLength: 64}
+        chargeCode: {type: string, minLength: 1, maxLength: 64}
+        calculation: {type: string, enum: [FLAT, PER_KG, PERCENTAGE]}
+        amount: {$ref: '#/components/schemas/Decimal'}
+        priority: {type: integer, minimum: 0, maximum: 100000}
+        status: {type: string, enum: [DRAFT, ACTIVE, INACTIVE]}
+    ValidateShipmentRestrictionsRequest:
+      type: object
+      additionalProperties: false
+      required: [origin, destination, packages]
+      properties:
+        channelProductId: {$ref: '#/components/schemas/Ulid'}
+        origin: {$ref: '#/components/schemas/Address'}
+        destination: {$ref: '#/components/schemas/Address'}
+        packages: {type: array, minItems: 1, items: {$ref: '#/components/schemas/PackageInput'}}
+        commodityCodes: {type: array, uniqueItems: true, items: {type: string}}
+    CopyOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [copyAddresses, copyPackages]
+      properties:
+        copyAddresses: {type: boolean}
+        copyPackages: {type: boolean}
+        customerId: {$ref: '#/components/schemas/Ulid'}
+    RollbackImportBatchRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 5, maxLength: 500}
+    UpsertWaybillPackagesRequest:
+      type: object
+      additionalProperties: false
+      required: [packages]
+      properties:
+        packages: {type: array, minItems: 1, items: {$ref: '#/components/schemas/PackageInput'}}
+    DeclarationItemInput:
+      type: object
+      additionalProperties: false
+      required: [description, quantity, unitValue, currency, countryOfOrigin]
+      properties:
+        description: {type: string, minLength: 1, maxLength: 500}
+        quantity: {type: integer, minimum: 1}
+        unitValue: {$ref: '#/components/schemas/Decimal'}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+        countryOfOrigin: {type: string, minLength: 2, maxLength: 2}
+        hsCode: {type: string, maxLength: 20}
+    UpdateWaybillDeclarationRequest:
+      type: object
+      additionalProperties: false
+      required: [items, insured, attachments]
+      properties:
+        items: {type: array, minItems: 1, items: {$ref: '#/components/schemas/DeclarationItemInput'}}
+        insured: {type: boolean}
+        insuredValue: {$ref: '#/components/schemas/Money'}
+        attachments: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
+    CreateLabelJobRequest:
+      type: object
+      additionalProperties: false
+      required: [format, copies]
+      properties:
+        format: {type: string, enum: [A4, 100X150]}
+        copies: {type: integer, minimum: 1, maximum: 100}
+    CancelWaybillRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 5, maxLength: 500}
+    RenumberWaybillRequest:
+      type: object
+      additionalProperties: false
+      required: [newWaybillNo, reason]
+      properties:
+        newWaybillNo: {type: string, minLength: 4, maxLength: 80}
+        reason: {type: string, minLength: 5, maxLength: 500}
+    SplitWaybillRequest:
+      type: object
+      additionalProperties: false
+      required: [waybillId, packageRefs, reason]
+      properties:
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        packageRefs: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+        reason: {type: string, minLength: 5, maxLength: 500}
+    MergeWaybillsRequest:
+      type: object
+      additionalProperties: false
+      required: [waybillIds, reason]
+      properties:
+        waybillIds: {type: array, minItems: 2, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+        reason: {type: string, minLength: 5, maxLength: 500}
+    BatchWaybillCommandRequest:
+      type: object
+      additionalProperties: false
+      required: [waybillIds, command, reason]
+      properties:
+        waybillIds: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+        command: {type: string, enum: [SUBMIT, CANCEL, HOLD, RELEASE]}
+        reason: {type: string, minLength: 5, maxLength: 500}
+    RecordMeasurementRequest:
+      type: object
+      additionalProperties: false
+      required: [deviceEventId, actualWeightKg, lengthCm, widthCm, heightCm, measuredAt]
+      properties:
+        deviceEventId: {$ref: '#/components/schemas/Ulid'}
+        actualWeightKg: {$ref: '#/components/schemas/Decimal'}
+        lengthCm: {$ref: '#/components/schemas/Decimal'}
+        widthCm: {$ref: '#/components/schemas/Decimal'}
+        heightCm: {$ref: '#/components/schemas/Decimal'}
+        measuredAt: {type: string, format: date-time}
+    ReceiptMediaReference:
+      type: object
+      additionalProperties: false
+      required: [mediaId, objectRef, sha256, kind, capturedAt]
+      properties:
+        mediaId: {$ref: '#/components/schemas/Ulid'}
+        objectRef: {type: string, minLength: 1, maxLength: 2048}
+        sha256: {type: string, pattern: '^[A-Fa-f0-9]{64}$'}
+        kind: {type: string, enum: [PHOTO, VIDEO, DOCUMENT]}
+        capturedAt: {type: string, format: date-time}
+    AttachReceiptMediaRequest:
+      type: object
+      additionalProperties: false
+      required: [media]
+      properties:
+        media: {type: array, minItems: 1, maxItems: 20, items: {$ref: '#/components/schemas/ReceiptMediaReference'}}
+    UndoReceiptRequest:
+      type: object
+      additionalProperties: false
+      required: [reason]
+      properties:
+        reason: {type: string, minLength: 5, maxLength: 500}
+    MoveInventoryRequest:
+      type: object
+      additionalProperties: false
+      required: [warehouseId, sku, toLocationId, quantity, reason]
+      properties:
+        warehouseId: {$ref: '#/components/schemas/Ulid'}
+        sku: {type: string, minLength: 1, maxLength: 120}
+        fromLocationId: {oneOf: [{$ref: '#/components/schemas/Ulid'}, {type: 'null'}]}
+        toLocationId: {$ref: '#/components/schemas/Ulid'}
+        quantity: {type: integer, minimum: 1}
+        reason: {type: string, minLength: 3, maxLength: 500}
+    StocktakeItemInput:
+      type: object
+      additionalProperties: false
+      required: [sku, countedQuantity]
+      properties:
+        sku: {type: string, minLength: 1, maxLength: 120}
+        countedQuantity: {type: integer, minimum: 0}
+    CommitStocktakeRequest:
+      type: object
+      additionalProperties: false
+      required: [warehouseId, locationId, countedAt, items]
+      properties:
+        warehouseId: {$ref: '#/components/schemas/Ulid'}
+        locationId: {$ref: '#/components/schemas/Ulid'}
+        countedAt: {type: string, format: date-time}
+        items: {type: array, minItems: 1, items: {$ref: '#/components/schemas/StocktakeItemInput'}}
+    CreatePrintJobRequest:
+      type: object
+      additionalProperties: false
+      required: [resourceType, resourceId, templateId, copies]
+      properties:
+        resourceType: {type: string, enum: [WAYBILL, RECEIPT, LOAD_UNIT, BILL_OF_LADING]}
+        resourceId: {$ref: '#/components/schemas/Ulid'}
+        templateId: {$ref: '#/components/schemas/Ulid'}
+        copies: {type: integer, minimum: 1, maximum: 100}
+    ReprintDocumentRequest:
+      type: object
+      additionalProperties: false
+      required: [sourcePrintJobId, reason, copies]
+      properties:
+        sourcePrintJobId: {$ref: '#/components/schemas/Ulid'}
+        reason: {type: string, minLength: 5, maxLength: 500}
+        copies: {type: integer, minimum: 1, maximum: 100}
+    ValidateLoadCompatibilityRequest:
+      type: object
+      additionalProperties: false
+      required: [waybillIds]
+      properties:
+        loadUnitId: {$ref: '#/components/schemas/Ulid'}
+        waybillIds: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+    LinkFbaShipmentRequest:
+      type: object
+      additionalProperties: false
+      required: [loadUnitId, amazonShipmentId, cartonRefs]
+      properties:
+        loadUnitId: {$ref: '#/components/schemas/Ulid'}
+        amazonShipmentId: {type: string, minLength: 1, maxLength: 120}
+        cartonRefs: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+    ScanLastMileIntakeRequest:
+      type: object
+      additionalProperties: false
+      required: [deviceEventId, waybillId, scannedAt, condition]
+      properties:
+        deviceEventId: {$ref: '#/components/schemas/Ulid'}
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        scannedAt: {type: string, format: date-time}
+        condition: {type: string, enum: [ACCEPTED, DAMAGED, MISSING]}
+        note: {type: string, maxLength: 500}
+    UpdateDeliveryTaskStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [deviceEventId, targetStatus, occurredAt, mediaRefs, scanEvidence]
+      properties:
+        deviceEventId: {$ref: '#/components/schemas/Ulid'}
+        targetStatus: {$ref: '#/components/schemas/DeliveryTaskStatus'}
+        occurredAt: {type: string, format: date-time}
+        mediaRefs: {type: array, uniqueItems: true, items: {type: string}}
+        scanEvidence: {$ref: '#/components/schemas/DeliveryScanEvidence'}
+        exceptionReason: {type: string, maxLength: 500}
+    AmendProofOfDeliveryRequest:
+      type: object
+      additionalProperties: false
+      required: [proofOfDeliveryId, reason, recipientName, signedAt, evidenceRefs]
+      properties:
+        proofOfDeliveryId: {$ref: '#/components/schemas/Ulid'}
+        reason: {type: string, minLength: 5, maxLength: 500}
+        recipientName: {type: string, minLength: 1, maxLength: 120}
+        signedAt: {type: string, format: date-time}
+        evidenceRefs: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
+    SyncLastMilePartnerRequest:
+      type: object
+      additionalProperties: false
+      required: [partnerId, externalEventId, eventType, occurredAt, payloadRef]
+      properties:
+        partnerId: {$ref: '#/components/schemas/Ulid'}
+        externalEventId: {type: string, minLength: 1, maxLength: 160}
+        eventType: {type: string, minLength: 1, maxLength: 120}
+        occurredAt: {type: string, format: date-time}
+        payloadRef: {type: string, minLength: 1, maxLength: 2048}
+    ReplayPartnerEventRequest:
+      type: object
+      additionalProperties: false
+      required: [partnerEventId, reason]
+      properties:
+        partnerEventId: {$ref: '#/components/schemas/Ulid'}
+        reason: {type: string, minLength: 5, maxLength: 500}
+    GenerateLastMileChargesRequest:
+      type: object
+      additionalProperties: false
+      required: [deliveryTaskIds, billingDate, currency]
+      properties:
+        deliveryTaskIds: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+        billingDate: {type: string, format: date}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+    LinkAcceptedQuoteToOrderRequest:
+      type: object
+      additionalProperties: false
+      required: [quoteId, quoteOptionId]
+      properties:
+        quoteId: {$ref: '#/components/schemas/Ulid'}
+        quoteOptionId: {$ref: '#/components/schemas/Ulid'}
+    AcceptedQuoteOrderLink:
+      type: object
+      additionalProperties: false
+      required: [quoteId, quoteOptionId, orderId, waybillId, orderVersion, waybillVersion]
+      properties:
+        quoteId: {$ref: '#/components/schemas/Ulid'}
+        quoteOptionId: {$ref: '#/components/schemas/Ulid'}
+        orderId: {$ref: '#/components/schemas/Ulid'}
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        orderVersion: {type: integer, minimum: 1}
+        waybillVersion: {type: integer, minimum: 1}
+    AcceptedQuoteOrderLinkResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/AcceptedQuoteOrderLink'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    QuoteListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/Quote'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+    OrderListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/Order'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+    WaybillListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/Waybill'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+    ImportJobListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/ImportJob'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+    WarehouseReceiptListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/WarehouseReceipt'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+    LoadUnitListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/LoadUnit'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+    BookingListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/Booking'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+    LastMileIntakeListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/LastMileIntake'}}
+        meta: {$ref: '#/components/schemas/Meta'}
+    DeliveryTaskListResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {type: array, items: {$ref: '#/components/schemas/DeliveryTask'}}
+        meta: {$ref: '#/components/schemas/Meta'}
     DomainRecord:
       type: object
       description: Extensible contract shape refined by the owning domain module.
@@ -6433,100 +7479,16 @@ components:
         - $ref: '#/components/schemas/PaymentRefund'
         - $ref: '#/components/schemas/PaymentReconciliation'
         - $ref: '#/components/schemas/Approval'
-    TenantEntitlement:
-      description: Tenant module, expiry, quota and usage entitlement.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    OAuthBinding:
-      description: Official WeChat OAuth identity binding or callback payload.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    FieldPolicy:
-      description: Field read, write, masking, copy and export decision.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    OrganizationNode:
-      description: Versioned company, department, site, warehouse or location node.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    User:
-      description: Employee identity, roles, data scopes and assignments.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
     Device:
       description: Managed PDA device and warehouse binding.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    Partner:
-      description: Agent, supplier or last-mile partner master record.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    ReferenceDataVersion:
-      description: Published country, port, currency, fee or commodity reference set.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    CreditPolicy:
-      description: Customer tier, credit limit, payment cycle and hold policy.
       allOf:
         - $ref: '#/components/schemas/DomainRecord'
     ShipmentHold:
       description: Audited shipment hold or authorized release command.
       allOf:
         - $ref: '#/components/schemas/DomainRecord'
-    ChannelProduct:
-      description: Versioned carrier channel product and service coverage.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    RateCardVersion:
-      description: Published zone, weight break, volumetric and minimum-charge rules.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    RatePriceVersion:
-      description: Versioned cost, agent, customer or special selling price.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    SurchargeRule:
-      description: Versioned fuel, remote, oversize or handling surcharge rule.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    RestrictionResult:
-      description: Restriction validation result with unavailable reasons and alternatives.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    OrderDraft:
-      description: Editable standard or FBA order draft snapshot.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    ImportCommit:
-      description: Import validation and atomic or partial commit decision.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    Package:
-      description: Waybill package dimensions, weight and commodity lines.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    Declaration:
-      description: Customs declaration, insurance and attachment version.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    LabelJob:
-      description: Immutable carrier label generation job.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    BatchCommand:
-      description: Batch command input and per-item outcome.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
     WarehouseScan:
       description: Idempotent warehouse scan event and matched forecast.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    Measurement:
-      description: Scale, dimensions, volumetric and chargeable-weight evidence.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    InventoryMovement:
-      description: Putaway, movement or stocktake variance record.
       allOf:
         - $ref: '#/components/schemas/DomainRecord'
     RoutingDecision:
@@ -6535,22 +7497,6 @@ components:
         - $ref: '#/components/schemas/DomainRecord'
     DispatchResult:
       description: Dispatch preflight result and handover snapshot.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    PrintJob:
-      description: Browser or local-agent print job and source lineage.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    CompatibilityResult:
-      description: Customs, packaging and load compatibility decision.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    FbaShipmentLink:
-      description: Amazon shipment and FBA carton linkage.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    PartnerSyncEvent:
-      description: Checkpointed partner command, callback or reconciliation event.
       allOf:
         - $ref: '#/components/schemas/DomainRecord'
     TrackingStall:

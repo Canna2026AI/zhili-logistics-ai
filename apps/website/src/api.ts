@@ -21,7 +21,11 @@ const mockFetch: typeof fetch = async (input) => {
   if (path.endsWith('/auth/wechat/authorization'))
     return new Response(
       JSON.stringify({
-        data: { resourceId: '01JWECHAT000000000000001', status: 'SUCCEEDED', version: 1 },
+        data: {
+          authorizationUrl:
+            'https://open.weixin.qq.com/connect/oauth2/authorize?state=server-owned',
+          stateExpiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+        },
         meta,
       }),
       { status: 200, headers: { 'content-type': 'application/json' } }
@@ -70,7 +74,10 @@ export const websitePort = {
   },
   async startWechat() {
     const response = await client.POST('/auth/wechat/authorization', {
-      body: { channel: 'WECHAT' },
+      body: {
+        redirectUri: `${window.location.origin}/auth/wechat/callback`,
+        clientNonce: key(),
+      },
     });
     if (!response.data || response.error) throw new Error('微信授权入口暂不可用。');
   },

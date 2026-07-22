@@ -1,4 +1,10 @@
 import { createZhiliClient } from '@zhili/api-client';
+import type { components } from '@zhili/contracts';
+
+export type CustomerAddressInput = Omit<
+  components['schemas']['UpsertCustomerAddressRequest'],
+  'mode' | 'id'
+>;
 
 const meta = { requestId: 'req-f1c-customer', asOf: '2026-07-22T00:00:00.000Z' };
 const json = (body: unknown, status = 200) =>
@@ -144,6 +150,24 @@ const mockFetch: typeof fetch = async (input) => {
       },
       201
     );
+  const acceptedQuoteLink = path.match(/\/orders\/([^/]+):link-accepted-quote$/);
+  if (acceptedQuoteLink) {
+    const body = (await request.clone().json()) as { quoteId: string; quoteOptionId: string };
+    return json(
+      {
+        data: {
+          quoteId: body.quoteId,
+          quoteOptionId: body.quoteOptionId,
+          orderId: acceptedQuoteLink[1],
+          waybillId: '01JWAYBILL000000000000001',
+          orderVersion: 2,
+          waybillVersion: 1,
+        },
+        meta,
+      },
+      201
+    );
+  }
   if (path.endsWith('/payments/statement-orders'))
     return json(
       {
@@ -225,8 +249,6 @@ const mockCustomerCommandFetch = async (
     const itemIds = body.itemIds as string[];
     return { items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) };
   }
-  if (path === '/api/v1/portal/order-quote-links')
-    return { resourceId: '01JORDERQUOTELINK000000001', status: 'SUCCEEDED', version: 1 };
   throw new Error(`未实现的客户门户命令：${path}`);
 };
 
@@ -337,9 +359,15 @@ export const customerPort = {
     orderVersion: number;
     quoteId: string;
     optionId: string;
-    quoteVersion: number;
   }) {
-    await localCommand('/api/v1/portal/order-quote-links', input);
+    const response = await client.POST('/orders/{orderId}:link-accepted-quote', {
+      params: {
+        path: { orderId: input.orderId },
+        header: { 'Idempotency-Key': key(), 'If-Match': `"${input.orderVersion}"` },
+      },
+      body: { quoteId: input.quoteId, quoteOptionId: input.optionId },
+    });
+    return ensure(response.data, response.error).data;
   },
   async createOrder(input: OrderInput) {
     const originCountry = input.origin.split('-')[0] || 'CN';
@@ -379,7 +407,6 @@ export const customerPort = {
         orderVersion: order.version,
         quoteId: input.acceptedQuote.quoteId,
         optionId: input.acceptedQuote.optionId,
-        quoteVersion: input.acceptedQuote.version,
       });
     return order;
   },
@@ -403,19 +430,16 @@ export const customerPort = {
     });
     return ensure(response.data, response.error).data;
   },
-  async saveAddress(name: string) {
+  async saveAddress(input: string | CustomerAddressInput) {
+    if (typeof input === 'string') {
+      throw new Error('请先补全国家、城市、详细地址和邮编后再保存。');
+    }
     const response = await client.POST('/customers/{customerId}/addresses:upsert', {
       params: {
         path: { customerId: '01JCUSTOMER000000000000001' },
-        header: { 'Idempotency-Key': key(), 'If-Match': '"1"' },
+        header: { 'Idempotency-Key': key() },
       },
-      body: {
-        id: '01JCUSTOMER000000000000001',
-        name,
-        customerCode: 'XINYUAN',
-        status: 'ACTIVE',
-        version: 1,
-      },
+      body: { mode: 'CREATE', ...input },
     });
     ensure(response.data, response.error);
   },

@@ -99,8 +99,28 @@ describe('master data', () => {
       creditLimit: '100000.00',
       paymentTerms: '月结 30 天',
     });
-    await api.upsertOrganization({ id: 'org-1' }, 3);
-    await api.updateCredit('customer-1', { id: 'credit-1' }, 2);
+    await api.upsertOrganization(
+      {
+        mode: 'UPDATE',
+        id: 'org-1',
+        code: 'SZX-WH',
+        name: '深圳仓',
+        nodeType: 'WAREHOUSE',
+        status: 'ACTIVE',
+      },
+      3
+    );
+    await api.updateCredit(
+      'customer-1',
+      {
+        tier: 'GOLD',
+        creditLimit: { amount: '100000.00', currency: 'CNY' },
+        paymentCycleDays: 30,
+        holdOnExceed: true,
+        reason: '调整客户信用额度',
+      },
+      2
+    );
     expect(POST).toHaveBeenCalledWith(
       '/master-data/organization-nodes:upsert',
       expect.objectContaining({

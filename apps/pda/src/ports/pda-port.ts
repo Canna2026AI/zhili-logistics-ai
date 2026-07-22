@@ -10,7 +10,7 @@ import type {
   DeviceEventEnvelope,
   DeviceSession,
   DeviceTask,
-  ProofOfDelivery,
+  ProofOfDeliveryAmendmentInput,
   ProofOfDeliveryCaptureReceipt,
   ProofOfDeliveryInput,
   SyncResult,
@@ -85,7 +85,7 @@ export interface PdaPort {
     deliveryTaskId: string,
     etag: string,
     idempotencyKey: string,
-    body: ProofOfDelivery
+    body: ProofOfDeliveryAmendmentInput
   ): Promise<void>;
   authorizeDeviceTakeoverExport(
     deviceId: string,

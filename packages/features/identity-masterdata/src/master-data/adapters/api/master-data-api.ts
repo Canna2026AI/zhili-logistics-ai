@@ -4,21 +4,21 @@ import type { MasterDataPort } from '../../model/master-data';
 
 export interface MasterDataCommandPort extends MasterDataPort {
   upsertOrganization(
-    record: components['schemas']['OrganizationNode'],
-    version: number
+    record: components['schemas']['UpsertOrganizationNodeRequest'],
+    version?: number
   ): Promise<void>;
   upsertAddress(
     customerId: string,
-    record: components['schemas']['Customer'],
-    version: number
+    record: components['schemas']['UpsertCustomerAddressRequest'],
+    version?: number
   ): Promise<void>;
   publishReference(
-    record: components['schemas']['ReferenceDataVersion'],
+    record: components['schemas']['PublishReferenceDataVersionRequest'],
     version: number
   ): Promise<void>;
   updateCredit(
     customerId: string,
-    record: components['schemas']['CreditPolicy'],
+    record: components['schemas']['UpdateCustomerCreditPolicyRequest'],
     version: number
   ): Promise<void>;
 }
@@ -32,6 +32,13 @@ export function createMasterDataApi(
     'Idempotency-Key': createIdempotencyKey(),
     'If-Match': `"${version}"`,
   });
+  const upsertHeaders = (mode: 'CREATE' | 'UPDATE', version?: number) => {
+    if (mode === 'UPDATE') {
+      if (!version) throw new Error('UPDATE_REQUIRES_VERSION');
+      return headers(version);
+    }
+    return createHeaders();
+  };
   const ensureSucceeded = (response: { error?: unknown }) => {
     if (response.error) throw response.error;
   };
@@ -70,7 +77,7 @@ export function createMasterDataApi(
     async upsertOrganization(record, version) {
       ensureSucceeded(
         await client.POST('/master-data/organization-nodes:upsert', {
-          params: { header: headers(version) },
+          params: { header: upsertHeaders(record.mode, version) },
           body: record,
         })
       );
@@ -78,7 +85,7 @@ export function createMasterDataApi(
     async upsertAddress(customerId, record, version) {
       ensureSucceeded(
         await client.POST('/customers/{customerId}/addresses:upsert', {
-          params: { path: { customerId }, header: headers(version) },
+          params: { path: { customerId }, header: upsertHeaders(record.mode, version) },
           body: record,
         })
       );

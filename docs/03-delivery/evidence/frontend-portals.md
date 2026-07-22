@@ -47,7 +47,7 @@
 
 第四轮复审的 4 项 Important 已形成回归闭环：
 
-- I4-01：报价创建与接受均使用 generated typed operations；接受结果的 `quoteId`、`optionId` 和 version 进入订单输入，并通过 `/api/v1/portal/order-quote-links` 审计 port 关联订单版本。
+- I4-01：报价创建与接受均使用 generated typed operations；接受结果的 `quoteId`、`optionId` 和 version 进入订单输入，并通过正式契约 `linkAcceptedQuoteToOrder`（`POST /api/v1/orders/{orderId}:link-accepted-quote`）原子关联订单并返回真实运单标识。
 - I4-02：可注入 clock 与 500ms 到期刷新覆盖展示期间跨过 `validUntil`；点击时二次校验，typed accept 的 410 映射为明确重查状态。
 - I4-03：平台运行失败项成为实体状态；成功响应按 item ID 合并，失败数归零、支付回调变为健康，成功反馈保持可见；拒绝时原失败实体不变。
 - I4-04：官网 Vite 使用 `appType: 'mpa'`；production preview 自动探针验证四个合法 URL 为 200，未知静态路径为 404 且不返回首页。

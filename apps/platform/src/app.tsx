@@ -632,7 +632,7 @@ function ModulesPage({ notify }: { notify: (text: string) => void }) {
                 onChange={() => {
                   const next = !enabled[module];
                   void platformPort
-                    .saveEntitlements('1', { plan, module, enabled: next })
+                    .setModuleEntitlement('1', module, next)
                     .then(() => {
                       setEnabled((current) => {
                         const updated = { ...current, [module]: next };
