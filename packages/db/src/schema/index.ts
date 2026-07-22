@@ -3,5 +3,6 @@ export * from './identity';
 export * from './identity-contracts';
 export * from './outbox';
 export * from './platform';
+export * from './persistence-alignment';
 export * from './rates-waybills';
 export * from './warehouse-linehaul';

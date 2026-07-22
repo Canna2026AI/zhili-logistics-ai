@@ -15,6 +15,13 @@
       "when": 1784723744596,
       "tag": "0001_b1_domains",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784732658347,
+      "tag": "0002_b1_persistence_alignment",
+      "breakpoints": true
     }
   ]
 }

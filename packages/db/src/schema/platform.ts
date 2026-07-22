@@ -29,6 +29,7 @@ export const idempotencyRecords = pgTable(
     expiresAt: timestamp('expires_at', { mode: 'date', withTimezone: true }).notNull(),
   },
   (table) => [
+    unique('idempotency_records_tenant_id_unique').on(table.tenantId, table.id),
     unique('idempotency_records_tenant_key_unique').on(table.tenantId, table.idempotencyKey),
     index('idempotency_records_expiry_idx').on(table.expiresAt),
     check('idempotency_records_id_ulid_check', sql`${table.id} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),

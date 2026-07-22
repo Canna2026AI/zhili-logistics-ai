@@ -2,12 +2,14 @@ import {
   type AnyPgColumn,
   type ForeignKeyBuilder,
   bigint,
+  boolean,
   check,
   customType,
   foreignKey,
   index,
   integer,
   jsonb,
+  numeric,
   pgPolicy,
   pgTable,
   text,
@@ -64,6 +66,7 @@ export const shippingChannels = pgTable(
     tenantId: text('tenant_id').notNull(),
     code: text().notNull(),
     name: text().notNull(),
+    transportMode: text('transport_mode'),
     state: text().default('ACTIVE').notNull(),
     capabilities: jsonb().default({}).notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
@@ -106,7 +109,11 @@ export const shippingChannels = pgTable(
     ),
     check(
       'shipping_channels_state_check',
-      sql`state = ANY (ARRAY['ACTIVE'::text, 'INACTIVE'::text])`
+      sql`state = ANY (ARRAY['DRAFT'::text, 'ACTIVE'::text, 'INACTIVE'::text])`
+    ),
+    check(
+      'shipping_channels_transport_mode_check',
+      sql`transport_mode IS NULL OR transport_mode IN ('AIR', 'SEA', 'ROAD', 'RAIL', 'EXPRESS')`
     ),
     check('shipping_channels_version_check', sql`version >= 1`),
     check('shipping_channels_timestamps_check', sql`updated_at >= created_at`),
@@ -260,6 +267,10 @@ export const rateRules = pgTable(
     tenantId: text('tenant_id').notNull(),
     rateCardVersionId: text('rate_card_version_id').notNull(),
     ruleType: text('rule_type').notNull(),
+    ruleCode: text('rule_code'),
+    chargeCode: text('charge_code'),
+    priceType: text('price_type'),
+    zoneCode: text('zone_code'),
     priority: integer().notNull(),
     channelId: text('channel_id'),
     serviceCode: text('service_code').notNull(),
@@ -279,6 +290,10 @@ export const rateRules = pgTable(
     dimensionalDivisor: bigint('dimensional_divisor', { mode: 'number' }),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     roundingStepGrams: bigint('rounding_step_grams', { mode: 'number' }),
+    roundingMode: text('rounding_mode'),
+    minimumChargeMinor: bigint('minimum_charge_minor', { mode: 'number' }),
+    effectiveFrom: timestamp('effective_from', { withTimezone: true, mode: 'string' }),
+    effectiveUntil: timestamp('effective_until', { withTimezone: true, mode: 'string' }),
     state: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
@@ -353,17 +368,21 @@ export const rateRules = pgTable(
     ),
     check(
       'rate_rules_method_check',
-      sql`calculation_method = ANY (ARRAY['FLAT'::text, 'PER_KG'::text, 'PERCENT'::text, 'MINIMUM'::text])`
+      sql`calculation_method = ANY (ARRAY['FLAT'::text, 'PER_KG'::text, 'PERCENT'::text, 'PERCENTAGE'::text, 'MINIMUM'::text])`
     ),
     check(
       'rate_rules_money_check',
-      sql`((calculation_method = ANY (ARRAY['FLAT'::text, 'PER_KG'::text, 'MINIMUM'::text])) AND (amount_minor IS NOT NULL) AND (amount_minor >= 0) AND (currency ~ '^[A-Z]{3}$'::text) AND (percentage_bps IS NULL)) OR ((calculation_method = 'PERCENT'::text) AND (amount_minor IS NULL) AND (currency IS NULL) AND ((percentage_bps >= '-10000'::integer) AND (percentage_bps <= 100000)))`
+      sql`((calculation_method = ANY (ARRAY['FLAT'::text, 'PER_KG'::text, 'MINIMUM'::text])) AND (amount_minor IS NOT NULL) AND (amount_minor >= 0) AND (currency ~ '^[A-Z]{3}$'::text) AND (percentage_bps IS NULL)) OR ((calculation_method IN ('PERCENT', 'PERCENTAGE')) AND (amount_minor IS NULL) AND (currency IS NULL) AND ((percentage_bps >= '-10000'::integer) AND (percentage_bps <= 100000)))`
     ),
     check(
       'rate_rules_measurement_check',
-      sql`((dimensional_divisor IS NULL) OR (dimensional_divisor > 0)) AND ((rounding_step_grams IS NULL) OR (rounding_step_grams > 0))`
+      sql`((dimensional_divisor IS NULL) OR (dimensional_divisor > 0)) AND ((rounding_step_grams IS NULL) OR (rounding_step_grams > 0)) AND (rounding_mode IS NULL OR rounding_mode IN ('UP', 'NEAREST', 'DOWN')) AND (minimum_charge_minor IS NULL OR minimum_charge_minor >= 0)`
     ),
-    check('rate_rules_state_check', sql`state = ANY (ARRAY['ACTIVE'::text, 'INACTIVE'::text])`),
+    check(
+      'rate_rules_semantic_metadata_check',
+      sql`(rule_code IS NULL OR length(btrim(rule_code)) BETWEEN 1 AND 64) AND (charge_code IS NULL OR length(btrim(charge_code)) BETWEEN 1 AND 64) AND (price_type IS NULL OR price_type IN ('COST', 'AGENT', 'CUSTOMER', 'SPECIAL')) AND (zone_code IS NULL OR length(btrim(zone_code)) BETWEEN 1 AND 64) AND (effective_until IS NULL OR effective_from IS NULL OR effective_until > effective_from)`
+    ),
+    check('rate_rules_state_check', sql`state = ANY (ARRAY['DRAFT'::text, 'ACTIVE'::text, 'INACTIVE'::text])`),
     check('rate_rules_version_check', sql`version >= 1`),
     check('rate_rules_timestamps_check', sql`updated_at >= created_at`),
   ]
@@ -380,7 +399,7 @@ export const quotes = pgTable(
     deliveryAddressId: text('delivery_address_id'),
     state: text().default('OPEN').notNull(),
     requestedCurrency: text('requested_currency').notNull(),
-    idempotencyKey: text('idempotency_key').notNull(),
+    idempotencyKey: text('idempotency_key'),
     acceptedQuoteVersionId: text('accepted_quote_version_id'),
     acceptedQuoteOptionId: text('accepted_quote_option_id'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
@@ -883,6 +902,13 @@ export const quoteAcceptances = pgTable(
       .onUpdate('restrict')
       .onDelete('restrict'),
     unique('quote_acceptances_tenant_id_unique').on(table.tenantId, table.id),
+    unique('quote_acceptances_ownership_unique').on(
+      table.tenantId,
+      table.id,
+      table.quoteId,
+      table.quoteVersionId,
+      table.quoteOptionId
+    ),
     unique('quote_acceptances_quote_unique').on(table.tenantId, table.quoteId),
     pgPolicy('quote_acceptances_tenant_isolation', {
       as: 'permissive',
@@ -915,8 +941,9 @@ export const orders = pgTable(
     pickupAddressId: text('pickup_address_id').notNull(),
     deliveryAddressId: text('delivery_address_id').notNull(),
     quoteAcceptanceId: text('quote_acceptance_id'),
+    orderType: text('order_type').default('STANDARD').notNull(),
     state: text().default('DRAFT').notNull(),
-    idempotencyKey: text('idempotency_key').notNull(),
+    idempotencyKey: text('idempotency_key'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
     submittedAt: timestamp('submitted_at', { withTimezone: true, mode: 'string' }),
@@ -988,6 +1015,7 @@ export const orders = pgTable(
       'orders_state_check',
       sql`state = ANY (ARRAY['DRAFT'::text, 'VALIDATED'::text, 'SUBMITTED'::text, 'CANCELLED'::text])`
     ),
+    check('orders_type_check', sql`order_type IN ('STANDARD', 'FBA')`),
     check(
       'orders_submission_check',
       sql`((state = ANY (ARRAY['SUBMITTED'::text, 'CANCELLED'::text])) AND (submitted_at IS NOT NULL)) OR ((state = ANY (ARRAY['DRAFT'::text, 'VALIDATED'::text])) AND (submitted_at IS NULL))`
@@ -1165,7 +1193,7 @@ export const waybills = pgTable(
     trackingNumber: text('tracking_number').notNull(),
     orderId: text('order_id').notNull(),
     state: text().default('DRAFT').notNull(),
-    idempotencyKey: text('idempotency_key').notNull(),
+    idempotencyKey: text('idempotency_key'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
     issuedAt: timestamp('issued_at', { withTimezone: true, mode: 'string' }),
@@ -1319,11 +1347,15 @@ export const customsDeclarations = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id').notNull(),
     waybillId: text('waybill_id').notNull(),
-    declarationNumber: text('declaration_number').notNull(),
-    incoterm: text().notNull(),
+    declarationNumber: text('declaration_number'),
+    incoterm: text(),
     currency: text().notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     totalValueMinor: bigint('total_value_minor', { mode: 'number' }).notNull(),
+    insured: boolean().default(false).notNull(),
+    insuredValueAmount: numeric('insured_value_amount', { precision: 20, scale: 6 }),
+    insuredValueMinor: bigint('insured_value_minor', { mode: 'number' }),
+    insuredCurrency: text('insured_currency'),
     state: text().default('DRAFT').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
@@ -1367,9 +1399,9 @@ export const customsDeclarations = pgTable(
     check('customs_declarations_id_check', sql`id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'::text`),
     check(
       'customs_declarations_number_check',
-      sql`(length(btrim(declaration_number)) >= 1) AND (length(btrim(declaration_number)) <= 100)`
+      sql`declaration_number IS NULL OR length(btrim(declaration_number)) BETWEEN 1 AND 100`
     ),
-    check('customs_declarations_incoterm_check', sql`incoterm ~ '^[A-Z]{3}$'::text`),
+    check('customs_declarations_incoterm_check', sql`incoterm IS NULL OR incoterm ~ '^[A-Z]{3}$'::text`),
     check(
       'customs_declarations_money_check',
       sql`(currency ~ '^[A-Z]{3}$'::text) AND (total_value_minor >= 0)`
@@ -1377,6 +1409,10 @@ export const customsDeclarations = pgTable(
     check(
       'customs_declarations_state_check',
       sql`state = ANY (ARRAY['DRAFT'::text, 'SUBMITTED'::text, 'ACCEPTED'::text, 'REJECTED'::text, 'VOID'::text])`
+    ),
+    check(
+      'customs_declarations_insurance_check',
+      sql`(NOT insured AND insured_value_amount IS NULL AND insured_value_minor IS NULL AND insured_currency IS NULL) OR (insured AND (insured_value_amount IS NOT NULL OR insured_value_minor IS NOT NULL) AND insured_currency ~ '^[A-Z]{3}$'::text)`
     ),
     check('customs_declarations_version_check', sql`version >= 1`),
     check('customs_declarations_timestamps_check', sql`updated_at >= created_at`),
@@ -1391,14 +1427,14 @@ export const declarationItems = pgTable(
     declarationId: text('declaration_id').notNull(),
     lineNumber: integer('line_number').notNull(),
     description: text().notNull(),
-    hsCode: text('hs_code').notNull(),
-    originCountryCode: text('origin_country_code').notNull(),
+    hsCode: text('hs_code'),
+    originCountryCode: text('origin_country_code'),
     quantity: integer().notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     unitValueMinor: bigint('unit_value_minor', { mode: 'number' }).notNull(),
     currency: text().notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    netWeightGrams: bigint('net_weight_grams', { mode: 'number' }).notNull(),
+    netWeightGrams: bigint('net_weight_grams', { mode: 'number' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -1443,14 +1479,14 @@ export const declarationItems = pgTable(
       'declaration_items_description_check',
       sql`(length(btrim(description)) >= 1) AND (length(btrim(description)) <= 500)`
     ),
-    check('declaration_items_hs_code_check', sql`hs_code ~ '^[0-9]{6,12}$'::text`),
-    check('declaration_items_origin_check', sql`origin_country_code ~ '^[A-Z]{2}$'::text`),
+    check('declaration_items_hs_code_check', sql`hs_code IS NULL OR hs_code ~ '^[0-9]{6,12}$'::text`),
+    check('declaration_items_origin_check', sql`origin_country_code IS NULL OR origin_country_code ~ '^[A-Z]{2}$'::text`),
     check('declaration_items_quantity_check', sql`quantity > 0`),
     check(
       'declaration_items_money_check',
       sql`(currency ~ '^[A-Z]{3}$'::text) AND (unit_value_minor >= 0)`
     ),
-    check('declaration_items_weight_check', sql`net_weight_grams > 0`),
+    check('declaration_items_weight_check', sql`net_weight_grams IS NULL OR net_weight_grams > 0`),
   ]
 ).enableRLS();
 
@@ -1550,10 +1586,15 @@ export const importJobs = pgTable(
     tenantId: text('tenant_id').notNull(),
     importNumber: text('import_number').notNull(),
     importType: text('import_type').notNull(),
-    sourceObjectKey: text('source_object_key').notNull(),
-    sourceSha256: text('source_sha256').notNull(),
+    sourceObjectKey: text('source_object_key'),
+    sourceSha256: text('source_sha256'),
+    sourceFileRef: text('source_file_ref'),
+    sourceMetadata: jsonb('source_metadata'),
+    atomicity: text(),
+    mappingVersion: integer('mapping_version'),
+    validationVersion: integer('validation_version'),
     state: text().default('UPLOADED').notNull(),
-    idempotencyKey: text('idempotency_key').notNull(),
+    idempotencyKey: text('idempotency_key'),
     rollbackOfJobId: text('rollback_of_job_id'),
     totalRows: integer('total_rows').default(0).notNull(),
     succeededRows: integer('succeeded_rows').default(0).notNull(),
@@ -1615,11 +1656,19 @@ export const importJobs = pgTable(
     ),
     check(
       'import_jobs_type_check',
-      sql`import_type = ANY (ARRAY['ORDERS'::text, 'WAYBILLS'::text])`
+      sql`import_type = ANY (ARRAY['ORDERS'::text, 'PAYABLES'::text, 'MASTER_DATA'::text, 'MIGRATION'::text, 'WAYBILLS'::text])`
     ),
     check(
       'import_jobs_source_check',
-      sql`(length(btrim(source_object_key)) >= 1) AND (source_sha256 ~ '^[0-9a-f]{64}$'::text)`
+      sql`(source_file_ref IS NULL OR length(btrim(source_file_ref)) >= 1) AND (source_metadata IS NULL OR jsonb_typeof(source_metadata) = 'object') AND (source_object_key IS NULL OR length(btrim(source_object_key)) >= 1) AND (source_sha256 IS NULL OR source_sha256 ~ '^[0-9a-f]{64}$'::text)`
+    ),
+    check(
+      'import_jobs_atomicity_check',
+      sql`atomicity IS NULL OR atomicity IN ('ALL_OR_NOTHING', 'ALLOW_PARTIAL')`
+    ),
+    check(
+      'import_jobs_versions_check',
+      sql`(mapping_version IS NULL OR mapping_version >= 1) AND (validation_version IS NULL OR validation_version >= 1)`
     ),
     check(
       'import_jobs_state_check',
