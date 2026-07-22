@@ -33,7 +33,7 @@ test('平台端代入必须展示审计影响与原因', async ({ page }) => {
 test('平台配置回写当前租户实体且运行快照可比较', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: '配额与用量' }).click();
-  await page.getByLabel('配置租户').selectOption('2');
+  await page.getByLabel('配置租户').selectOption({ label: '深圳海运通物流有限公司' });
   await page.getByLabel('租户套餐').selectOption('企业版');
   await page.getByLabel('运单配额上限').fill('260000');
   await page.getByLabel('租户到期日').fill('2027-02-01');

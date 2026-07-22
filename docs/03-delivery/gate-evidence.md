@@ -2,14 +2,14 @@
 
 只有可复查证据齐全，门槛状态才可从 `OPEN` 改为 `PASSED`。不能只靠概念图或文字声明；必须同时提供机器可检验的规格、真实接口或自动测试。
 
-| Gate         | 状态        | Commit/版本              | 证据                                                                                             | 未关闭例外                                                                 |
-| ------------ | ----------- | ------------------------ | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
-| 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题                     | 无                                                                         |
-| 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过                      | 无                                                                         |
-| Figma 同步   | PASSED      | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、45 个五端画布、104 条原型 reaction；独立终审 C0/I0/M0 | Code Connect 受方案与发布条件阻塞，记录为 `BLOCKED_EXTERNAL`，不阻塞本门槛 |
-| 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过                     | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                         |
-| 后端         | IN_PROGRESS | `2a26938`                | Foundation 已通过；B1 三份 schema proposal 均经独立 C0/I0/M0 审查并按依赖顺序合并                | 统一 Drizzle schema、迁移与领域服务仍在独立工作树实现                      |
-| 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                                              | 前置门槛未通过                                                             |
+| Gate         | 状态        | Commit/版本              | 证据                                                                                             | 未关闭例外                                                                  |
+| ------------ | ----------- | ------------------------ | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题                     | 无                                                                          |
+| 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过                      | 无                                                                          |
+| Figma 同步   | PASSED      | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、45 个五端画布、104 条原型 reaction；独立终审 C0/I0/M0 | Code Connect 受方案与发布条件阻塞，记录为 `BLOCKED_EXTERNAL`，不阻塞本门槛  |
+| 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过                     | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                          |
+| 后端         | IN_PROGRESS | `fe56518`                | Foundation、B1 统一 schema/迁移、OpenAPI/适配器公共基线均经独立 C0/I0/M0 审查并合入主线          | 三个领域 repository、service、controller 与 Mock-off 集成仍在独立工作树实现 |
+| 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                                              | 前置门槛未通过                                                              |
 
 ## UI 门槛与 B 方案决策
 
@@ -102,3 +102,13 @@ Code Connect 当前是明确的外部门槛：Pro 方案与未发布的本地组
 - Proposal 严格复用 Foundation 的 `current_setting('app.tenant_id', true)`，身份域拥有 tenants/customers/customer_addresses/devices，费率域拥有 waybills/waybill_packages，仓储域只引用上游复合租户键，没有重复定义上游表。
 - 三个分支按身份主数据 `21d1501` → 费率/运单 `ae5e5d0` → 仓储/干线 `2a26938` 合入主分支；合并后 `pnpm --filter @zhili/db test` 为 2 files / 3 tests 通过，`git diff --check` 通过且工作区干净。
 - 统一迁移不由三个领域分支各自生成；它固定在 `codex/backend-b1-schema` 工作树一次性产出 Drizzle schema、`0001_b1_domains.sql`、RLS 与 up/down/up 指纹门禁，完成独立审查后再同步给领域工作树。
+
+## 2026-07-22 B1 公共后端基线证据
+
+- B1 统一 schema 最终提交 `a8b73d5`，独立 R4 复审为 `C0 / I0 / M0`；合入主线提交 `54b8884`。
+- PostgreSQL 17 集成测试为 5 files / 27 tests，覆盖 72 张 B1 领域表、RLS、复合键与索引 parity、fresh Drizzle 建库、旧 `0000` → 新 `0001` 升级、真实 down/up 指纹、预存角色与扩展保持、平台作用域、幂等和并发 CAS。
+- B1 OpenAPI、生成类型、权威适配器与 Mock 合同最终提交 `777a0a0`，独立 R5 复审为 `C0 / I0 / M0`；合入主线提交 `fe56518`。
+- 契约门禁为 Redocly 0 error/warning、185/185 operationId 唯一、Contracts 32/32；secured field projection、ETag/If-Match、412 envelope、稳定游标、批量逐项版本与报价关联均由语义测试覆盖。
+- 合并后的主线通过 frozen install、生成一致性、Prettier、Markdownlint、24/24 lint、24/24 typecheck、35/35 test、20/20 build、PG17 27/27 和 Playwright 41/41。
+- Playwright 首轮发现平台测试仍硬编码旧数字租户 ID；改为按用户可见租户名称选择后，平台 5/5 与五端 41/41 均通过。产品租户 ID 保持正式 ULID，没有为测试回退数据模型。
+- 公共基线完成不等于后端总门槛完成；身份主数据、费率订单运单、仓储干线尾程的 repository/service/controller 与跨端 Mock-off 仍按三个独立工作树实施。
