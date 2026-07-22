@@ -294,6 +294,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/orders/{orderId}:submit': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Submit a validated order forecast */
+    post: operations['submitOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/quotes': {
     parameters: {
       query?: never;
@@ -374,7 +391,7 @@ export interface paths {
     put?: never;
     /**
      * Link an accepted quote option to an order and create its draft waybill
-     * @description Atomically proves the quote option is accepted and unexpired, links it to the order, and creates or replays exactly one draft waybill identity.
+     * @description Atomically proves the exact acceptedQuoteVersion and option are accepted and unexpired, links the immutable quote snapshot to the order, and creates or idempotently replays exactly one link and draft waybill identity. The response ETag always represents the order aggregate.
      */
     post: operations['linkAcceptedQuoteToOrder'];
     delete?: never;
@@ -2003,7 +2020,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Split packages into linked waybills atomically */
+    /**
+     * Split packages into linked waybills atomically
+     * @description expectedVersion protects the source waybill. The response body carries every resulting aggregate version; no single response ETag is emitted because the command creates lineage.
+     */
     post: operations['splitWaybill'];
     delete?: never;
     options?: never;
@@ -2020,7 +2040,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Merge compatible waybills with lineage */
+    /**
+     * Merge compatible waybills with lineage
+     * @description Each source carries its own expectedVersion. The command is atomic and returns source and merged aggregate versions; no ambiguous single response ETag is emitted.
+     */
     post: operations['mergeWaybills'];
     delete?: never;
     options?: never;
@@ -2037,7 +2060,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Execute a resumable batch command with item outcomes */
+    /**
+     * Execute a resumable batch command with item outcomes
+     * @description Each input carries its own expectedVersion. The response preserves input order exactly and returns one authoritative outcome for every input; stale items are represented as failures.
+     */
     post: operations['batchWaybillCommand'];
     delete?: never;
     options?: never;
@@ -3166,6 +3192,7 @@ export interface components {
       | 'APPROVAL_REQUIRED'
       | 'CARRIER_UNAVAILABLE'
       | 'CHANNEL_RESTRICTION'
+      | 'CURSOR_FILTER_MISMATCH'
       | 'DEVICE_EVENT_DUPLICATE'
       | 'DEVICE_QUEUE_FULL'
       | 'DEVICE_SYNC_CONFLICT'
@@ -3217,6 +3244,16 @@ export interface components {
       nextCursor?: string | null;
       /** Format: date-time */
       asOf?: string;
+    };
+    /** @description Signed base64url token containing the snapshot, filter hash and order tuple. */
+    OpaqueCursor: string;
+    CursorPageMeta: {
+      requestId: string;
+      nextCursor: components['schemas']['OpaqueCursor'] | null;
+      /** Format: date-time */
+      asOf: string;
+      filterHash: string;
+      order: string[];
     };
     HealthDependencyResult: {
       /** @enum {string} */
@@ -3502,15 +3539,29 @@ export interface components {
       optionId: components['schemas']['Ulid'];
       reason: string;
     };
+    FieldProjectionDecision: {
+      /** @enum {string} */
+      access: 'READ' | 'MASK' | 'DENY';
+      copyAllowed: boolean;
+      exportAllowed: boolean;
+      maskPattern?: string;
+    };
+    WaybillFieldPolicyProjection: {
+      customerName: components['schemas']['FieldProjectionDecision'];
+      customerCode: components['schemas']['FieldProjectionDecision'];
+      contactName: components['schemas']['FieldProjectionDecision'];
+      contactPhone: components['schemas']['FieldProjectionDecision'];
+    };
     Waybill: {
       id: components['schemas']['Ulid'];
       /** @example S2505120004 */
       waybillNo: string;
       masterNo: string | null;
-      customerName: string;
-      customerCode: string;
-      contactName: string | null;
-      contactPhone: string | null;
+      customerName?: string;
+      customerCode?: string;
+      contactName?: string | null;
+      contactPhone?: string | null;
+      fieldPolicy: components['schemas']['WaybillFieldPolicyProjection'];
       route: string;
       service: string;
       /** @enum {string} */
@@ -4416,6 +4467,19 @@ export interface components {
     UpdateTenantEntitlementsRequest: {
       modules: components['schemas']['TenantModuleEntitlementInput'][];
     };
+    ChangeTenantStatusRequest: {
+      /** @enum {string} */
+      status: 'ACTIVE' | 'SUSPENDED';
+    };
+    TenantEntitlementsState: {
+      tenantId: components['schemas']['Ulid'];
+      modules: components['schemas']['TenantModuleEntitlementInput'][];
+      version: number;
+    };
+    TenantEntitlementsResponse: {
+      data: components['schemas']['TenantEntitlementsState'];
+      meta: components['schemas']['Meta'];
+    };
     TenantModuleEntitlementInput: {
       moduleCode: string;
       enabled: boolean;
@@ -4497,10 +4561,15 @@ export interface components {
       data: components['schemas']['FieldPolicyPreview'];
       meta: components['schemas']['Meta'];
     };
-    UpsertOrganizationNodeRequest: {
-      /** @enum {string} */
-      mode: 'CREATE' | 'UPDATE';
-      id?: components['schemas']['Ulid'];
+    UpsertOrganizationNodeRequest:
+      | components['schemas']['CreateOrganizationNodeRequest']
+      | components['schemas']['UpdateOrganizationNodeRequest'];
+    CreateOrganizationNodeRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
       code: string;
       name: string;
       /** @enum {string} */
@@ -4509,10 +4578,29 @@ export interface components {
       /** @enum {string} */
       status: 'ACTIVE' | 'INACTIVE';
     };
-    UpsertUserRequest: {
+    UpdateOrganizationNodeRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      code: string;
+      name: string;
       /** @enum {string} */
-      mode: 'CREATE' | 'UPDATE';
-      id?: components['schemas']['Ulid'];
+      nodeType: 'COMPANY' | 'DEPARTMENT' | 'SITE' | 'WAREHOUSE' | 'LOCATION';
+      parentId?: components['schemas']['Ulid'] | null;
+      /** @enum {string} */
+      status: 'ACTIVE' | 'INACTIVE';
+    };
+    UpsertUserRequest:
+      components['schemas']['CreateUserRequest'] | components['schemas']['UpdateUserRequest'];
+    CreateUserRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
       loginName: string;
       displayName: string;
       /** Format: email */
@@ -4523,18 +4611,71 @@ export interface components {
       roleIds: components['schemas']['Ulid'][];
       organizationNodeIds: components['schemas']['Ulid'][];
     };
-    UpsertCustomerAddressRequest: {
+    UpdateUserRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      loginName: string;
+      displayName: string;
+      /** Format: email */
+      email?: string;
+      mobile?: string;
       /** @enum {string} */
-      mode: 'CREATE' | 'UPDATE';
-      id?: components['schemas']['Ulid'];
+      status: 'ACTIVE' | 'DISABLED' | 'LOCKED';
+      roleIds: components['schemas']['Ulid'][];
+      organizationNodeIds: components['schemas']['Ulid'][];
+    };
+    UpsertCustomerAddressRequest:
+      | components['schemas']['CreateCustomerAddressRequest']
+      | components['schemas']['UpdateCustomerAddressRequest'];
+    CreateCustomerAddressRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
       label: string;
       address: components['schemas']['Address'];
       isDefault: boolean;
     };
-    UpsertPartnerRequest: {
+    UpdateCustomerAddressRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      label: string;
+      address: components['schemas']['Address'];
+      isDefault: boolean;
+    };
+    UpsertPartnerRequest:
+      components['schemas']['CreatePartnerRequest'] | components['schemas']['UpdatePartnerRequest'];
+    CreatePartnerRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      partnerCode: string;
+      name: string;
       /** @enum {string} */
-      mode: 'CREATE' | 'UPDATE';
-      id?: components['schemas']['Ulid'];
+      partnerType: 'AGENT' | 'SUPPLIER' | 'CARRIER' | 'LAST_MILE';
+      /** @enum {string} */
+      status: 'ACTIVE' | 'INACTIVE';
+      contactName?: string;
+      contactPhone?: string;
+    };
+    UpdatePartnerRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
       partnerCode: string;
       name: string;
       /** @enum {string} */
@@ -4564,10 +4705,29 @@ export interface components {
       holdOnExceed: boolean;
       reason: string;
     };
-    UpsertChannelProductRequest: {
+    UpsertChannelProductRequest:
+      | components['schemas']['CreateChannelProductRequest']
+      | components['schemas']['UpdateChannelProductRequest'];
+    CreateChannelProductRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      productCode: string;
+      name: string;
       /** @enum {string} */
-      mode: 'CREATE' | 'UPDATE';
-      id?: components['schemas']['Ulid'];
+      transportMode: 'AIR' | 'SEA' | 'RAIL' | 'ROAD' | 'EXPRESS';
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    UpdateChannelProductRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
       productCode: string;
       name: string;
       /** @enum {string} */
@@ -4584,29 +4744,151 @@ export interface components {
       currency: components['schemas']['CurrencyCode'];
       reason: string;
     };
-    UpsertRatePriceVersionRequest: {
+    RateCardPublication: {
+      rateCardId: components['schemas']['Ulid'];
+      version: number;
+      versionLabel: string;
+      /** @constant */
+      status: 'PUBLISHED';
+      /** Format: date-time */
+      effectiveFrom: string;
+      /** Format: date-time */
+      effectiveUntil: string | null;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    RateCardPublicationResponse: {
+      data: components['schemas']['RateCardPublication'];
+      meta: components['schemas']['Meta'];
+    };
+    RateRuleScopeInput: {
+      channelProductId?: components['schemas']['Ulid'];
+      zoneCode?: string;
+      serviceCode: string;
+      originCountryCode: string;
+      destinationCountryCode: string;
+      packageType: string;
+    };
+    RateWeightRangeInput: {
+      minWeightGrams: number;
+      maxWeightGrams: number;
+    };
+    RateMeasurementInput: {
+      dimensionalDivisor?: number;
+      roundingStepGrams?: number;
       /** @enum {string} */
-      mode: 'CREATE' | 'UPDATE';
-      id?: components['schemas']['Ulid'];
-      channelProductId: components['schemas']['Ulid'];
+      roundingMode: 'UP' | 'NEAREST' | 'DOWN';
+      minimumCharge?: components['schemas']['MoneyMinorInput'];
+    };
+    MoneyMinorInput: {
+      amountMinor: number;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    RateCalculationInput:
+      | components['schemas']['FlatRateCalculationInput']
+      | components['schemas']['PerKgRateCalculationInput']
+      | components['schemas']['PercentageRateCalculationInput'];
+    FlatRateCalculationInput: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      method: 'FLAT';
+      amountMinor: number;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    PerKgRateCalculationInput: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      method: 'PER_KG';
+      amountMinor: number;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    PercentageRateCalculationInput: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      method: 'PERCENTAGE';
+      percentageBps: number;
+    };
+    UpsertRatePriceVersionRequest:
+      | components['schemas']['CreateRatePriceVersionRequest']
+      | components['schemas']['UpdateRatePriceVersionRequest'];
+    CreateRatePriceVersionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
       /** @enum {string} */
       priceType: 'COST' | 'AGENT' | 'CUSTOMER' | 'SPECIAL';
-      currency: components['schemas']['CurrencyCode'];
-      amount: components['schemas']['Decimal'];
+      scope: components['schemas']['RateRuleScopeInput'];
+      weightRange: components['schemas']['RateWeightRangeInput'];
+      calculation: components['schemas']['RateCalculationInput'];
+      measurement: components['schemas']['RateMeasurementInput'];
       /** Format: date-time */
       effectiveFrom: string;
       /** Format: date-time */
       effectiveUntil?: string | null;
-    };
-    UpsertSurchargeRuleRequest: {
+      priority: number;
       /** @enum {string} */
-      mode: 'CREATE' | 'UPDATE';
-      id?: components['schemas']['Ulid'];
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    UpdateRatePriceVersionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      /** @enum {string} */
+      priceType: 'COST' | 'AGENT' | 'CUSTOMER' | 'SPECIAL';
+      scope: components['schemas']['RateRuleScopeInput'];
+      weightRange: components['schemas']['RateWeightRangeInput'];
+      calculation: components['schemas']['RateCalculationInput'];
+      measurement: components['schemas']['RateMeasurementInput'];
+      /** Format: date-time */
+      effectiveFrom: string;
+      /** Format: date-time */
+      effectiveUntil?: string | null;
+      priority: number;
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    UpsertSurchargeRuleRequest:
+      | components['schemas']['CreateSurchargeRuleRequest']
+      | components['schemas']['UpdateSurchargeRuleRequest'];
+    CreateSurchargeRuleRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
       ruleCode: string;
       chargeCode: string;
+      scope: components['schemas']['RateRuleScopeInput'];
+      weightRange: components['schemas']['RateWeightRangeInput'];
+      calculation: components['schemas']['RateCalculationInput'];
+      measurement: components['schemas']['RateMeasurementInput'];
+      priority: number;
       /** @enum {string} */
-      calculation: 'FLAT' | 'PER_KG' | 'PERCENTAGE';
-      amount?: components['schemas']['Decimal'];
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    UpdateSurchargeRuleRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      ruleCode: string;
+      chargeCode: string;
+      scope: components['schemas']['RateRuleScopeInput'];
+      weightRange: components['schemas']['RateWeightRangeInput'];
+      calculation: components['schemas']['RateCalculationInput'];
+      measurement: components['schemas']['RateMeasurementInput'];
       priority: number;
       /** @enum {string} */
       status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
@@ -4617,6 +4899,26 @@ export interface components {
       destination: components['schemas']['Address'];
       packages: components['schemas']['PackageInput'][];
       commodityCodes?: string[];
+    };
+    RestrictionRuleFailure: {
+      ruleCode: string;
+      reason: string;
+      field: string;
+    };
+    ShipmentRestrictionAlternative: {
+      channelProductId: components['schemas']['Ulid'];
+      serviceCode: string;
+      reason: string;
+    };
+    ShipmentRestrictionValidationResult: {
+      available: boolean;
+      failedRules: components['schemas']['RestrictionRuleFailure'][];
+      warnings: string[];
+      alternatives: components['schemas']['ShipmentRestrictionAlternative'][];
+    };
+    ShipmentRestrictionValidationResponse: {
+      data: components['schemas']['ShipmentRestrictionValidationResult'];
+      meta: components['schemas']['Meta'];
     };
     CopyOrderRequest: {
       copyAddresses: boolean;
@@ -4648,6 +4950,21 @@ export interface components {
       format: 'A4' | '100X150';
       copies: number;
     };
+    LabelJobCreated: {
+      labelJobId: components['schemas']['Ulid'];
+      waybillId: components['schemas']['Ulid'];
+      latestWaybillVersion: number;
+      /** @enum {string} */
+      status: 'QUEUED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED';
+      /** @enum {string} */
+      format: 'A4' | '100X150';
+      /** Format: date-time */
+      createdAt: string;
+    };
+    LabelJobCreatedResponse: {
+      data: components['schemas']['LabelJobCreated'];
+      meta: components['schemas']['Meta'];
+    };
     CancelWaybillRequest: {
       reason: string;
     };
@@ -4655,20 +4972,95 @@ export interface components {
       newWaybillNo: string;
       reason: string;
     };
+    WaybillRenumberResult: {
+      waybillId: components['schemas']['Ulid'];
+      previousWaybillNo: string;
+      newWaybillNo: string;
+      latestVersion: number;
+    };
+    WaybillRenumberResponse: {
+      data: components['schemas']['WaybillRenumberResult'];
+      meta: components['schemas']['Meta'];
+    };
+    WaybillVersionPrecondition: {
+      waybillId: components['schemas']['Ulid'];
+      expectedVersion: number;
+    };
+    WaybillLineageNode: {
+      waybillId: components['schemas']['Ulid'];
+      waybillNo: string;
+      version: number;
+      packageRefs: string[];
+    };
     SplitWaybillRequest: {
       waybillId: components['schemas']['Ulid'];
+      expectedVersion: number;
       packageRefs: string[];
       reason: string;
     };
+    WaybillSplitResult: {
+      source: components['schemas']['WaybillLineageNode'];
+      children: components['schemas']['WaybillLineageNode'][];
+    };
+    WaybillSplitResponse: {
+      data: components['schemas']['WaybillSplitResult'];
+      meta: components['schemas']['Meta'];
+    };
     MergeWaybillsRequest: {
-      waybillIds: components['schemas']['Ulid'][];
+      items: components['schemas']['WaybillVersionPrecondition'][];
       reason: string;
     };
+    WaybillMergeResult: {
+      sources: components['schemas']['WaybillLineageNode'][];
+      merged: components['schemas']['WaybillLineageNode'];
+    };
+    WaybillMergeResponse: {
+      data: components['schemas']['WaybillMergeResult'];
+      meta: components['schemas']['Meta'];
+    };
     BatchWaybillCommandRequest: {
-      waybillIds: components['schemas']['Ulid'][];
+      items: components['schemas']['WaybillVersionPrecondition'][];
       /** @enum {string} */
       command: 'SUBMIT' | 'CANCEL' | 'HOLD' | 'RELEASE';
       reason: string;
+    };
+    WaybillBatchOutcome:
+      | components['schemas']['WaybillBatchSucceededOutcome']
+      | components['schemas']['WaybillBatchFailedOutcome'];
+    WaybillBatchSucceededOutcome: {
+      waybillId: components['schemas']['Ulid'];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      disposition: 'SUCCEEDED';
+      latestVersion: number;
+    };
+    WaybillBatchItemError: {
+      code: components['schemas']['ErrorCode'];
+      message: string;
+      remediation: string;
+    };
+    WaybillBatchFailedOutcome: {
+      waybillId: components['schemas']['Ulid'];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      disposition: 'FAILED';
+      latestVersion: number;
+      error: components['schemas']['WaybillBatchItemError'];
+    };
+    WaybillBatchCommandResult: {
+      /** @enum {string} */
+      command: 'SUBMIT' | 'CANCEL' | 'HOLD' | 'RELEASE';
+      /** @constant */
+      orderPreserved: true;
+      outcomes: components['schemas']['WaybillBatchOutcome'][];
+    };
+    WaybillBatchCommandResponse: {
+      data: components['schemas']['WaybillBatchCommandResult'];
+      meta: components['schemas']['Meta'];
     };
     RecordMeasurementRequest: {
       deviceEventId: components['schemas']['Ulid'];
@@ -4729,6 +5121,27 @@ export interface components {
       loadUnitId?: components['schemas']['Ulid'];
       waybillIds: components['schemas']['Ulid'][];
     };
+    LoadCompatibilityFailure: {
+      ruleCode: string;
+      reason: string;
+      waybillIds: components['schemas']['Ulid'][];
+    };
+    LoadCompatibilityAlternative: {
+      /** @enum {string} */
+      action: 'SPLIT_LOAD' | 'CHANGE_LOAD_UNIT' | 'REMOVE_WAYBILLS';
+      reason: string;
+      waybillIds?: components['schemas']['Ulid'][];
+    };
+    LoadCompatibilityValidationResult: {
+      compatible: boolean;
+      failedRules: components['schemas']['LoadCompatibilityFailure'][];
+      warnings: string[];
+      alternatives: components['schemas']['LoadCompatibilityAlternative'][];
+    };
+    LoadCompatibilityValidationResponse: {
+      data: components['schemas']['LoadCompatibilityValidationResult'];
+      meta: components['schemas']['Meta'];
+    };
     LinkFbaShipmentRequest: {
       loadUnitId: components['schemas']['Ulid'];
       amazonShipmentId: string;
@@ -4781,13 +5194,17 @@ export interface components {
     LinkAcceptedQuoteToOrderRequest: {
       quoteId: components['schemas']['Ulid'];
       quoteOptionId: components['schemas']['Ulid'];
+      acceptedQuoteVersion: number;
     };
     AcceptedQuoteOrderLink: {
       quoteId: components['schemas']['Ulid'];
       quoteOptionId: components['schemas']['Ulid'];
+      quoteVersion: number;
+      linkId: components['schemas']['Ulid'];
+      linkVersion: number;
       orderId: components['schemas']['Ulid'];
-      waybillId: components['schemas']['Ulid'];
       orderVersion: number;
+      waybillId: components['schemas']['Ulid'];
       waybillVersion: number;
     };
     AcceptedQuoteOrderLinkResponse: {
@@ -4796,39 +5213,39 @@ export interface components {
     };
     QuoteListResponse: {
       data: components['schemas']['Quote'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     OrderListResponse: {
       data: components['schemas']['Order'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     WaybillListResponse: {
       data: components['schemas']['Waybill'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     ImportJobListResponse: {
       data: components['schemas']['ImportJob'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     WarehouseReceiptListResponse: {
       data: components['schemas']['WarehouseReceipt'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     LoadUnitListResponse: {
       data: components['schemas']['LoadUnit'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     BookingListResponse: {
       data: components['schemas']['Booking'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     LastMileIntakeListResponse: {
       data: components['schemas']['LastMileIntake'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     DeliveryTaskListResponse: {
       data: components['schemas']['DeliveryTask'][];
-      meta: components['schemas']['Meta'];
+      meta: components['schemas']['CursorPageMeta'];
     };
     /** @description Extensible contract shape refined by the owning domain module. */
     DomainRecord: {
@@ -5034,6 +5451,52 @@ export interface components {
         'application/problem+json': components['schemas']['ErrorEnvelope'];
       };
     };
+    /** @description The order, accepted quote version or quote option is absent or outside caller scope. */
+    AcceptedQuoteLinkNotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        /**
+         * @example {
+         *       "code": "NOT_FOUND",
+         *       "message": "Accepted quote linkage input was not found in the caller data scope.",
+         *       "details": [
+         *         {
+         *           "field": "acceptedQuoteVersion",
+         *           "reason": "quote snapshot is absent or inaccessible"
+         *         }
+         *       ],
+         *       "remediation": "Reload the order and accepted quote snapshot before retrying.",
+         *       "requestId": "req_01JY8Z8F"
+         *     }
+         */
+        'application/problem+json': components['schemas']['ErrorEnvelope'];
+      };
+    };
+    /** @description Cursor is invalid or does not match the normalized filters and immutable snapshot. */
+    CursorFilterMismatch: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        /**
+         * @example {
+         *       "code": "CURSOR_FILTER_MISMATCH",
+         *       "message": "Cursor cannot be reused with a different filter set.",
+         *       "details": [
+         *         {
+         *           "field": "cursor",
+         *           "reason": "filter hash or snapshot does not match"
+         *         }
+         *       ],
+         *       "remediation": "Restart pagination without a cursor using the desired filters.",
+         *       "requestId": "req_01JY8Z8F"
+         *     }
+         */
+        'application/problem+json': components['schemas']['ErrorEnvelope'];
+      };
+    };
     /** @description Unexpected server failure that can be retried with the same safe request intent. */
     InternalError: {
       headers: {
@@ -5221,8 +5684,54 @@ export interface components {
     IfMatch: string;
     /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
     OptionalIfMatch: string;
-    Cursor: string;
+    /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+    Cursor: components['schemas']['OpaqueCursor'];
     Limit: number;
+    QuoteStatusFilter: 'DRAFT' | 'CALCULATED' | 'ACCEPTED' | 'EXPIRED';
+    OrderStatusFilter: 'DRAFT' | 'VALIDATED' | 'SUBMITTED' | 'CANCELLED';
+    WaybillStateFilter:
+      | 'DRAFT'
+      | 'FORECASTED'
+      | 'AWAITING_RECEIPT'
+      | 'RECEIVED'
+      | 'AWAITING_ROUTING'
+      | 'AWAITING_TRANSIT'
+      | 'IN_TRANSIT'
+      | 'OUT_FOR_DELIVERY'
+      | 'DELIVERED'
+      | 'AWAITING_RETURN'
+      | 'RETURNED'
+      | 'CANCELLED';
+    ImportStatusFilter:
+      | 'UPLOADED'
+      | 'MAPPING'
+      | 'VALIDATING'
+      | 'READY'
+      | 'COMMITTING'
+      | 'COMPLETED'
+      | 'FAILED'
+      | 'ROLLED_BACK';
+    WarehouseReceiptStatusFilter: 'SCANNED' | 'CONFIRMED' | 'UNDONE';
+    LoadUnitStatusFilter: 'OPEN' | 'SEALED' | 'DISPATCHED';
+    BookingStatusFilter: 'DRAFT' | 'CONFIRMED' | 'DEPARTED' | 'CLOSED' | 'CANCELLED';
+    LastMileIntakeStatusFilter: 'OPEN' | 'RECONCILING' | 'CLOSED';
+    DeliveryTaskStatusFilter: components['schemas']['DeliveryTaskStatus'];
+    CustomerIdFilter: components['schemas']['Ulid'];
+    WarehouseIdFilter: components['schemas']['Ulid'];
+    StationCodeFilter: string;
+    Search: string;
+    CreatedFrom: string;
+    CreatedTo: string;
+    ReceivedFrom: string;
+    ReceivedTo: string;
+    DispatchFrom: string;
+    DispatchTo: string;
+    DepartureFrom: string;
+    DepartureTo: string;
+    IntakeFrom: string;
+    IntakeTo: string;
+    ScheduledFrom: string;
+    ScheduledTo: string;
     OrderId: components['schemas']['Ulid'];
     RoleId: components['schemas']['Ulid'];
     UserId: components['schemas']['Ulid'];
@@ -5620,8 +6129,14 @@ export interface operations {
   listOrders: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        status?: components['parameters']['OrderStatusFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        createdFrom?: components['parameters']['CreatedFrom'];
+        createdTo?: components['parameters']['CreatedTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -5638,6 +6153,7 @@ export interface operations {
           'application/json': components['schemas']['OrderListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -5725,11 +6241,48 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  submitOrder: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable key for the same intended command, retained for at least 24 hours. */
+        'Idempotency-Key': components['parameters']['IdempotencyKey'];
+        /** @description ETag returned by the latest resource representation. */
+        'If-Match': components['parameters']['IfMatch'];
+      };
+      path: {
+        orderId: components['parameters']['OrderId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authoritative submitted order projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+      412: components['responses']['PreconditionFailed'];
+      422: components['responses']['StateTransitionFailed'];
+    };
+  };
   listQuotes: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        status?: components['parameters']['QuoteStatusFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        createdFrom?: components['parameters']['CreatedFrom'];
+        createdTo?: components['parameters']['CreatedTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -5746,6 +6299,7 @@ export interface operations {
           'application/json': components['schemas']['QuoteListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -5883,7 +6437,8 @@ export interface operations {
       /** @description Existing idempotent link replayed. */
       200: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Strong ETag for the order aggregate, derived from data.orderVersion. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -5893,7 +6448,8 @@ export interface operations {
       /** @description Quote linked and draft waybill created. */
       201: {
         headers: {
-          ETag: components['headers']['ETag'];
+          /** @description Strong ETag for the order aggregate, derived from data.orderVersion. */
+          ETag?: string;
           [name: string]: unknown;
         };
         content: {
@@ -5901,6 +6457,8 @@ export interface operations {
         };
       };
       403: components['responses']['Forbidden'];
+      404: components['responses']['AcceptedQuoteLinkNotFound'];
+      410: components['responses']['Expired'];
       412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
@@ -5908,8 +6466,16 @@ export interface operations {
   listWaybills: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        state?: components['parameters']['WaybillStateFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        warehouseId?: components['parameters']['WarehouseIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        createdFrom?: components['parameters']['CreatedFrom'];
+        createdTo?: components['parameters']['CreatedTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -5926,6 +6492,7 @@ export interface operations {
           'application/json': components['schemas']['WaybillListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -6019,8 +6586,16 @@ export interface operations {
   listWarehouseReceipts: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        status?: components['parameters']['WarehouseReceiptStatusFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        warehouseId?: components['parameters']['WarehouseIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        receivedFrom?: components['parameters']['ReceivedFrom'];
+        receivedTo?: components['parameters']['ReceivedTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -6037,6 +6612,7 @@ export interface operations {
           'application/json': components['schemas']['WarehouseReceiptListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -6195,6 +6771,7 @@ export interface operations {
   getDeviceTasks: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
       };
@@ -6383,8 +6960,14 @@ export interface operations {
   listBookings: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        status?: components['parameters']['BookingStatusFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        departureFrom?: components['parameters']['DepartureFrom'];
+        departureTo?: components['parameters']['DepartureTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -6401,6 +6984,7 @@ export interface operations {
           'application/json': components['schemas']['BookingListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -6460,8 +7044,15 @@ export interface operations {
   listLoadUnits: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        status?: components['parameters']['LoadUnitStatusFilter'];
+        warehouseId?: components['parameters']['WarehouseIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        dispatchFrom?: components['parameters']['DispatchFrom'];
+        dispatchTo?: components['parameters']['DispatchTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -6478,6 +7069,7 @@ export interface operations {
           'application/json': components['schemas']['LoadUnitListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -6668,8 +7260,15 @@ export interface operations {
   listLastMileIntakes: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        status?: components['parameters']['LastMileIntakeStatusFilter'];
+        warehouseId?: components['parameters']['WarehouseIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        intakeFrom?: components['parameters']['IntakeFrom'];
+        intakeTo?: components['parameters']['IntakeTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -6686,6 +7285,7 @@ export interface operations {
           'application/json': components['schemas']['LastMileIntakeListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -6745,8 +7345,15 @@ export interface operations {
   listDeliveryTasks: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        status?: components['parameters']['DeliveryTaskStatusFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        scheduledFrom?: components['parameters']['ScheduledFrom'];
+        scheduledTo?: components['parameters']['ScheduledTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -6763,6 +7370,7 @@ export interface operations {
           'application/json': components['schemas']['DeliveryTaskListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -7522,6 +8130,7 @@ export interface operations {
   listPaymentReconciliationExceptions: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
       };
@@ -7579,8 +8188,13 @@ export interface operations {
   listImports: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
+        status?: components['parameters']['ImportStatusFilter'];
+        createdFrom?: components['parameters']['CreatedFrom'];
+        createdTo?: components['parameters']['CreatedTo'];
+        search?: components['parameters']['Search'];
       };
       header?: never;
       path?: never;
@@ -7597,6 +8211,7 @@ export interface operations {
           'application/json': components['schemas']['ImportJobListResponse'];
         };
       };
+      400: components['responses']['CursorFilterMismatch'];
       403: components['responses']['Forbidden'];
     };
   };
@@ -7890,13 +8505,23 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Tenant'];
+        'application/json': components['schemas']['ChangeTenantStatusRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative tenant after the lifecycle transition. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the returned tenant aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TenantResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7920,7 +8545,17 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative tenant entitlement aggregate. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the tenant entitlement aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TenantEntitlementsResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
@@ -8269,7 +8904,17 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative immutable publication projection. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the published rate-card aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RateCardPublicationResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
@@ -8339,7 +8984,15 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Availability, failed rules, warnings and alternatives. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShipmentRestrictionValidationResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       409: components['responses']['StaleVersion'];
       422: components['responses']['StateTransitionFailed'];
@@ -8365,7 +9018,17 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative independent draft order created by the copy. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the returned copied order. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
@@ -8469,7 +9132,17 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Created label job and authoritative latest waybill version. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the mutated waybill aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelJobCreatedResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
@@ -8521,7 +9194,17 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative replacement number and lineage. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the renumbered waybill aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillRenumberResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
@@ -8533,8 +9216,6 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
       };
       path?: never;
       cookie?: never;
@@ -8545,7 +9226,15 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Source and child waybill lineage with authoritative versions. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillSplitResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
@@ -8557,8 +9246,6 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
       };
       path?: never;
       cookie?: never;
@@ -8569,7 +9256,15 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Source and merged waybill lineage with authoritative versions. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillMergeResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
@@ -8581,8 +9276,6 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
       };
       path?: never;
       cookie?: never;
@@ -8593,9 +9286,16 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description One ordered outcome for each requested waybill. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillBatchCommandResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -8789,7 +9489,15 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Compatibility, failed rules, warnings and alternatives. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoadCompatibilityValidationResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
       409: components['responses']['StaleVersion'];
       422: components['responses']['StateTransitionFailed'];

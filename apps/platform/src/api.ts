@@ -1,4 +1,5 @@
 import { createZhiliClient } from '@zhili/api-client';
+import type { ZhiliApiClient } from '@zhili/api-client';
 import type { components } from '@zhili/contracts';
 
 const json = (body: unknown, status = 200) =>
@@ -39,11 +40,36 @@ const mockFetch: typeof fetch = async (input) => {
       201
     );
   if (path.endsWith('/platform/impersonations/current')) return new Response(null, { status: 204 });
-  if (/\/platform\/tenants\/[^/]+(?::change-status|\/entitlements)$/.test(path))
+  const tenantStatus = path.match(/\/platform\/tenants\/([^/]+):change-status$/);
+  if (tenantStatus) {
+    const body = (await request.clone().json()) as { status: 'ACTIVE' | 'SUSPENDED' };
+    const currentVersion = Number(request.headers.get('If-Match')?.replaceAll('"', '') ?? 1);
     return json({
-      data: { resourceId: '01JCOMMAND000000000000002', status: 'SUCCEEDED', version: 2 },
+      data: {
+        id: tenantStatus[1],
+        name: '上海智立科技有限公司',
+        slug: 'zhili-sh',
+        status: body.status,
+        version: currentVersion + 1,
+      },
       meta,
     });
+  }
+  const tenantEntitlements = path.match(/\/platform\/tenants\/([^/]+)\/entitlements$/);
+  if (tenantEntitlements) {
+    const body = (await request
+      .clone()
+      .json()) as components['schemas']['UpdateTenantEntitlementsRequest'];
+    const currentVersion = Number(request.headers.get('If-Match')?.replaceAll('"', '') ?? 1);
+    return json({
+      data: {
+        tenantId: tenantEntitlements[1],
+        modules: body.modules,
+        version: currentVersion + 1,
+      },
+      meta,
+    });
+  }
   return json({ message: `No typed mock route for ${path}` }, 404);
 };
 
@@ -85,6 +111,88 @@ const entitlementCode = (value: string) =>
     .replace(/[^a-z0-9.-]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'core';
 
+type TenantResource = components['schemas']['Tenant'];
+type TenantStatusResult = Omit<TenantResource, 'status'> & {
+  status: 'ACTIVE' | 'SUSPENDED';
+};
+type EntitlementRequest = components['schemas']['UpdateTenantEntitlementsRequest'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function isPositiveVersion(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 1;
+}
+
+function isTenant(value: unknown): value is TenantResource {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.slug === 'string' &&
+    ['ACTIVE', 'SUSPENDED', 'EXPIRED'].includes(String(value.status)) &&
+    isPositiveVersion(value.version)
+  );
+}
+
+export function createPlatformApi(
+  apiClient: Pick<ZhiliApiClient, 'POST' | 'PUT'>,
+  createIdempotencyKey: () => string = () => `platform-${crypto.randomUUID()}`
+) {
+  return {
+    async changeTenantStatus(
+      tenant: TenantResource,
+      status: 'ACTIVE' | 'SUSPENDED'
+    ): Promise<TenantStatusResult> {
+      const response = await apiClient.POST('/platform/tenants/{tenantId}:change-status', {
+        params: {
+          path: { tenantId: tenant.id },
+          header: {
+            'Idempotency-Key': createIdempotencyKey(),
+            'If-Match': `"${tenant.version}"`,
+          },
+        },
+        body: { status },
+      });
+      if (response.error) throw response.error;
+      const data: unknown = response.data?.data;
+      if (!isTenant(data) || data.id !== tenant.id || data.status !== status)
+        throw new Error('TENANT_STATUS_RESPONSE_INCOMPLETE');
+      return data as TenantStatusResult;
+    },
+    async saveEntitlements(
+      tenantId: string,
+      version: number,
+      body: EntitlementRequest
+    ): Promise<number> {
+      const response = await apiClient.PUT('/platform/tenants/{tenantId}/entitlements', {
+        params: {
+          path: { tenantId },
+          header: {
+            'Idempotency-Key': createIdempotencyKey(),
+            'If-Match': `"${version}"`,
+          },
+        },
+        body,
+      });
+      if (response.error) throw response.error;
+      const data: unknown = response.data?.data;
+      if (
+        !isRecord(data) ||
+        data.tenantId !== tenantId ||
+        !Array.isArray(data.modules) ||
+        !isPositiveVersion(data.version)
+      ) {
+        throw new Error('TENANT_ENTITLEMENTS_RESPONSE_INCOMPLETE');
+      }
+      return data.version;
+    },
+  };
+}
+
+const typedPlatformApi = createPlatformApi(client, key);
+
 export const platformPort = {
   async createTenant(name: string, slug: string, plan: string) {
     const response = await client.POST('/platform/tenants', {
@@ -92,7 +200,7 @@ export const platformPort = {
       body: { name, slug, defaultTimezone: 'Asia/Shanghai', defaultCurrency: 'CNY' },
     });
     const created = ensure(response.data, response.error).data;
-    await this.saveEntitlements(created.id, {
+    const version = await typedPlatformApi.saveEntitlements(created.id, created.version, {
       modules: [
         {
           moduleCode: entitlementCode(plan),
@@ -101,7 +209,7 @@ export const platformPort = {
         },
       ],
     });
-    return created;
+    return { ...created, version };
   },
   async startImpersonation(tenantId: string, reason: string) {
     const response = await client.POST('/platform/impersonations', {
@@ -114,39 +222,19 @@ export const platformPort = {
     const response = await client.DELETE('/platform/impersonations/current');
     if (response.error) throw new Error('退出代入失败，请重试。');
   },
-  async changeTenantStatus(tenantId: string, status: 'ACTIVE' | 'SUSPENDED') {
-    const response = await client.POST('/platform/tenants/{tenantId}:change-status', {
-      params: {
-        path: { tenantId },
-        header: { 'Idempotency-Key': key(), 'If-Match': '"1"' },
-      },
-      body: { id: tenantId, name: 'tenant', slug: 'tenant', status, version: 1 },
-    });
-    ensure(response.data, response.error);
-  },
-  async saveEntitlements(
-    tenantId: string,
-    body: components['schemas']['UpdateTenantEntitlementsRequest']
-  ) {
-    const response = await client.PUT('/platform/tenants/{tenantId}/entitlements', {
-      params: {
-        path: { tenantId },
-        header: { 'Idempotency-Key': key(), 'If-Match': '"1"' },
-      },
-      body,
-    });
-    return ensure(response.data, response.error).data.version;
-  },
-  setModuleEntitlement(tenantId: string, module: string, enabled: boolean) {
-    return this.saveEntitlements(tenantId, {
+  changeTenantStatus: typedPlatformApi.changeTenantStatus,
+  saveEntitlements: typedPlatformApi.saveEntitlements,
+  setModuleEntitlement(tenantId: string, version: number, module: string, enabled: boolean) {
+    return typedPlatformApi.saveEntitlements(tenantId, version, {
       modules: [{ moduleCode: entitlementCode(module), enabled, quotas: {} }],
     });
   },
   saveTenantConfiguration(
     tenantId: string,
+    version: number,
     body: { plan: string; waybillLimit: number; expires: string }
   ) {
-    return this.saveEntitlements(tenantId, {
+    return typedPlatformApi.saveEntitlements(tenantId, version, {
       modules: [
         {
           moduleCode: entitlementCode(body.plan),

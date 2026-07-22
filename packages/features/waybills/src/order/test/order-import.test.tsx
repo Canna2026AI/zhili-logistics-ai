@@ -111,15 +111,28 @@ describe('standard and FBA order', () => {
         return { data: { data: { valid: true, items: [] } } };
       if (path === '/orders/{orderId}:copy')
         return {
-          data: { data: { resourceId: 'order-2', version: 1, domain: { orderNo: 'ORD-2' } } },
+          data: { data: { id: 'order-2', orderNo: 'ORD-2', status: 'DRAFT', version: 1 } },
         };
-      return { data: { data: { waybillNo: 'S2505120099', version: 2 } } };
+      return {
+        data: { data: { id: 'order-1', orderNo: 'ORD-1', status: 'SUBMITTED', version: 2 } },
+      };
     });
     const api = createOrderApi({ POST } as never, () => 'idem-order');
     const saved = await api.save(buildOrderRequest('STANDARD'));
     await api.validate(saved.id, saved.version);
-    await api.copy(saved.id, saved.version);
+    await expect(api.copy(saved.id, saved.version)).resolves.toEqual({
+      id: 'order-2',
+      orderNo: 'ORD-2',
+      status: 'DRAFT',
+      version: 1,
+    });
     await api.submit(saved.id, saved.version);
+    expect(POST).toHaveBeenCalledWith(
+      '/orders/{orderId}:submit',
+      expect.objectContaining({
+        params: expect.objectContaining({ path: { orderId: 'order-1' } }),
+      })
+    );
     expect(POST).toHaveBeenCalledWith(
       '/orders/{orderId}:validate',
       expect.objectContaining({
@@ -128,6 +141,16 @@ describe('standard and FBA order', () => {
         }),
       })
     );
+  });
+
+  it('fails closed instead of fabricating a copied order from a generic acknowledgement', async () => {
+    const api = createOrderApi({
+      POST: vi.fn().mockResolvedValue({
+        data: { data: { resourceId: 'order-2', status: 'SUCCEEDED', version: 1 } },
+      }),
+    } as never);
+    await expect(api.copy('order-1', 3)).rejects.toThrow('ORDER_COPY_RESPONSE_INCOMPLETE');
+    await expect(api.submit('order-1', 3)).rejects.toThrow('ORDER_SUBMIT_RESPONSE_INCOMPLETE');
   });
 });
 

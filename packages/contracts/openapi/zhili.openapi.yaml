@@ -379,9 +379,18 @@ paths:
       summary: List order projections using a stable cursor
       x-feature-id: ORD-01
       x-permission: order.read
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['updatedAt:DESC', 'id:DESC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/OrderStatusFilter'
+        - $ref: '#/components/parameters/CustomerIdFilter'
+        - $ref: '#/components/parameters/CreatedFrom'
+        - $ref: '#/components/parameters/CreatedTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable order page ordered by updatedAt and id.
@@ -389,6 +398,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/OrderListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
     post:
@@ -466,6 +477,34 @@ paths:
           $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /orders/{orderId}:submit:
+    post:
+      tags: [Orders]
+      operationId: submitOrder
+      summary: Submit a validated order forecast
+      x-feature-id: ORD-02
+      x-permission: order.submit
+      x-audit-event: order.submitted
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      responses:
+        '200':
+          description: Authoritative submitted order projection.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
+        '422':
+          $ref: '#/components/responses/StateTransitionFailed'
   /quotes:
     get:
       tags: [Quotes]
@@ -473,9 +512,18 @@ paths:
       summary: List quote projections using a stable cursor
       x-feature-id: RATE-06
       x-permission: quote.read
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['createdAt:DESC', 'id:DESC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/QuoteStatusFilter'
+        - $ref: '#/components/parameters/CustomerIdFilter'
+        - $ref: '#/components/parameters/CreatedFrom'
+        - $ref: '#/components/parameters/CreatedTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable quote page ordered by createdAt and id.
@@ -483,6 +531,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/QuoteListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
     post:
@@ -591,8 +641,9 @@ paths:
       operationId: linkAcceptedQuoteToOrder
       summary: Link an accepted quote option to an order and create its draft waybill
       description: >-
-        Atomically proves the quote option is accepted and unexpired, links it to the order,
-        and creates or replays exactly one draft waybill identity.
+        Atomically proves the exact acceptedQuoteVersion and option are accepted and unexpired,
+        links the immutable quote snapshot to the order, and creates or idempotently replays exactly
+        one link and draft waybill identity. The response ETag always represents the order aggregate.
       x-feature-ids: [RATE-07, ORD-05]
       x-permission: order.quote.link
       x-audit-event: order.accepted-quote.linked
@@ -611,7 +662,8 @@ paths:
           description: Existing idempotent link replayed.
           headers:
             ETag:
-              $ref: '#/components/headers/ETag'
+              description: Strong ETag for the order aggregate, derived from data.orderVersion.
+              schema: {type: string, pattern: '^"[1-9][0-9]*"$'}
           content:
             application/json:
               schema:
@@ -620,13 +672,18 @@ paths:
           description: Quote linked and draft waybill created.
           headers:
             ETag:
-              $ref: '#/components/headers/ETag'
+              description: Strong ETag for the order aggregate, derived from data.orderVersion.
+              schema: {type: string, pattern: '^"[1-9][0-9]*"$'}
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AcceptedQuoteOrderLinkResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/AcceptedQuoteLinkNotFound'
+        '410':
+          $ref: '#/components/responses/Expired'
         '412':
           $ref: '#/components/responses/PreconditionFailed'
         '422':
@@ -638,9 +695,20 @@ paths:
       summary: List operational waybill projections using a stable cursor
       x-feature-id: ORD-05
       x-permission: waybill.read
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['updatedAt:DESC', 'id:DESC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/WaybillStateFilter'
+        - $ref: '#/components/parameters/CustomerIdFilter'
+        - $ref: '#/components/parameters/WarehouseIdFilter'
+        - $ref: '#/components/parameters/StationCodeFilter'
+        - $ref: '#/components/parameters/CreatedFrom'
+        - $ref: '#/components/parameters/CreatedTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable waybill page ordered by updatedAt and id.
@@ -648,6 +716,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WaybillListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
   /waybills/{waybillId}:
@@ -740,9 +810,20 @@ paths:
       summary: List warehouse receipts using a stable cursor
       x-feature-id: WH-03
       x-permission: warehouse.receipt.read
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['scannedAt:DESC', 'id:DESC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/WarehouseReceiptStatusFilter'
+        - $ref: '#/components/parameters/CustomerIdFilter'
+        - $ref: '#/components/parameters/WarehouseIdFilter'
+        - $ref: '#/components/parameters/StationCodeFilter'
+        - $ref: '#/components/parameters/ReceivedFrom'
+        - $ref: '#/components/parameters/ReceivedTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable receipt page ordered by scannedAt and id.
@@ -750,6 +831,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WarehouseReceiptListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
   /warehouse/receipts/{receiptId}:
@@ -1095,9 +1178,18 @@ paths:
       summary: List linehaul bookings using a stable cursor
       x-feature-id: LINE-01
       x-permission: linehaul.booking.read
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['plannedDepartureAt:ASC', 'id:ASC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/BookingStatusFilter'
+        - $ref: '#/components/parameters/StationCodeFilter'
+        - $ref: '#/components/parameters/DepartureFrom'
+        - $ref: '#/components/parameters/DepartureTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable booking page ordered by plannedDepartureAt and id.
@@ -1105,6 +1197,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BookingListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
     post:
@@ -1165,9 +1259,19 @@ paths:
       summary: List load units using a stable cursor
       x-feature-id: WH-06
       x-permission: warehouse.load.read
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['updatedAt:DESC', 'id:DESC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/LoadUnitStatusFilter'
+        - $ref: '#/components/parameters/WarehouseIdFilter'
+        - $ref: '#/components/parameters/StationCodeFilter'
+        - $ref: '#/components/parameters/DispatchFrom'
+        - $ref: '#/components/parameters/DispatchTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable load-unit page ordered by updatedAt and id.
@@ -1175,6 +1279,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LoadUnitListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
     post:
@@ -1356,9 +1462,19 @@ paths:
       summary: List last-mile intake batches using a stable cursor
       x-feature-id: LM-01
       x-permission: lastmile.intake
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['createdAt:DESC', 'id:DESC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/LastMileIntakeStatusFilter'
+        - $ref: '#/components/parameters/WarehouseIdFilter'
+        - $ref: '#/components/parameters/StationCodeFilter'
+        - $ref: '#/components/parameters/IntakeFrom'
+        - $ref: '#/components/parameters/IntakeTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable intake page ordered by createdAt and id.
@@ -1366,6 +1482,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/LastMileIntakeListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
     post:
@@ -1426,9 +1544,19 @@ paths:
       summary: List delivery tasks using a stable cursor
       x-feature-id: LM-02
       x-permission: lastmile.delivery.read
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['plannedStartAt:ASC', 'id:ASC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/DeliveryTaskStatusFilter'
+        - $ref: '#/components/parameters/CustomerIdFilter'
+        - $ref: '#/components/parameters/StationCodeFilter'
+        - $ref: '#/components/parameters/ScheduledFrom'
+        - $ref: '#/components/parameters/ScheduledTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable task page ordered by planned window and id.
@@ -1436,6 +1564,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeliveryTaskListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
     post:
@@ -2214,9 +2344,17 @@ paths:
       summary: List import jobs using a stable cursor
       x-feature-id: ORD-03
       x-permission: order.import
+      x-stable-cursor:
+        snapshot: asOf
+        filterHash: REQUIRED
+        order: ['createdAt:DESC', 'id:DESC']
       parameters:
         - $ref: '#/components/parameters/Cursor'
         - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/ImportStatusFilter'
+        - $ref: '#/components/parameters/CreatedFrom'
+        - $ref: '#/components/parameters/CreatedTo'
+        - $ref: '#/components/parameters/Search'
       responses:
         '200':
           description: Stable import-job page ordered by createdAt and id.
@@ -2224,6 +2362,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImportJobListResponse'
+        '400':
+          $ref: '#/components/responses/CursorFilterMismatch'
         '403':
           $ref: '#/components/responses/Forbidden'
     post:
@@ -2492,14 +2632,22 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/Tenant'
+              $ref: '#/components/schemas/ChangeTenantStatusRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Authoritative tenant after the lifecycle transition.
+          headers:
+            ETag:
+              description: Strong ETag for the returned tenant aggregate.
+              schema: {type: string, pattern: '^"[1-9][0-9]*"$'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /platform/tenants/{tenantId}/entitlements:
@@ -2526,7 +2674,15 @@ paths:
               $ref: '#/components/schemas/UpdateTenantEntitlementsRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Authoritative tenant entitlement aggregate.
+          headers:
+            ETag:
+              description: Strong ETag for the tenant entitlement aggregate.
+              schema: {type: string, pattern: '^"[1-9][0-9]*"$'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantEntitlementsResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '412':
@@ -2631,6 +2787,14 @@ paths:
       operationId: upsertOrganizationNode
       summary: Create or update a versioned organization node
       description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+      x-upsert-precondition:
+        discriminator: mode
+        CREATE:
+          ifMatch: FORBIDDEN
+          id: FORBIDDEN
+        UPDATE:
+          ifMatch: REQUIRED
+          id: REQUIRED
       x-feature-id: MDM-01
       x-permission: masterdata.organization.write
       x-audit-event: masterdata.organization-node.upserted
@@ -2658,6 +2822,14 @@ paths:
       operationId: upsertUser
       summary: Create or update an employee and assignments
       description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+      x-upsert-precondition:
+        discriminator: mode
+        CREATE:
+          ifMatch: FORBIDDEN
+          id: FORBIDDEN
+        UPDATE:
+          ifMatch: REQUIRED
+          id: REQUIRED
       x-feature-id: MDM-02
       x-permission: identity.user.write
       x-audit-event: identity.user.upserted
@@ -2692,6 +2864,14 @@ paths:
       description: >-
         The path customerId is authoritative. CREATE forbids If-Match; UPDATE requires a
         strong If-Match and an address id already owned by that path customer.
+      x-upsert-precondition:
+        discriminator: mode
+        CREATE:
+          ifMatch: FORBIDDEN
+          id: FORBIDDEN
+        UPDATE:
+          ifMatch: REQUIRED
+          id: REQUIRED
       x-feature-id: MDM-03
       x-permission: customer.write
       x-audit-event: customer.address.upserted
@@ -2719,6 +2899,14 @@ paths:
       operationId: upsertPartner
       summary: Create or update an agent supplier or last-mile partner
       description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+      x-upsert-precondition:
+        discriminator: mode
+        CREATE:
+          ifMatch: FORBIDDEN
+          id: FORBIDDEN
+        UPDATE:
+          ifMatch: REQUIRED
+          id: REQUIRED
       x-feature-id: MDM-04
       x-permission: partner.write
       x-audit-event: masterdata.partner.upserted
@@ -2860,6 +3048,14 @@ paths:
       operationId: upsertChannelProduct
       summary: Create or update a versioned channel product
       description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+      x-upsert-precondition:
+        discriminator: mode
+        CREATE:
+          ifMatch: FORBIDDEN
+          id: FORBIDDEN
+        UPDATE:
+          ifMatch: REQUIRED
+          id: REQUIRED
       x-feature-id: RATE-01
       x-permission: rate.channel.write
       x-audit-event: rate.channel-product.upserted
@@ -2905,7 +3101,15 @@ paths:
               $ref: '#/components/schemas/PublishRateCardRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Authoritative immutable publication projection.
+          headers:
+            ETag:
+              description: Strong ETag for the published rate-card aggregate.
+              schema: {type: string, pattern: '^"[1-9][0-9]*"$'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RateCardPublicationResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '412':
@@ -2918,6 +3122,14 @@ paths:
       operationId: upsertRatePriceVersion
       summary: Create or update a versioned cost or sell price
       description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+      x-upsert-precondition:
+        discriminator: mode
+        CREATE:
+          ifMatch: FORBIDDEN
+          id: FORBIDDEN
+        UPDATE:
+          ifMatch: REQUIRED
+          id: REQUIRED
       x-feature-id: RATE-03
       x-permission: rate.price.write
       x-audit-event: rate.price-version.upserted
@@ -2945,6 +3157,14 @@ paths:
       operationId: upsertSurchargeRule
       summary: Create or update a surcharge calculation rule
       description: CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+      x-upsert-precondition:
+        discriminator: mode
+        CREATE:
+          ifMatch: FORBIDDEN
+          id: FORBIDDEN
+        UPDATE:
+          ifMatch: REQUIRED
+          id: REQUIRED
       x-feature-id: RATE-04
       x-permission: rate.surcharge.write
       x-audit-event: rate.surcharge-rule.upserted
@@ -2984,7 +3204,11 @@ paths:
               $ref: '#/components/schemas/ValidateShipmentRestrictionsRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Availability, failed rules, warnings and alternatives.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShipmentRestrictionValidationResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -3015,7 +3239,15 @@ paths:
               $ref: '#/components/schemas/CopyOrderRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Authoritative independent draft order created by the copy.
+          headers:
+            ETag:
+              description: Strong ETag for the returned copied order.
+              schema: {type: string, pattern: '^"[1-9][0-9]*"$'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '412':
@@ -3139,7 +3371,15 @@ paths:
               $ref: '#/components/schemas/CreateLabelJobRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Created label job and authoritative latest waybill version.
+          headers:
+            ETag:
+              description: Strong ETag for the mutated waybill aggregate.
+              schema: {type: string, pattern: '^"[1-9][0-9]*"$'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LabelJobCreatedResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '412':
@@ -3201,7 +3441,15 @@ paths:
               $ref: '#/components/schemas/RenumberWaybillRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Authoritative replacement number and lineage.
+          headers:
+            ETag:
+              description: Strong ETag for the renumbered waybill aggregate.
+              schema: {type: string, pattern: '^"[1-9][0-9]*"$'}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaybillRenumberResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '412':
@@ -3213,12 +3461,14 @@ paths:
       tags: [Waybills]
       operationId: splitWaybill
       summary: Split packages into linked waybills atomically
+      description: >-
+        expectedVersion protects the source waybill. The response body carries every resulting
+        aggregate version; no single response ETag is emitted because the command creates lineage.
       x-feature-id: ORD-08
       x-permission: waybill.batch
       x-audit-event: waybill.split
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
       requestBody:
         required: true
         content:
@@ -3227,7 +3477,11 @@ paths:
               $ref: '#/components/schemas/SplitWaybillRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Source and child waybill lineage with authoritative versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaybillSplitResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '412':
@@ -3239,12 +3493,14 @@ paths:
       tags: [Waybills]
       operationId: mergeWaybills
       summary: Merge compatible waybills with lineage
+      description: >-
+        Each source carries its own expectedVersion. The command is atomic and returns source and
+        merged aggregate versions; no ambiguous single response ETag is emitted.
       x-feature-id: ORD-08
       x-permission: waybill.batch
       x-audit-event: waybill.merged
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
       requestBody:
         required: true
         content:
@@ -3253,7 +3509,11 @@ paths:
               $ref: '#/components/schemas/MergeWaybillsRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Source and merged waybill lineage with authoritative versions.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaybillMergeResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '412':
@@ -3265,12 +3525,14 @@ paths:
       tags: [Waybills]
       operationId: batchWaybillCommand
       summary: Execute a resumable batch command with item outcomes
+      description: >-
+        Each input carries its own expectedVersion. The response preserves input order exactly and
+        returns one authoritative outcome for every input; stale items are represented as failures.
       x-feature-id: ORD-08
       x-permission: waybill.batch
       x-audit-event: waybill.batch-command.executed
       parameters:
         - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/IfMatch'
       requestBody:
         required: true
         content:
@@ -3279,11 +3541,13 @@ paths:
               $ref: '#/components/schemas/BatchWaybillCommandRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: One ordered outcome for each requested waybill.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WaybillBatchCommandResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '412':
-          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /warehouse/receipts/{receiptId}/measurements:
@@ -3501,7 +3765,11 @@ paths:
               $ref: '#/components/schemas/ValidateLoadCompatibilityRequest'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Compatibility, failed rules, warnings and alternatives.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadCompatibilityValidationResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -5010,12 +5278,142 @@ components:
       name: cursor
       in: query
       required: false
-      schema: {type: string}
+      description: >-
+        Opaque signed continuation token bound to the original normalized filters, immutable order
+        tuple and asOf snapshot. Reusing it with different filters is rejected.
+      schema: {$ref: '#/components/schemas/OpaqueCursor'}
     Limit:
       name: limit
       in: query
       required: false
       schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+    QuoteStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [DRAFT, CALCULATED, ACCEPTED, EXPIRED]}
+    OrderStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [DRAFT, VALIDATED, SUBMITTED, CANCELLED]}
+    WaybillStateFilter:
+      name: state
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [DRAFT, FORECASTED, AWAITING_RECEIPT, RECEIVED, AWAITING_ROUTING, AWAITING_TRANSIT, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, AWAITING_RETURN, RETURNED, CANCELLED]
+    ImportStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [UPLOADED, MAPPING, VALIDATING, READY, COMMITTING, COMPLETED, FAILED, ROLLED_BACK]}
+    WarehouseReceiptStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [SCANNED, CONFIRMED, UNDONE]}
+    LoadUnitStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [OPEN, SEALED, DISPATCHED]}
+    BookingStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [DRAFT, CONFIRMED, DEPARTED, CLOSED, CANCELLED]}
+    LastMileIntakeStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema: {type: string, enum: [OPEN, RECONCILING, CLOSED]}
+    DeliveryTaskStatusFilter:
+      name: status
+      in: query
+      required: false
+      schema: {$ref: '#/components/schemas/DeliveryTaskStatus'}
+    CustomerIdFilter:
+      name: customerId
+      in: query
+      required: false
+      schema: {$ref: '#/components/schemas/Ulid'}
+    WarehouseIdFilter:
+      name: warehouseId
+      in: query
+      required: false
+      schema: {$ref: '#/components/schemas/Ulid'}
+    StationCodeFilter:
+      name: stationCode
+      in: query
+      required: false
+      schema: {type: string, minLength: 2, maxLength: 16, pattern: '^[A-Z0-9_-]+$'}
+    Search:
+      name: search
+      in: query
+      required: false
+      schema: {type: string, minLength: 1, maxLength: 160}
+    CreatedFrom:
+      name: createdFrom
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    CreatedTo:
+      name: createdTo
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    ReceivedFrom:
+      name: receivedFrom
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    ReceivedTo:
+      name: receivedTo
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    DispatchFrom:
+      name: dispatchFrom
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    DispatchTo:
+      name: dispatchTo
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    DepartureFrom:
+      name: departureFrom
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    DepartureTo:
+      name: departureTo
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    IntakeFrom:
+      name: intakeFrom
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    IntakeTo:
+      name: intakeTo
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    ScheduledFrom:
+      name: scheduledFrom
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
+    ScheduledTo:
+      name: scheduledTo
+      in: query
+      required: false
+      schema: {type: string, format: date-time}
     OrderId:
       name: orderId
       in: path
@@ -5161,6 +5559,28 @@ components:
             details: [{field: resourceId, reason: resource is absent or outside the caller scope}]
             remediation: Check the identifier and current data scope before retrying.
             requestId: req_01JY8Z8F
+    AcceptedQuoteLinkNotFound:
+      description: The order, accepted quote version or quote option is absent or outside caller scope.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example:
+            code: NOT_FOUND
+            message: Accepted quote linkage input was not found in the caller data scope.
+            details: [{field: acceptedQuoteVersion, reason: quote snapshot is absent or inaccessible}]
+            remediation: Reload the order and accepted quote snapshot before retrying.
+            requestId: req_01JY8Z8F
+    CursorFilterMismatch:
+      description: Cursor is invalid or does not match the normalized filters and immutable snapshot.
+      content:
+        application/problem+json:
+          schema: {$ref: '#/components/schemas/ErrorEnvelope'}
+          example:
+            code: CURSOR_FILTER_MISMATCH
+            message: Cursor cannot be reused with a different filter set.
+            details: [{field: cursor, reason: filter hash or snapshot does not match}]
+            remediation: Restart pagination without a cursor using the desired filters.
+            requestId: req_01JY8Z8F
     InternalError:
       description: Unexpected server failure that can be retried with the same safe request intent.
       content:
@@ -5302,6 +5722,7 @@ components:
         - APPROVAL_REQUIRED
         - CARRIER_UNAVAILABLE
         - CHANNEL_RESTRICTION
+        - CURSOR_FILTER_MISMATCH
         - DEVICE_EVENT_DUPLICATE
         - DEVICE_QUEUE_FULL
         - DEVICE_SYNC_CONFLICT
@@ -5364,6 +5785,28 @@ components:
         requestId: {type: string}
         nextCursor: {type: [string, 'null']}
         asOf: {type: string, format: date-time}
+    OpaqueCursor:
+      type: string
+      minLength: 24
+      maxLength: 2048
+      pattern: '^[A-Za-z0-9_-]+$'
+      description: Signed base64url token containing the snapshot, filter hash and order tuple.
+    CursorPageMeta:
+      type: object
+      additionalProperties: false
+      required: [requestId, nextCursor, asOf, filterHash, order]
+      properties:
+        requestId: {type: string, minLength: 1}
+        nextCursor:
+          oneOf:
+            - $ref: '#/components/schemas/OpaqueCursor'
+            - type: 'null'
+        asOf: {type: string, format: date-time}
+        filterHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        order:
+          type: array
+          minItems: 2
+          items: {type: string, minLength: 1}
     HealthDependencyResult:
       type: object
       additionalProperties: false
@@ -5763,10 +6206,28 @@ components:
       properties:
         optionId: {$ref: '#/components/schemas/Ulid'}
         reason: {type: string, minLength: 2}
+    FieldProjectionDecision:
+      type: object
+      additionalProperties: false
+      required: [access, copyAllowed, exportAllowed]
+      properties:
+        access: {type: string, enum: [READ, MASK, DENY]}
+        copyAllowed: {type: boolean}
+        exportAllowed: {type: boolean}
+        maskPattern: {type: string, minLength: 1, maxLength: 80}
+    WaybillFieldPolicyProjection:
+      type: object
+      additionalProperties: false
+      required: [customerName, customerCode, contactName, contactPhone]
+      properties:
+        customerName: {$ref: '#/components/schemas/FieldProjectionDecision'}
+        customerCode: {$ref: '#/components/schemas/FieldProjectionDecision'}
+        contactName: {$ref: '#/components/schemas/FieldProjectionDecision'}
+        contactPhone: {$ref: '#/components/schemas/FieldProjectionDecision'}
     Waybill:
       type: object
       additionalProperties: false
-      required: [id, waybillNo, masterNo, customerName, customerCode, contactName, contactPhone, route, service, transport, forecastWeightKg, actualWeightKg, volumeM3, pieces, createdAt, state, branch, timeline, allowedActions, version]
+      required: [id, waybillNo, masterNo, fieldPolicy, route, service, transport, forecastWeightKg, actualWeightKg, volumeM3, pieces, createdAt, state, branch, timeline, allowedActions, version]
       properties:
         id: {$ref: '#/components/schemas/Ulid'}
         waybillNo: {type: string, examples: [S2505120004]}
@@ -5775,6 +6236,7 @@ components:
         customerCode: {type: string}
         contactName: {type: [string, 'null']}
         contactPhone: {type: [string, 'null']}
+        fieldPolicy: {$ref: '#/components/schemas/WaybillFieldPolicyProjection'}
         route: {type: string}
         service: {type: string}
         transport: {type: string, enum: [AIR, SEA, RAIL, ROAD, EXPRESS]}
@@ -6885,6 +7347,30 @@ components:
           minItems: 1
           items:
             $ref: '#/components/schemas/TenantModuleEntitlementInput'
+    ChangeTenantStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status: {type: string, enum: [ACTIVE, SUSPENDED]}
+    TenantEntitlementsState:
+      type: object
+      additionalProperties: false
+      required: [tenantId, modules, version]
+      properties:
+        tenantId: {$ref: '#/components/schemas/Ulid'}
+        modules:
+          type: array
+          minItems: 1
+          items: {$ref: '#/components/schemas/TenantModuleEntitlementInput'}
+        version: {type: integer, minimum: 1}
+    TenantEntitlementsResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/TenantEntitlementsState'}
+        meta: {$ref: '#/components/schemas/Meta'}
     TenantModuleEntitlementInput:
       type: object
       additionalProperties: false
@@ -7006,11 +7492,31 @@ components:
         data: {$ref: '#/components/schemas/FieldPolicyPreview'}
         meta: {$ref: '#/components/schemas/Meta'}
     UpsertOrganizationNodeRequest:
+      oneOf:
+        - $ref: '#/components/schemas/CreateOrganizationNodeRequest'
+        - $ref: '#/components/schemas/UpdateOrganizationNodeRequest'
+      discriminator:
+        propertyName: mode
+        mapping:
+          CREATE: '#/components/schemas/CreateOrganizationNodeRequest'
+          UPDATE: '#/components/schemas/UpdateOrganizationNodeRequest'
+    CreateOrganizationNodeRequest:
       type: object
       additionalProperties: false
       required: [mode, code, name, nodeType, status]
       properties:
-        mode: {type: string, enum: [CREATE, UPDATE]}
+        mode: {type: string, const: CREATE}
+        code: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$'}
+        name: {type: string, minLength: 1, maxLength: 120}
+        nodeType: {type: string, enum: [COMPANY, DEPARTMENT, SITE, WAREHOUSE, LOCATION]}
+        parentId: {oneOf: [{$ref: '#/components/schemas/Ulid'}, {type: 'null'}]}
+        status: {type: string, enum: [ACTIVE, INACTIVE]}
+    UpdateOrganizationNodeRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, id, code, name, nodeType, status]
+      properties:
+        mode: {type: string, const: UPDATE}
         id: {$ref: '#/components/schemas/Ulid'}
         code: {type: string, minLength: 1, maxLength: 64, pattern: '^[A-Za-z0-9._-]+$'}
         name: {type: string, minLength: 1, maxLength: 120}
@@ -7018,11 +7524,33 @@ components:
         parentId: {oneOf: [{$ref: '#/components/schemas/Ulid'}, {type: 'null'}]}
         status: {type: string, enum: [ACTIVE, INACTIVE]}
     UpsertUserRequest:
+      oneOf:
+        - $ref: '#/components/schemas/CreateUserRequest'
+        - $ref: '#/components/schemas/UpdateUserRequest'
+      discriminator:
+        propertyName: mode
+        mapping:
+          CREATE: '#/components/schemas/CreateUserRequest'
+          UPDATE: '#/components/schemas/UpdateUserRequest'
+    CreateUserRequest:
       type: object
       additionalProperties: false
       required: [mode, loginName, displayName, status, roleIds, organizationNodeIds]
       properties:
-        mode: {type: string, enum: [CREATE, UPDATE]}
+        mode: {type: string, const: CREATE}
+        loginName: {type: string, minLength: 3, maxLength: 120}
+        displayName: {type: string, minLength: 1, maxLength: 120}
+        email: {type: string, format: email}
+        mobile: {type: string, minLength: 6, maxLength: 32}
+        status: {type: string, enum: [ACTIVE, DISABLED, LOCKED]}
+        roleIds: {type: array, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+        organizationNodeIds: {type: array, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+    UpdateUserRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, id, loginName, displayName, status, roleIds, organizationNodeIds]
+      properties:
+        mode: {type: string, const: UPDATE}
         id: {$ref: '#/components/schemas/Ulid'}
         loginName: {type: string, minLength: 3, maxLength: 120}
         displayName: {type: string, minLength: 1, maxLength: 120}
@@ -7032,21 +7560,60 @@ components:
         roleIds: {type: array, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
         organizationNodeIds: {type: array, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
     UpsertCustomerAddressRequest:
+      oneOf:
+        - $ref: '#/components/schemas/CreateCustomerAddressRequest'
+        - $ref: '#/components/schemas/UpdateCustomerAddressRequest'
+      discriminator:
+        propertyName: mode
+        mapping:
+          CREATE: '#/components/schemas/CreateCustomerAddressRequest'
+          UPDATE: '#/components/schemas/UpdateCustomerAddressRequest'
+    CreateCustomerAddressRequest:
       type: object
       additionalProperties: false
       required: [mode, label, address, isDefault]
       properties:
-        mode: {type: string, enum: [CREATE, UPDATE]}
+        mode: {type: string, const: CREATE}
+        label: {type: string, minLength: 1, maxLength: 80}
+        address: {$ref: '#/components/schemas/Address'}
+        isDefault: {type: boolean}
+    UpdateCustomerAddressRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, id, label, address, isDefault]
+      properties:
+        mode: {type: string, const: UPDATE}
         id: {$ref: '#/components/schemas/Ulid'}
         label: {type: string, minLength: 1, maxLength: 80}
         address: {$ref: '#/components/schemas/Address'}
         isDefault: {type: boolean}
     UpsertPartnerRequest:
+      oneOf:
+        - $ref: '#/components/schemas/CreatePartnerRequest'
+        - $ref: '#/components/schemas/UpdatePartnerRequest'
+      discriminator:
+        propertyName: mode
+        mapping:
+          CREATE: '#/components/schemas/CreatePartnerRequest'
+          UPDATE: '#/components/schemas/UpdatePartnerRequest'
+    CreatePartnerRequest:
       type: object
       additionalProperties: false
       required: [mode, partnerCode, name, partnerType, status]
       properties:
-        mode: {type: string, enum: [CREATE, UPDATE]}
+        mode: {type: string, const: CREATE}
+        partnerCode: {type: string, minLength: 1, maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 160}
+        partnerType: {type: string, enum: [AGENT, SUPPLIER, CARRIER, LAST_MILE]}
+        status: {type: string, enum: [ACTIVE, INACTIVE]}
+        contactName: {type: string, maxLength: 120}
+        contactPhone: {type: string, maxLength: 32}
+    UpdatePartnerRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, id, partnerCode, name, partnerType, status]
+      properties:
+        mode: {type: string, const: UPDATE}
         id: {$ref: '#/components/schemas/Ulid'}
         partnerCode: {type: string, minLength: 1, maxLength: 64}
         name: {type: string, minLength: 1, maxLength: 160}
@@ -7082,11 +7649,30 @@ components:
         holdOnExceed: {type: boolean}
         reason: {type: string, minLength: 5, maxLength: 500}
     UpsertChannelProductRequest:
+      oneOf:
+        - $ref: '#/components/schemas/CreateChannelProductRequest'
+        - $ref: '#/components/schemas/UpdateChannelProductRequest'
+      discriminator:
+        propertyName: mode
+        mapping:
+          CREATE: '#/components/schemas/CreateChannelProductRequest'
+          UPDATE: '#/components/schemas/UpdateChannelProductRequest'
+    CreateChannelProductRequest:
       type: object
       additionalProperties: false
       required: [mode, productCode, name, transportMode, status]
       properties:
-        mode: {type: string, enum: [CREATE, UPDATE]}
+        mode: {type: string, const: CREATE}
+        productCode: {type: string, minLength: 1, maxLength: 64}
+        name: {type: string, minLength: 1, maxLength: 160}
+        transportMode: {type: string, enum: [AIR, SEA, RAIL, ROAD, EXPRESS]}
+        status: {type: string, enum: [DRAFT, ACTIVE, INACTIVE]}
+    UpdateChannelProductRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, id, productCode, name, transportMode, status]
+      properties:
+        mode: {type: string, const: UPDATE}
         id: {$ref: '#/components/schemas/Ulid'}
         productCode: {type: string, minLength: 1, maxLength: 64}
         name: {type: string, minLength: 1, maxLength: 160}
@@ -7102,30 +7688,169 @@ components:
         effectiveUntil: {type: [string, 'null'], format: date-time}
         currency: {$ref: '#/components/schemas/CurrencyCode'}
         reason: {type: string, minLength: 5, maxLength: 500}
-    UpsertRatePriceVersionRequest:
+    RateCardPublication:
       type: object
       additionalProperties: false
-      required: [mode, channelProductId, priceType, currency, amount, effectiveFrom]
+      required: [rateCardId, version, versionLabel, status, effectiveFrom, effectiveUntil, currency]
       properties:
-        mode: {type: string, enum: [CREATE, UPDATE]}
-        id: {$ref: '#/components/schemas/Ulid'}
-        channelProductId: {$ref: '#/components/schemas/Ulid'}
-        priceType: {type: string, enum: [COST, AGENT, CUSTOMER, SPECIAL]}
-        currency: {$ref: '#/components/schemas/CurrencyCode'}
-        amount: {$ref: '#/components/schemas/Decimal'}
+        rateCardId: {$ref: '#/components/schemas/Ulid'}
+        version: {type: integer, minimum: 1}
+        versionLabel: {type: string, minLength: 1, maxLength: 80}
+        status: {type: string, const: PUBLISHED}
         effectiveFrom: {type: string, format: date-time}
         effectiveUntil: {type: [string, 'null'], format: date-time}
-    UpsertSurchargeRuleRequest:
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+    RateCardPublicationResponse:
       type: object
       additionalProperties: false
-      required: [mode, ruleCode, chargeCode, calculation, priority, status]
+      required: [data, meta]
       properties:
-        mode: {type: string, enum: [CREATE, UPDATE]}
+        data: {$ref: '#/components/schemas/RateCardPublication'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    RateRuleScopeInput:
+      type: object
+      additionalProperties: false
+      required: [serviceCode, originCountryCode, destinationCountryCode, packageType]
+      properties:
+        channelProductId: {$ref: '#/components/schemas/Ulid'}
+        zoneCode: {type: string, minLength: 1, maxLength: 64}
+        serviceCode: {type: string, minLength: 1, maxLength: 64}
+        originCountryCode: {type: string, pattern: '^([A-Z]{2}|\\*)$'}
+        destinationCountryCode: {type: string, pattern: '^([A-Z]{2}|\\*)$'}
+        packageType: {type: string, minLength: 1, maxLength: 32}
+    RateWeightRangeInput:
+      type: object
+      additionalProperties: false
+      required: [minWeightGrams, maxWeightGrams]
+      properties:
+        minWeightGrams: {type: integer, minimum: 1}
+        maxWeightGrams: {type: integer, minimum: 1}
+    RateMeasurementInput:
+      type: object
+      additionalProperties: false
+      required: [roundingMode]
+      properties:
+        dimensionalDivisor: {type: integer, minimum: 1}
+        roundingStepGrams: {type: integer, minimum: 1}
+        roundingMode: {type: string, enum: [UP, NEAREST, DOWN]}
+        minimumCharge: {$ref: '#/components/schemas/MoneyMinorInput'}
+    MoneyMinorInput:
+      type: object
+      additionalProperties: false
+      required: [amountMinor, currency]
+      properties:
+        amountMinor: {type: integer, minimum: 0}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+    RateCalculationInput:
+      oneOf:
+        - $ref: '#/components/schemas/FlatRateCalculationInput'
+        - $ref: '#/components/schemas/PerKgRateCalculationInput'
+        - $ref: '#/components/schemas/PercentageRateCalculationInput'
+      discriminator:
+        propertyName: method
+        mapping:
+          FLAT: '#/components/schemas/FlatRateCalculationInput'
+          PER_KG: '#/components/schemas/PerKgRateCalculationInput'
+          PERCENTAGE: '#/components/schemas/PercentageRateCalculationInput'
+    FlatRateCalculationInput:
+      type: object
+      additionalProperties: false
+      required: [method, amountMinor, currency]
+      properties:
+        method: {type: string, const: FLAT}
+        amountMinor: {type: integer, minimum: 0}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+    PerKgRateCalculationInput:
+      type: object
+      additionalProperties: false
+      required: [method, amountMinor, currency]
+      properties:
+        method: {type: string, const: PER_KG}
+        amountMinor: {type: integer, minimum: 0}
+        currency: {$ref: '#/components/schemas/CurrencyCode'}
+    PercentageRateCalculationInput:
+      type: object
+      additionalProperties: false
+      required: [method, percentageBps]
+      properties:
+        method: {type: string, const: PERCENTAGE}
+        percentageBps: {type: integer, minimum: -10000, maximum: 100000}
+    UpsertRatePriceVersionRequest:
+      oneOf:
+        - $ref: '#/components/schemas/CreateRatePriceVersionRequest'
+        - $ref: '#/components/schemas/UpdateRatePriceVersionRequest'
+      discriminator:
+        propertyName: mode
+        mapping:
+          CREATE: '#/components/schemas/CreateRatePriceVersionRequest'
+          UPDATE: '#/components/schemas/UpdateRatePriceVersionRequest'
+    CreateRatePriceVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, priceType, scope, weightRange, calculation, measurement, effectiveFrom, priority, status]
+      properties:
+        mode: {type: string, const: CREATE}
+        priceType: {type: string, enum: [COST, AGENT, CUSTOMER, SPECIAL]}
+        scope: {$ref: '#/components/schemas/RateRuleScopeInput'}
+        weightRange: {$ref: '#/components/schemas/RateWeightRangeInput'}
+        calculation: {$ref: '#/components/schemas/RateCalculationInput'}
+        measurement: {$ref: '#/components/schemas/RateMeasurementInput'}
+        effectiveFrom: {type: string, format: date-time}
+        effectiveUntil: {type: [string, 'null'], format: date-time}
+        priority: {type: integer, minimum: 0, maximum: 100000}
+        status: {type: string, enum: [DRAFT, ACTIVE, INACTIVE]}
+    UpdateRatePriceVersionRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, id, priceType, scope, weightRange, calculation, measurement, effectiveFrom, priority, status]
+      properties:
+        mode: {type: string, const: UPDATE}
+        id: {$ref: '#/components/schemas/Ulid'}
+        priceType: {type: string, enum: [COST, AGENT, CUSTOMER, SPECIAL]}
+        scope: {$ref: '#/components/schemas/RateRuleScopeInput'}
+        weightRange: {$ref: '#/components/schemas/RateWeightRangeInput'}
+        calculation: {$ref: '#/components/schemas/RateCalculationInput'}
+        measurement: {$ref: '#/components/schemas/RateMeasurementInput'}
+        effectiveFrom: {type: string, format: date-time}
+        effectiveUntil: {type: [string, 'null'], format: date-time}
+        priority: {type: integer, minimum: 0, maximum: 100000}
+        status: {type: string, enum: [DRAFT, ACTIVE, INACTIVE]}
+    UpsertSurchargeRuleRequest:
+      oneOf:
+        - $ref: '#/components/schemas/CreateSurchargeRuleRequest'
+        - $ref: '#/components/schemas/UpdateSurchargeRuleRequest'
+      discriminator:
+        propertyName: mode
+        mapping:
+          CREATE: '#/components/schemas/CreateSurchargeRuleRequest'
+          UPDATE: '#/components/schemas/UpdateSurchargeRuleRequest'
+    CreateSurchargeRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, ruleCode, chargeCode, scope, weightRange, calculation, measurement, priority, status]
+      properties:
+        mode: {type: string, const: CREATE}
+        ruleCode: {type: string, minLength: 1, maxLength: 64}
+        chargeCode: {type: string, minLength: 1, maxLength: 64}
+        scope: {$ref: '#/components/schemas/RateRuleScopeInput'}
+        weightRange: {$ref: '#/components/schemas/RateWeightRangeInput'}
+        calculation: {$ref: '#/components/schemas/RateCalculationInput'}
+        measurement: {$ref: '#/components/schemas/RateMeasurementInput'}
+        priority: {type: integer, minimum: 0, maximum: 100000}
+        status: {type: string, enum: [DRAFT, ACTIVE, INACTIVE]}
+    UpdateSurchargeRuleRequest:
+      type: object
+      additionalProperties: false
+      required: [mode, id, ruleCode, chargeCode, scope, weightRange, calculation, measurement, priority, status]
+      properties:
+        mode: {type: string, const: UPDATE}
         id: {$ref: '#/components/schemas/Ulid'}
         ruleCode: {type: string, minLength: 1, maxLength: 64}
         chargeCode: {type: string, minLength: 1, maxLength: 64}
-        calculation: {type: string, enum: [FLAT, PER_KG, PERCENTAGE]}
-        amount: {$ref: '#/components/schemas/Decimal'}
+        scope: {$ref: '#/components/schemas/RateRuleScopeInput'}
+        weightRange: {$ref: '#/components/schemas/RateWeightRangeInput'}
+        calculation: {$ref: '#/components/schemas/RateCalculationInput'}
+        measurement: {$ref: '#/components/schemas/RateMeasurementInput'}
         priority: {type: integer, minimum: 0, maximum: 100000}
         status: {type: string, enum: [DRAFT, ACTIVE, INACTIVE]}
     ValidateShipmentRestrictionsRequest:
@@ -7138,6 +7863,38 @@ components:
         destination: {$ref: '#/components/schemas/Address'}
         packages: {type: array, minItems: 1, items: {$ref: '#/components/schemas/PackageInput'}}
         commodityCodes: {type: array, uniqueItems: true, items: {type: string}}
+    RestrictionRuleFailure:
+      type: object
+      additionalProperties: false
+      required: [ruleCode, reason, field]
+      properties:
+        ruleCode: {type: string, minLength: 1, maxLength: 80}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        field: {type: string, minLength: 1, maxLength: 160}
+    ShipmentRestrictionAlternative:
+      type: object
+      additionalProperties: false
+      required: [channelProductId, serviceCode, reason]
+      properties:
+        channelProductId: {$ref: '#/components/schemas/Ulid'}
+        serviceCode: {type: string, minLength: 1, maxLength: 64}
+        reason: {type: string, minLength: 1, maxLength: 500}
+    ShipmentRestrictionValidationResult:
+      type: object
+      additionalProperties: false
+      required: [available, failedRules, warnings, alternatives]
+      properties:
+        available: {type: boolean}
+        failedRules: {type: array, items: {$ref: '#/components/schemas/RestrictionRuleFailure'}}
+        warnings: {type: array, items: {type: string, minLength: 1}}
+        alternatives: {type: array, items: {$ref: '#/components/schemas/ShipmentRestrictionAlternative'}}
+    ShipmentRestrictionValidationResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/ShipmentRestrictionValidationResult'}
+        meta: {$ref: '#/components/schemas/Meta'}
     CopyOrderRequest:
       type: object
       additionalProperties: false
@@ -7185,6 +7942,24 @@ components:
       properties:
         format: {type: string, enum: [A4, 100X150]}
         copies: {type: integer, minimum: 1, maximum: 100}
+    LabelJobCreated:
+      type: object
+      additionalProperties: false
+      required: [labelJobId, waybillId, latestWaybillVersion, status, format, createdAt]
+      properties:
+        labelJobId: {$ref: '#/components/schemas/Ulid'}
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        latestWaybillVersion: {type: integer, minimum: 1}
+        status: {type: string, enum: [QUEUED, PROCESSING, SUCCEEDED, FAILED]}
+        format: {type: string, enum: [A4, 100X150]}
+        createdAt: {type: string, format: date-time}
+    LabelJobCreatedResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/LabelJobCreated'}
+        meta: {$ref: '#/components/schemas/Meta'}
     CancelWaybillRequest:
       type: object
       additionalProperties: false
@@ -7198,29 +7973,139 @@ components:
       properties:
         newWaybillNo: {type: string, minLength: 4, maxLength: 80}
         reason: {type: string, minLength: 5, maxLength: 500}
+    WaybillRenumberResult:
+      type: object
+      additionalProperties: false
+      required: [waybillId, previousWaybillNo, newWaybillNo, latestVersion]
+      properties:
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        previousWaybillNo: {type: string, minLength: 4, maxLength: 80}
+        newWaybillNo: {type: string, minLength: 4, maxLength: 80}
+        latestVersion: {type: integer, minimum: 1}
+    WaybillRenumberResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/WaybillRenumberResult'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    WaybillVersionPrecondition:
+      type: object
+      additionalProperties: false
+      required: [waybillId, expectedVersion]
+      properties:
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        expectedVersion: {type: integer, minimum: 1}
+    WaybillLineageNode:
+      type: object
+      additionalProperties: false
+      required: [waybillId, waybillNo, version, packageRefs]
+      properties:
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        waybillNo: {type: string, minLength: 4, maxLength: 80}
+        version: {type: integer, minimum: 1}
+        packageRefs: {type: array, uniqueItems: true, items: {type: string, minLength: 1}}
     SplitWaybillRequest:
       type: object
       additionalProperties: false
-      required: [waybillId, packageRefs, reason]
+      required: [waybillId, expectedVersion, packageRefs, reason]
       properties:
         waybillId: {$ref: '#/components/schemas/Ulid'}
+        expectedVersion: {type: integer, minimum: 1}
         packageRefs: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
         reason: {type: string, minLength: 5, maxLength: 500}
+    WaybillSplitResult:
+      type: object
+      additionalProperties: false
+      required: [source, children]
+      properties:
+        source: {$ref: '#/components/schemas/WaybillLineageNode'}
+        children: {type: array, minItems: 2, items: {$ref: '#/components/schemas/WaybillLineageNode'}}
+    WaybillSplitResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/WaybillSplitResult'}
+        meta: {$ref: '#/components/schemas/Meta'}
     MergeWaybillsRequest:
       type: object
       additionalProperties: false
-      required: [waybillIds, reason]
+      required: [items, reason]
       properties:
-        waybillIds: {type: array, minItems: 2, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+        items: {type: array, minItems: 2, uniqueItems: true, items: {$ref: '#/components/schemas/WaybillVersionPrecondition'}}
         reason: {type: string, minLength: 5, maxLength: 500}
+    WaybillMergeResult:
+      type: object
+      additionalProperties: false
+      required: [sources, merged]
+      properties:
+        sources: {type: array, minItems: 2, items: {$ref: '#/components/schemas/WaybillLineageNode'}}
+        merged: {$ref: '#/components/schemas/WaybillLineageNode'}
+    WaybillMergeResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/WaybillMergeResult'}
+        meta: {$ref: '#/components/schemas/Meta'}
     BatchWaybillCommandRequest:
       type: object
       additionalProperties: false
-      required: [waybillIds, command, reason]
+      required: [items, command, reason]
       properties:
-        waybillIds: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+        items: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/WaybillVersionPrecondition'}}
         command: {type: string, enum: [SUBMIT, CANCEL, HOLD, RELEASE]}
         reason: {type: string, minLength: 5, maxLength: 500}
+    WaybillBatchOutcome:
+      oneOf:
+        - $ref: '#/components/schemas/WaybillBatchSucceededOutcome'
+        - $ref: '#/components/schemas/WaybillBatchFailedOutcome'
+      discriminator:
+        propertyName: disposition
+        mapping:
+          SUCCEEDED: '#/components/schemas/WaybillBatchSucceededOutcome'
+          FAILED: '#/components/schemas/WaybillBatchFailedOutcome'
+    WaybillBatchSucceededOutcome:
+      type: object
+      additionalProperties: false
+      required: [waybillId, disposition, latestVersion]
+      properties:
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        disposition: {type: string, const: SUCCEEDED}
+        latestVersion: {type: integer, minimum: 1}
+    WaybillBatchItemError:
+      type: object
+      additionalProperties: false
+      required: [code, message, remediation]
+      properties:
+        code: {$ref: '#/components/schemas/ErrorCode'}
+        message: {type: string, minLength: 1}
+        remediation: {type: string, minLength: 1}
+    WaybillBatchFailedOutcome:
+      type: object
+      additionalProperties: false
+      required: [waybillId, disposition, latestVersion, error]
+      properties:
+        waybillId: {$ref: '#/components/schemas/Ulid'}
+        disposition: {type: string, const: FAILED}
+        latestVersion: {type: integer, minimum: 1}
+        error: {$ref: '#/components/schemas/WaybillBatchItemError'}
+    WaybillBatchCommandResult:
+      type: object
+      additionalProperties: false
+      required: [command, orderPreserved, outcomes]
+      properties:
+        command: {type: string, enum: [SUBMIT, CANCEL, HOLD, RELEASE]}
+        orderPreserved: {type: boolean, const: true}
+        outcomes: {type: array, minItems: 1, items: {$ref: '#/components/schemas/WaybillBatchOutcome'}}
+    WaybillBatchCommandResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/WaybillBatchCommandResult'}
+        meta: {$ref: '#/components/schemas/Meta'}
     RecordMeasurementRequest:
       type: object
       additionalProperties: false
@@ -7305,6 +8190,38 @@ components:
       properties:
         loadUnitId: {$ref: '#/components/schemas/Ulid'}
         waybillIds: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+    LoadCompatibilityFailure:
+      type: object
+      additionalProperties: false
+      required: [ruleCode, reason, waybillIds]
+      properties:
+        ruleCode: {type: string, minLength: 1, maxLength: 80}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        waybillIds: {type: array, minItems: 1, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+    LoadCompatibilityAlternative:
+      type: object
+      additionalProperties: false
+      required: [action, reason]
+      properties:
+        action: {type: string, enum: [SPLIT_LOAD, CHANGE_LOAD_UNIT, REMOVE_WAYBILLS]}
+        reason: {type: string, minLength: 1, maxLength: 500}
+        waybillIds: {type: array, uniqueItems: true, items: {$ref: '#/components/schemas/Ulid'}}
+    LoadCompatibilityValidationResult:
+      type: object
+      additionalProperties: false
+      required: [compatible, failedRules, warnings, alternatives]
+      properties:
+        compatible: {type: boolean}
+        failedRules: {type: array, items: {$ref: '#/components/schemas/LoadCompatibilityFailure'}}
+        warnings: {type: array, items: {type: string, minLength: 1}}
+        alternatives: {type: array, items: {$ref: '#/components/schemas/LoadCompatibilityAlternative'}}
+    LoadCompatibilityValidationResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/LoadCompatibilityValidationResult'}
+        meta: {$ref: '#/components/schemas/Meta'}
     LinkFbaShipmentRequest:
       type: object
       additionalProperties: false
@@ -7372,20 +8289,24 @@ components:
     LinkAcceptedQuoteToOrderRequest:
       type: object
       additionalProperties: false
-      required: [quoteId, quoteOptionId]
+      required: [quoteId, quoteOptionId, acceptedQuoteVersion]
       properties:
         quoteId: {$ref: '#/components/schemas/Ulid'}
         quoteOptionId: {$ref: '#/components/schemas/Ulid'}
+        acceptedQuoteVersion: {type: integer, minimum: 1}
     AcceptedQuoteOrderLink:
       type: object
       additionalProperties: false
-      required: [quoteId, quoteOptionId, orderId, waybillId, orderVersion, waybillVersion]
+      required: [quoteId, quoteOptionId, quoteVersion, linkId, linkVersion, orderId, orderVersion, waybillId, waybillVersion]
       properties:
         quoteId: {$ref: '#/components/schemas/Ulid'}
         quoteOptionId: {$ref: '#/components/schemas/Ulid'}
+        quoteVersion: {type: integer, minimum: 1}
+        linkId: {$ref: '#/components/schemas/Ulid'}
+        linkVersion: {type: integer, minimum: 1}
         orderId: {$ref: '#/components/schemas/Ulid'}
-        waybillId: {$ref: '#/components/schemas/Ulid'}
         orderVersion: {type: integer, minimum: 1}
+        waybillId: {$ref: '#/components/schemas/Ulid'}
         waybillVersion: {type: integer, minimum: 1}
     AcceptedQuoteOrderLinkResponse:
       type: object
@@ -7400,63 +8321,63 @@ components:
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/Quote'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     OrderListResponse:
       type: object
       additionalProperties: false
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/Order'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     WaybillListResponse:
       type: object
       additionalProperties: false
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/Waybill'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     ImportJobListResponse:
       type: object
       additionalProperties: false
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/ImportJob'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     WarehouseReceiptListResponse:
       type: object
       additionalProperties: false
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/WarehouseReceipt'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     LoadUnitListResponse:
       type: object
       additionalProperties: false
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/LoadUnit'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     BookingListResponse:
       type: object
       additionalProperties: false
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/Booking'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     LastMileIntakeListResponse:
       type: object
       additionalProperties: false
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/LastMileIntake'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     DeliveryTaskListResponse:
       type: object
       additionalProperties: false
       required: [data, meta]
       properties:
         data: {type: array, items: {$ref: '#/components/schemas/DeliveryTask'}}
-        meta: {$ref: '#/components/schemas/Meta'}
+        meta: {$ref: '#/components/schemas/CursorPageMeta'}
     DomainRecord:
       type: object
       description: Extensible contract shape refined by the owning domain module.

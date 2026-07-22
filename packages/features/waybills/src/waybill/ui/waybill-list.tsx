@@ -159,24 +159,10 @@ export function WaybillList({
 
   const cancelSelected = () =>
     runCommand(async () => {
-      const settled = await Promise.allSettled(
-        selectedRows.map(async (row) => ({
-          row,
-          result: await port.batch([row.id], 'CANCEL', row.version, reason.trim()),
-        }))
-      );
-      const result = settled.reduce<WaybillBatchResult>(
-        (outcome, item, index) => {
-          const row = selectedRows[index]!;
-          if (item.status === 'rejected') {
-            outcome.failed.push({ id: row.id, reason: failureReason(item.reason) });
-          } else {
-            outcome.succeeded.push(...item.value.result.succeeded);
-            outcome.failed.push(...item.value.result.failed);
-          }
-          return outcome;
-        },
-        { succeeded: [], failed: [] }
+      const result = await port.batch(
+        selectedRows.map((row) => ({ waybillId: row.id, expectedVersion: row.version })),
+        'CANCEL',
+        reason.trim()
       );
       setBatchResult(result);
       setDangerOpen(false);

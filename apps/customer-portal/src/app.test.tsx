@@ -332,6 +332,9 @@ describe('客户门户', () => {
     const linkAcceptedQuote = vi.spyOn(customerPort, 'linkAcceptedQuote').mockResolvedValue({
       quoteId: '01JQUOTE000000000000000042',
       quoteOptionId: '01JQUOTEOPTION0000000000001',
+      quoteVersion: 2,
+      linkId: '01JQUOTELINK00000000000001',
+      linkVersion: 1,
       orderId: '01JORDER000000000000000006',
       waybillId: '01JWAYBILL000000000000001',
       orderVersion: 2,
@@ -358,6 +361,7 @@ describe('客户门户', () => {
       orderVersion: 1,
       quoteId: '01JQUOTE000000000000000042',
       optionId: '01JQUOTEOPTION0000000000001',
+      acceptedQuoteVersion: 2,
     });
   });
 

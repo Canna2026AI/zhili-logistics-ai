@@ -42,7 +42,15 @@ describe('rate catalog', () => {
       target: { value: '新财年合同价统一生效' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认发布' }));
-    await waitFor(() => expect(publish).toHaveBeenCalledWith('rate-dhl', 3, expect.any(String)));
+    await waitFor(() =>
+      expect(publish).toHaveBeenCalledWith('rate-dhl', 3, {
+        versionLabel: 'v4',
+        effectiveFrom: '2026-08-01T00:00:00.000Z',
+        effectiveUntil: null,
+        currency: 'CNY',
+        reason: '新财年合同价统一生效',
+      })
+    );
     expect(await screen.findByRole('status')).toHaveTextContent('价卡 v4 已发布');
   });
 
@@ -63,10 +71,30 @@ describe('rate catalog', () => {
   });
 
   it('publishes through the generated versioned rate-card path', async () => {
-    const POST = vi.fn().mockResolvedValue({ data: { data: { version: 4 } } });
+    const POST = vi.fn().mockResolvedValue({
+      data: {
+        data: {
+          rateCardId: 'rate-dhl',
+          version: 4,
+          versionLabel: 'FY26-v4',
+          status: 'PUBLISHED',
+          effectiveFrom: '2026-08-01T00:00:00.000Z',
+          effectiveUntil: null,
+          currency: 'USD',
+        },
+      },
+    });
     const api = createRateCatalogApi({ POST } as never, () => 'idem-rate');
-    await expect(api.publish('rate-dhl', 3, '合同价版本升级')).resolves.toMatchObject({
-      version: 'v4',
+    await expect(
+      api.publish('rate-dhl', 3, {
+        versionLabel: 'FY26-v4',
+        effectiveFrom: '2026-08-01T00:00:00.000Z',
+        effectiveUntil: null,
+        currency: 'USD',
+        reason: '合同价版本升级',
+      } as never)
+    ).resolves.toMatchObject({
+      version: 'FY26-v4',
     });
     expect(POST).toHaveBeenCalledWith(
       '/rates/rate-cards/{rateCardId}:publish',
@@ -75,7 +103,29 @@ describe('rate catalog', () => {
           path: { rateCardId: 'rate-dhl' },
           header: { 'Idempotency-Key': 'idem-rate', 'If-Match': '"3"' },
         },
+        body: {
+          versionLabel: 'FY26-v4',
+          effectiveFrom: '2026-08-01T00:00:00.000Z',
+          effectiveUntil: null,
+          currency: 'USD',
+          reason: '合同价版本升级',
+        },
       })
     );
+  });
+
+  it('fails closed when publication omits the authoritative immutable version', async () => {
+    const api = createRateCatalogApi({
+      POST: vi.fn().mockResolvedValue({ data: { data: { version: 4 } } }),
+    } as never);
+    await expect(
+      api.publish('rate-dhl', 3, {
+        versionLabel: 'FY26-v4',
+        effectiveFrom: '2026-08-01T00:00:00.000Z',
+        effectiveUntil: null,
+        currency: 'USD',
+        reason: '合同价版本升级',
+      } as never)
+    ).rejects.toThrow('RATE_CARD_PUBLICATION_CONTRACT_INCOMPLETE');
   });
 });

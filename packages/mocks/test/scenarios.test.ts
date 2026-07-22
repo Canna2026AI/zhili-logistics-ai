@@ -48,6 +48,12 @@ function expectWaybillResponse(body: unknown): asserts body is WaybillResponse {
       customerCode: 'CUST-SOUTH-001',
       contactName: '张伟',
       contactPhone: '138****2468',
+      fieldPolicy: {
+        customerName: { access: 'READ', copyAllowed: true, exportAllowed: true },
+        customerCode: { access: 'READ', copyAllowed: true, exportAllowed: true },
+        contactName: { access: 'READ', copyAllowed: true, exportAllowed: true },
+        contactPhone: { access: 'MASK', copyAllowed: false, exportAllowed: false },
+      },
       route: 'SZX-LAX',
       service: '智立空运专线',
       transport: 'AIR',

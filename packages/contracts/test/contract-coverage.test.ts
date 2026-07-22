@@ -137,8 +137,24 @@ describe("Backend B1 hardened operation contracts", () => {
         "$ref: '#/components/schemas/DomainRecord'",
       );
       const schema = schemaBlock(schemaName);
-      expect(schema, `${schemaName} schema`).toContain("additionalProperties: false");
-      expect(schema, `${schemaName} required fields`).toContain("required:");
+      const variants = [
+        ...schema.matchAll(/#\/components\/schemas\/([A-Za-z0-9]+)/g),
+      ].map((match) => match[1]);
+      if (/^    [A-Za-z0-9]+:\n      oneOf:/m.test(schema)) {
+        for (const variant of variants) {
+          expect(schemaBlock(variant!), `${variant} schema`).toContain(
+            "additionalProperties: false",
+          );
+          expect(schemaBlock(variant!), `${variant} required fields`).toContain(
+            "required:",
+          );
+        }
+      } else {
+        expect(schema, `${schemaName} schema`).toContain(
+          "additionalProperties: false",
+        );
+        expect(schema, `${schemaName} required fields`).toContain("required:");
+      }
     }
   });
 
@@ -280,6 +296,7 @@ describe("Backend B1 hardened operation contracts", () => {
       "acceptQuote",
       "linkAcceptedQuoteToOrder",
       "validateOrder",
+      "submitOrder",
       "submitWaybill",
       "confirmReceipt",
       "recordMeasurement",
@@ -303,9 +320,6 @@ describe("Backend B1 hardened operation contracts", () => {
       "createLabelJob",
       "cancelWaybill",
       "renumberWaybill",
-      "splitWaybill",
-      "mergeWaybills",
-      "batchWaybillCommand",
       "attachReceiptMedia",
       "undoReceipt",
       "moveInventory",
@@ -329,6 +343,247 @@ describe("Backend B1 hardened operation contracts", () => {
     }
     expect(schemaBlock("PreconditionProblemCode")).toContain("PRECONDITION_REQUIRED");
     expect(schemaBlock("PreconditionProblemCode")).toContain("STALE_VERSION");
+  });
+
+  it("models ORD-08 concurrency and outcomes per input aggregate", () => {
+    const batch = operationBlock("batchWaybillCommand");
+    expect(batch).not.toContain("#/components/parameters/IfMatch");
+    expect(batch).toContain("#/components/schemas/WaybillBatchCommandResponse");
+    expect(batch).not.toContain("#/components/responses/CommandSucceeded");
+    expect(batch).toMatch(/preserv(?:e|es|ing)[^\n]*input order/i);
+
+    const request = schemaBlock("BatchWaybillCommandRequest");
+    expect(request).toContain("items:");
+    expect(request).toContain("#/components/schemas/WaybillVersionPrecondition");
+    expect(request).not.toContain("waybillIds:");
+    expect(schemaBlock("WaybillVersionPrecondition")).toMatch(
+      /required:\s*\[waybillId, expectedVersion\]/,
+    );
+
+    const outcome = schemaBlock("WaybillBatchOutcome");
+    expect(outcome).toContain("oneOf:");
+    expect(outcome).toContain("WaybillBatchSucceededOutcome");
+    expect(outcome).toContain("WaybillBatchFailedOutcome");
+    expect(schemaBlock("WaybillBatchSucceededOutcome")).toMatch(
+      /required:\s*\[waybillId, disposition, latestVersion\]/,
+    );
+    expect(schemaBlock("WaybillBatchFailedOutcome")).toMatch(
+      /required:\s*\[waybillId, disposition, latestVersion, error\]/,
+    );
+
+    for (const [operationId, responseSchema] of [
+      ["splitWaybill", "WaybillSplitResponse"],
+      ["mergeWaybills", "WaybillMergeResponse"],
+    ] as const) {
+      const operation = operationBlock(operationId);
+      expect(operation).not.toContain("#/components/parameters/IfMatch");
+      expect(operation).not.toContain("#/components/responses/CommandSucceeded");
+      expect(operation).toContain(`#/components/schemas/${responseSchema}`);
+      expect(operation).not.toContain("ETag:");
+    }
+    expect(schemaBlock("SplitWaybillRequest")).toMatch(
+      /required:\s*\[waybillId, expectedVersion, packageRefs, reason\]/,
+    );
+    expect(schemaBlock("MergeWaybillsRequest")).toContain(
+      "#/components/schemas/WaybillVersionPrecondition",
+    );
+    expect(schemaBlock("WaybillSplitResult")).toContain("children:");
+    expect(schemaBlock("WaybillMergeResult")).toContain("sources:");
+  });
+
+  it("returns actionable validation results and complete rate-rule semantics", () => {
+    expect(operationBlock("validateShipmentRestrictions")).toContain(
+      "#/components/schemas/ShipmentRestrictionValidationResponse",
+    );
+    expect(operationBlock("validateLoadCompatibility")).toContain(
+      "#/components/schemas/LoadCompatibilityValidationResponse",
+    );
+    for (const schemaName of [
+      "ShipmentRestrictionValidationResult",
+      "LoadCompatibilityValidationResult",
+    ]) {
+      const schema = schemaBlock(schemaName);
+      expect(schema).toContain("failedRules:");
+      expect(schema).toContain("warnings:");
+      expect(schema).toContain("alternatives:");
+    }
+    expect(schemaBlock("ShipmentRestrictionValidationResult")).toContain(
+      "available:",
+    );
+    expect(schemaBlock("LoadCompatibilityValidationResult")).toContain(
+      "compatible:",
+    );
+
+    const priceCreate = schemaBlock("CreateRatePriceVersionRequest");
+    for (const field of [
+      "scope:",
+      "weightRange:",
+      "calculation:",
+      "measurement:",
+      "effectiveFrom:",
+      "effectiveUntil:",
+    ]) {
+      expect(priceCreate, field).toContain(field);
+    }
+    const surchargeCreate = schemaBlock("CreateSurchargeRuleRequest");
+    for (const field of ["scope:", "weightRange:", "calculation:", "measurement:"]) {
+      expect(surchargeCreate, field).toContain(field);
+    }
+    const calculation = schemaBlock("RateCalculationInput");
+    expect(calculation).toContain("FlatRateCalculationInput");
+    expect(calculation).toContain("PerKgRateCalculationInput");
+    expect(calculation).toContain("PercentageRateCalculationInput");
+    expect(schemaBlock("FlatRateCalculationInput")).toMatch(
+      /required:\s*\[method, amountMinor, currency\]/,
+    );
+    expect(schemaBlock("PerKgRateCalculationInput")).toMatch(
+      /required:\s*\[method, amountMinor, currency\]/,
+    );
+    expect(schemaBlock("PercentageRateCalculationInput")).toMatch(
+      /required:\s*\[method, percentageBps\]/,
+    );
+    expect(schemaBlock("PercentageRateCalculationInput")).not.toContain("currency:");
+  });
+
+  it("uses closed CREATE and UPDATE variants with machine-readable header rules", () => {
+    const upserts = {
+      upsertOrganizationNode: "OrganizationNode",
+      upsertUser: "User",
+      upsertCustomerAddress: "CustomerAddress",
+      upsertPartner: "Partner",
+      upsertChannelProduct: "ChannelProduct",
+      upsertRatePriceVersion: "RatePriceVersion",
+      upsertSurchargeRule: "SurchargeRule",
+    } as const;
+    for (const [operationId, resource] of Object.entries(upserts)) {
+      const operation = operationBlock(operationId);
+      expect(operation, `${operationId} machine rule`).toContain(
+        "x-upsert-precondition:",
+      );
+      expect(operation).toMatch(/CREATE:\s*\n\s+ifMatch: FORBIDDEN/);
+      expect(operation).toMatch(/UPDATE:\s*\n\s+ifMatch: REQUIRED/);
+
+      const request = schemaBlock(`Upsert${resource}Request`);
+      expect(request).toContain("oneOf:");
+      expect(request).toContain(`Create${resource}Request`);
+      expect(request).toContain(`Update${resource}Request`);
+      expect(request).toContain("propertyName: mode");
+      expect(request).toContain(
+        `CREATE: '#/components/schemas/Create${resource}Request'`,
+      );
+      expect(request).toContain(
+        `UPDATE: '#/components/schemas/Update${resource}Request'`,
+      );
+
+      const create = schemaBlock(`Create${resource}Request`);
+      const update = schemaBlock(`Update${resource}Request`);
+      expect(create).toContain("mode: {type: string, const: CREATE}");
+      expect(create).not.toContain("id:");
+      expect(update).toContain("mode: {type: string, const: UPDATE}");
+      expect(update).toMatch(/required:\s*\[[^\]]*id[^\]]*\]/);
+    }
+  });
+
+  it("binds accepted quote, link, order and waybill versions atomically", () => {
+    const operation = operationBlock("linkAcceptedQuoteToOrder");
+    expect(operation).toContain("#/components/responses/AcceptedQuoteLinkNotFound");
+    expect(operation).toContain("#/components/responses/Expired");
+    expect(operation).toMatch(/ETag[^\n]*order aggregate/i);
+    expect(operation).toMatch(/atomically/i);
+    expect(operation).toContain("#/components/parameters/IdempotencyKey");
+
+    expect(schemaBlock("LinkAcceptedQuoteToOrderRequest")).toMatch(
+      /required:\s*\[quoteId, quoteOptionId, acceptedQuoteVersion\]/,
+    );
+    const result = schemaBlock("AcceptedQuoteOrderLink");
+    expect(result).toMatch(
+      /required:\s*\[quoteId, quoteOptionId, quoteVersion, linkId, linkVersion, orderId, orderVersion, waybillId, waybillVersion\]/,
+    );
+  });
+
+  it("binds every workbench cursor to filters, snapshot and immutable ordering", () => {
+    const listFilters = {
+      listQuotes: ["QuoteStatusFilter", "CustomerIdFilter", "CreatedFrom", "CreatedTo", "Search"],
+      listOrders: ["OrderStatusFilter", "CustomerIdFilter", "CreatedFrom", "CreatedTo", "Search"],
+      listWaybills: ["WaybillStateFilter", "CustomerIdFilter", "WarehouseIdFilter", "StationCodeFilter", "CreatedFrom", "CreatedTo", "Search"],
+      listImports: ["ImportStatusFilter", "CreatedFrom", "CreatedTo", "Search"],
+      listWarehouseReceipts: ["WarehouseReceiptStatusFilter", "CustomerIdFilter", "WarehouseIdFilter", "StationCodeFilter", "ReceivedFrom", "ReceivedTo", "Search"],
+      listLoadUnits: ["LoadUnitStatusFilter", "WarehouseIdFilter", "StationCodeFilter", "DispatchFrom", "DispatchTo", "Search"],
+      listBookings: ["BookingStatusFilter", "StationCodeFilter", "DepartureFrom", "DepartureTo", "Search"],
+      listLastMileIntakes: ["LastMileIntakeStatusFilter", "WarehouseIdFilter", "StationCodeFilter", "IntakeFrom", "IntakeTo", "Search"],
+      listDeliveryTasks: ["DeliveryTaskStatusFilter", "CustomerIdFilter", "StationCodeFilter", "ScheduledFrom", "ScheduledTo", "Search"],
+    } as const;
+    for (const [operationId, filters] of Object.entries(listFilters)) {
+      const operation = operationBlock(operationId);
+      for (const filter of filters) {
+        expect(operation, `${operationId} ${filter}`).toContain(
+          `#/components/parameters/${filter}`,
+        );
+      }
+      expect(operation).toContain("x-stable-cursor:");
+      expect(operation).toContain("filterHash: REQUIRED");
+      expect(operation).toContain("snapshot: asOf");
+      expect(operation).toContain("order:");
+      expect(operation).toContain("#/components/responses/CursorFilterMismatch");
+    }
+    const cursor = schemaBlock("OpaqueCursor");
+    expect(cursor).toContain("minLength:");
+    expect(cursor).toContain("maxLength:");
+    expect(cursor).toContain("pattern:");
+    const pageMeta = schemaBlock("CursorPageMeta");
+    expect(pageMeta).toMatch(
+      /required:\s*\[requestId, nextCursor, asOf, filterHash, order\]/,
+    );
+    for (const response of [
+      "QuoteListResponse",
+      "OrderListResponse",
+      "WaybillListResponse",
+      "ImportJobListResponse",
+      "WarehouseReceiptListResponse",
+      "LoadUnitListResponse",
+      "BookingListResponse",
+      "LastMileIntakeListResponse",
+      "DeliveryTaskListResponse",
+    ]) {
+      expect(schemaBlock(response)).toContain("#/components/schemas/CursorPageMeta");
+    }
+  });
+
+  it("projects Waybill PII with reusable READ MASK and DENY decisions", () => {
+    const waybill = schemaBlock("Waybill");
+    expect(waybill).toContain("fieldPolicy:");
+    const required = waybill.match(/required:\s*\[([^\]]+)\]/)?.[1] ?? "";
+    for (const field of ["customerName", "customerCode", "contactName", "contactPhone"]) {
+      expect(required).not.toContain(field);
+    }
+    const policy = schemaBlock("WaybillFieldPolicyProjection");
+    for (const field of ["customerName", "customerCode", "contactName", "contactPhone"]) {
+      expect(policy).toContain(`${field}:`);
+    }
+    const decision = schemaBlock("FieldProjectionDecision");
+    expect(decision).toContain("enum: [READ, MASK, DENY]");
+    expect(decision).toContain("copyAllowed:");
+    expect(decision).toContain("exportAllowed:");
+  });
+
+  it("requires authoritative operation-specific responses instead of generic acknowledgements", () => {
+    const responses = {
+      publishRateCard: "RateCardPublicationResponse",
+      copyOrder: "OrderResponse",
+      submitOrder: "OrderResponse",
+      createLabelJob: "LabelJobCreatedResponse",
+      renumberWaybill: "WaybillRenumberResponse",
+      changeTenantStatus: "TenantResponse",
+      updateTenantEntitlements: "TenantEntitlementsResponse",
+    } as const;
+    for (const [operationId, response] of Object.entries(responses)) {
+      const operation = operationBlock(operationId);
+      expect(operation).toContain(`#/components/schemas/${response}`);
+      expect(operation).not.toContain("#/components/responses/CommandSucceeded");
+    }
+    expect(operationBlock("changeTenantStatus")).toContain(
+      "#/components/schemas/ChangeTenantStatusRequest",
+    );
   });
 });
 

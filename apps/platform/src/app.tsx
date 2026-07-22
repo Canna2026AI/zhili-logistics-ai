@@ -44,7 +44,7 @@ type SearchResult = {
 
 const tenantSeed: Tenant[] = [
   {
-    id: '1',
+    id: '01JTENANT0000000000000001',
     name: '上海智立科技有限公司',
     slug: 'zhili-sh',
     plan: '企业版',
@@ -58,7 +58,7 @@ const tenantSeed: Tenant[] = [
     version: 1,
   },
   {
-    id: '2',
+    id: '01JTENANT0000000000000002',
     name: '深圳海运通物流有限公司',
     slug: 'seatrans-sz',
     plan: '专业版',
@@ -72,7 +72,7 @@ const tenantSeed: Tenant[] = [
     version: 1,
   },
   {
-    id: '3',
+    id: '01JTENANT0000000000000003',
     name: '宁波迅达国际货运代理',
     slug: 'xunda-nb',
     plan: '基础版',
@@ -86,7 +86,7 @@ const tenantSeed: Tenant[] = [
     version: 1,
   },
   {
-    id: '4',
+    id: '01JTENANT0000000000000004',
     name: '广州港捷供应链管理',
     slug: 'gangjie-gz',
     plan: '企业版',
@@ -100,7 +100,7 @@ const tenantSeed: Tenant[] = [
     version: 1,
   },
   {
-    id: '5',
+    id: '01JTENANT0000000000000005',
     name: '青岛北方国际物流',
     slug: 'bf-logistics-qd',
     plan: '专业版',
@@ -561,7 +561,15 @@ function QuotaCell({ value, percent }: { value: string; percent: number }) {
   );
 }
 
-function ModulesPage({ notify }: { notify: (text: string) => void }) {
+function ModulesPage({
+  tenant,
+  updateTenantVersion,
+  notify,
+}: {
+  tenant: Tenant;
+  updateTenantVersion: (version: number) => void;
+  notify: (text: string) => void;
+}) {
   const [enabled, setEnabled] = useState<Record<string, boolean>>(() =>
     (() => {
       try {
@@ -632,13 +640,14 @@ function ModulesPage({ notify }: { notify: (text: string) => void }) {
                 onChange={() => {
                   const next = !enabled[module];
                   void platformPort
-                    .setModuleEntitlement('1', module, next)
-                    .then(() => {
+                    .setModuleEntitlement(tenant.id, tenant.version, module, next)
+                    .then((version) => {
                       setEnabled((current) => {
                         const updated = { ...current, [module]: next };
                         localStorage.setItem('zhili.platform.modules', JSON.stringify(updated));
                         return updated;
                       });
+                      updateTenantVersion(version);
                       notify('模块授权已保存，变更版本 PLAN-ENT-2026.06。');
                     })
                     .catch((error: Error) => notify(error.message));
@@ -664,6 +673,7 @@ function UsagePage({
   selectTenant: (id: string) => void;
   save: (
     tenantId: string,
+    version: number,
     config: { plan: string; limit: number; expires: string }
   ) => Promise<number>;
   notify: (text: string) => void;
@@ -697,7 +707,7 @@ function UsagePage({
           className="platform-create-form"
           onSubmit={(event) => {
             event.preventDefault();
-            void save(tenant.id, { plan, limit: Number(limit), expires })
+            void save(tenant.id, tenant.version, { plan, limit: Number(limit), expires })
               .then((version) => {
                 notify(`租户配置已保存，版本 ENT-${String(version).padStart(4, '0')}。`);
               })
@@ -1069,7 +1079,7 @@ export function App() {
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [newTenantPlan, setNewTenantPlan] = useState('专业版');
-  const [selectedTenantId, setSelectedTenantId] = useState('1');
+  const [selectedTenantId, setSelectedTenantId] = useState('01JTENANT0000000000000001');
   useEffect(
     () => localStorage.setItem('zhili.platform.tenants', JSON.stringify(tenantRows)),
     [tenantRows]
@@ -1233,7 +1243,18 @@ export function App() {
         }}
       />
     );
-  else if (page === '套餐与模块') content = <ModulesPage notify={setToast} />;
+  else if (page === '套餐与模块')
+    content = (
+      <ModulesPage
+        tenant={tenantRows[0]!}
+        updateTenantVersion={(version) =>
+          setTenantRows((rows) =>
+            rows.map((tenant, index) => (index === 0 ? { ...tenant, version } : tenant))
+          )
+        }
+        notify={setToast}
+      />
+    );
   else if (page === '配额与用量')
     content = (
       <UsagePage
@@ -1242,8 +1263,8 @@ export function App() {
         selectedTenantId={selectedTenantId}
         selectTenant={setSelectedTenantId}
         notify={setToast}
-        save={async (tenantId, config) => {
-          const version = await platformPort.saveTenantConfiguration(tenantId, {
+        save={async (tenantId, currentVersion, config) => {
+          const version = await platformPort.saveTenantConfiguration(tenantId, currentVersion, {
             plan: config.plan,
             waybillLimit: config.limit,
             expires: config.expires,
@@ -1419,9 +1440,9 @@ export function App() {
             tenant={detail}
             changeStatus={(status) =>
               void platformPort
-                .changeTenantStatus(detail.id, status)
-                .then(() => {
-                  const next = { ...detail, status, version: detail.version + 1 };
+                .changeTenantStatus(detail, status)
+                .then((updated) => {
+                  const next = { ...detail, status: updated.status, version: updated.version };
                   setDetail(next);
                   setTenantRows((rows) => rows.map((row) => (row.id === next.id ? next : row)));
                   setToast(status === 'ACTIVE' ? '租户已恢复。' : '租户已停用。');

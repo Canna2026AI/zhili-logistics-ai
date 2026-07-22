@@ -2,8 +2,8 @@ import { createZhiliClient } from '@zhili/api-client';
 import type { components } from '@zhili/contracts';
 
 export type CustomerAddressInput = Omit<
-  components['schemas']['UpsertCustomerAddressRequest'],
-  'mode' | 'id'
+  components['schemas']['CreateCustomerAddressRequest'],
+  'mode'
 >;
 
 const meta = { requestId: 'req-f1c-customer', asOf: '2026-07-22T00:00:00.000Z' };
@@ -152,12 +152,19 @@ const mockFetch: typeof fetch = async (input) => {
     );
   const acceptedQuoteLink = path.match(/\/orders\/([^/]+):link-accepted-quote$/);
   if (acceptedQuoteLink) {
-    const body = (await request.clone().json()) as { quoteId: string; quoteOptionId: string };
+    const body = (await request.clone().json()) as {
+      quoteId: string;
+      quoteOptionId: string;
+      acceptedQuoteVersion: number;
+    };
     return json(
       {
         data: {
           quoteId: body.quoteId,
           quoteOptionId: body.quoteOptionId,
+          quoteVersion: body.acceptedQuoteVersion,
+          linkId: '01JQUOTELINK00000000000001',
+          linkVersion: 1,
           orderId: acceptedQuoteLink[1],
           waybillId: '01JWAYBILL000000000000001',
           orderVersion: 2,
@@ -359,13 +366,18 @@ export const customerPort = {
     orderVersion: number;
     quoteId: string;
     optionId: string;
+    acceptedQuoteVersion: number;
   }) {
     const response = await client.POST('/orders/{orderId}:link-accepted-quote', {
       params: {
         path: { orderId: input.orderId },
         header: { 'Idempotency-Key': key(), 'If-Match': `"${input.orderVersion}"` },
       },
-      body: { quoteId: input.quoteId, quoteOptionId: input.optionId },
+      body: {
+        quoteId: input.quoteId,
+        quoteOptionId: input.optionId,
+        acceptedQuoteVersion: input.acceptedQuoteVersion,
+      },
     });
     return ensure(response.data, response.error).data;
   },
@@ -407,6 +419,7 @@ export const customerPort = {
         orderVersion: order.version,
         quoteId: input.acceptedQuote.quoteId,
         optionId: input.acceptedQuote.optionId,
+        acceptedQuoteVersion: input.acceptedQuote.version,
       });
     return order;
   },
