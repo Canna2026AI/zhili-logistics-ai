@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
 import { platformPort } from './api';
 import { OperationsPage, type OperationsPageName } from './features/operations/operations-page';
 import { AccessWorkflow } from './features/policies/access-workflow';
+import type { AccessPolicyDraft } from './features/policies/access-policy';
 import { SessionOutcome, type SessionOutcomeKind } from './features/sessions/session-outcome';
 
 type Page =
@@ -29,6 +30,8 @@ type Tenant = {
   version: number;
 };
 type Impersonation = {
+  id: string;
+  permissionsVersion: number;
   tenant: Tenant;
   reason: string;
   expiresAt: number;
@@ -136,7 +139,7 @@ const readSession = () => {
     const session = JSON.parse(
       localStorage.getItem('zhili.platform.impersonation') ?? ''
     ) as Impersonation;
-    return session.expiresAt > Date.now() ? session : null;
+    return session;
   } catch {
     return null;
   }
@@ -1090,12 +1093,24 @@ export function App() {
   const [toast, setToast] = useState('');
   const [session, setSession] = useState<Impersonation | null>(readSession);
   const [sessionOutcome, setSessionOutcome] = useState<SessionOutcomeKind | null>(null);
+  const [sessionEvidence, setSessionEvidence] = useState<{
+    permissionsVersion?: number;
+    eventId?: string;
+  }>({});
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [newTenantPlan, setNewTenantPlan] = useState('专业版');
   const [selectedTenantId, setSelectedTenantId] = useState('01JTENANT0000000000000001');
+  const accessSaveProgress = useRef<
+    | {
+        key: string;
+        role?: { roleId: string; version: number };
+        tenantVersion?: number;
+      }
+    | undefined
+  >(undefined);
   const mockMode = new URLSearchParams(window.location.search).get('mock') === '1';
   useEffect(
     () => localStorage.setItem('zhili.platform.tenants', JSON.stringify(tenantRows)),
@@ -1133,6 +1148,13 @@ export function App() {
         label: item,
         type: '页面' as const,
         context: '平台导航',
+        page: item,
+      })),
+      ...operationPages.map((item) => ({
+        id: `page-${item}`,
+        label: item,
+        type: '页面' as const,
+        context: '系统运维',
         page: item,
       })),
       ...tenantRows.map((tenant) => ({
@@ -1185,6 +1207,19 @@ export function App() {
   }, [announcements, auditRecords, globalSearch, session, tenantRows]);
   useEffect(() => {
     if (!session) return;
+    let cancelled = false;
+    void platformPort
+      .checkImpersonation(session.id, session.permissionsVersion)
+      .then((status) => {
+        if (cancelled || status.status === 'ACTIVE') return;
+        setSessionEvidence({
+          permissionsVersion: status.permissionsVersion,
+          eventId: status.eventId,
+        });
+        setSession(null);
+        setSessionOutcome(status.status === 'REVOKED' ? 'revoked' : 'expired');
+      })
+      .catch((error: Error) => !cancelled && setToast(error.message));
     const update = () => {
       const remaining = Math.max(0, Math.ceil((session.expiresAt - Date.now()) / 1000));
       setRemainingSeconds(remaining);
@@ -1196,7 +1231,10 @@ export function App() {
     };
     update();
     const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [session]);
   const createTenant = async () => {
     if (!newTenantName.trim() || !newTenantSlug.trim()) return;
@@ -1326,7 +1364,9 @@ export function App() {
     );
   else if (page === '代入与审计') content = <AuditPage records={auditRecords} />;
   else if (operationPages.includes(page as OperationsPageName))
-    content = <OperationsPage page={page as OperationsPageName} />;
+    content = (
+      <OperationsPage page={page as OperationsPageName} onExecute={platformPort.executeOperation} />
+    );
   else content = <RuntimePage readOnly={Boolean(session)} />;
 
   return (
@@ -1427,11 +1467,24 @@ export function App() {
             {mockMode ? (
               <>
                 <button
-                  onClick={() => {
-                    setSession(null);
-                    setSessionOutcome('revoked');
-                    setPage('租户管理');
-                  }}
+                  onClick={() =>
+                    void platformPort
+                      .revokeMockImpersonation(session.id)
+                      .then(() =>
+                        platformPort.checkImpersonation(session.id, session.permissionsVersion)
+                      )
+                      .then((status) => {
+                        if (status.status !== 'REVOKED') return;
+                        setSessionEvidence({
+                          permissionsVersion: status.permissionsVersion,
+                          eventId: status.eventId,
+                        });
+                        setSession(null);
+                        setSessionOutcome('revoked');
+                        setPage('租户管理');
+                      })
+                      .catch((error: Error) => setToast(error.message))
+                  }
                 >
                   模拟权限撤回
                 </button>
@@ -1452,6 +1505,8 @@ export function App() {
           {sessionOutcome ? (
             <SessionOutcome
               kind={sessionOutcome}
+              permissionsVersion={sessionEvidence.permissionsVersion}
+              eventId={sessionEvidence.eventId}
               onRecover={() => {
                 setSessionOutcome(null);
                 setPage('租户管理');
@@ -1524,24 +1579,54 @@ export function App() {
       {workflowTenant ? (
         <AccessWorkflow
           tenant={workflowTenant}
-          onClose={() => setWorkflowTenant(null)}
-          onSave={async () => {
-            const version = await platformPort.saveEntitlements(
-              workflowTenant.id,
-              workflowTenant.version,
-              {
-                modules: modules.map((module) => ({
-                  moduleCode: module,
-                  enabled: module !== '自动化',
-                  quotas: {},
-                })),
-              }
+          port={platformPort}
+          mockMode={mockMode}
+          onClose={() => {
+            const tenantName = workflowTenant.name;
+            accessSaveProgress.current = undefined;
+            setWorkflowTenant(null);
+            queueMicrotask(() =>
+              document
+                .querySelector<HTMLButtonElement>(
+                  `[aria-label="查看租户 ${tenantName.replaceAll('"', '\\"')}"]`
+                )
+                ?.focus()
             );
+          }}
+          onSave={async (draft: AccessPolicyDraft) => {
+            const progressKey = JSON.stringify(draft);
+            const progress =
+              accessSaveProgress.current?.key === progressKey
+                ? accessSaveProgress.current
+                : { key: progressKey };
+            accessSaveProgress.current = progress;
+            progress.role ??= await platformPort.updateRolePolicy(
+              draft.role.id,
+              draft.role.version,
+              { statements: draft.statements, reason: draft.reason }
+            );
+            progress.tenantVersion ??= await platformPort.saveEntitlements(
+              draft.tenant.id,
+              draft.tenant.version,
+              { modules: draft.modules }
+            );
+            const role = progress.role;
+            const version = progress.tenantVersion;
             setTenantRows((rows) =>
               rows.map((tenant) =>
-                tenant.id === workflowTenant.id ? { ...tenant, version } : tenant
+                tenant.id === draft.tenant.id ? { ...tenant, version } : tenant
               )
             );
+            accessSaveProgress.current = undefined;
+            return {
+              tenantId: draft.tenant.id,
+              tenantVersion: version,
+              roleId: role.roleId,
+              roleVersion: role.version,
+              subjectId: draft.subject.id,
+              effectiveModuleCount: draft.modules.filter((item) => item.enabled).length,
+              savedAt: new Date().toISOString(),
+            };
           }}
         />
       ) : null}
@@ -1613,10 +1698,13 @@ export function App() {
                 const why = reason.trim();
                 void platformPort
                   .startImpersonation(target.id, why)
-                  .then((created) => {
+                  .then(async (created) => {
+                    const checked = await platformPort.checkImpersonation(created.id, 0);
                     setAuditReason(why);
                     setRemainingSeconds(60 * 60);
                     setSession({
+                      id: created.id,
+                      permissionsVersion: checked.permissionsVersion,
                       tenant: target,
                       reason: why,
                       expiresAt: new Date(created.expiresAt).getTime(),

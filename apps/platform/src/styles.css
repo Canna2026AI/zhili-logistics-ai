@@ -1117,3 +1117,53 @@ textarea {
     grid-template-columns: 1fr;
   }
 }
+@media (max-width: 480px) {
+  .platform-content {
+    width: calc(100% - 56px);
+    min-width: 0;
+  }
+  .platform-content main {
+    min-width: 0;
+    padding-inline: 12px;
+  }
+  .platform-toolbar {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .platform-toolbar input,
+  .platform-toolbar select {
+    min-width: 0;
+    flex: 1 1 130px;
+  }
+  .f08-simulation {
+    left: 0;
+  }
+  .f08-workflow-body,
+  .f08-simulation-body {
+    min-width: 0;
+    padding-inline: 14px;
+  }
+  .f08-simulation-body > .platform-table-wrap {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .f08-simulation > header {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    padding-inline: 14px;
+  }
+  .f08-simulation > header > .f08-session-chip,
+  .f08-simulation > header > strong {
+    grid-column: 1 / -1;
+  }
+  .f08-simulation > header > strong {
+    min-width: 0;
+  }
+  .f08-simulation > header > button {
+    width: 100%;
+  }
+  .f08-policy-table,
+  .f08-simulation-table {
+    min-width: 620px;
+  }
+}

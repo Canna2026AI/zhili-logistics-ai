@@ -1,29 +1,42 @@
 import { Button } from '@zhili/ui';
+import type { AccessPolicyDraft, FieldPolicy } from './access-policy';
 
-const rows = [
-  ['客户手机号', '运单联系人信息', '掩码'],
-  ['运单成本', '内部成本字段', '关闭'],
-  ['应收金额', '账单与对账金额', '掩码'],
-  ['签收人证件', 'POD 身份凭证', '掩码'],
-] as const;
-
+const fieldNames: Record<string, string> = {
+  customerPhone: '客户手机号',
+  cost: '运单成本',
+  receivable: '应收金额',
+  recipientIdentity: '签收人证件',
+};
 export function FieldPolicyStep({
+  draft,
+  onChange,
   onBack,
   onSimulate,
   onClose,
+  busy,
 }: {
+  draft: AccessPolicyDraft;
+  onChange: (draft: AccessPolicyDraft) => void;
   onBack: () => void;
   onSimulate: () => void;
   onClose: () => void;
+  busy: boolean;
 }) {
+  const update = (field: string, decision: FieldPolicy['decision']) =>
+    onChange({
+      ...draft,
+      fieldPolicies: draft.fieldPolicies.map((item) =>
+        item.field === field ? { ...item, decision } : item
+      ),
+    });
   return (
     <section className="f08-workflow-panel" role="dialog" aria-modal="true" aria-label="字段策略">
       <header className="f08-workflow-head">
         <div>
           <h2>字段策略</h2>
-          <p>运营管理员 · 数据可见性与脱敏</p>
+          <p>{draft.role.name} · 数据可见性与脱敏</p>
         </div>
-        <button type="button" aria-label="关闭字段策略" onClick={onClose}>
+        <button type="button" disabled={busy} aria-label="关闭字段策略" onClick={onClose}>
           ×
         </button>
       </header>
@@ -34,44 +47,46 @@ export function FieldPolicyStep({
         <strong>字段策略</strong>
       </nav>
       <div className="f08-workflow-body">
-        <div className="f08-scope">
-          <small>规则范围</small>
-          <strong>运单与账单字段</strong>
-          <span>继承：租户默认</span>
-        </div>
-        <table className="f08-policy-table" aria-label="字段策略矩阵">
-          <thead>
-            <tr>
-              <th>字段</th>
-              <th>可见</th>
-              <th>编辑</th>
-              <th>脱敏</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(([name, desc, mask]) => (
-              <tr key={name}>
-                <th>
-                  <strong>{name}</strong>
-                  <small>{desc}</small>
-                </th>
-                <td>✓</td>
-                <td>—</td>
-                <td className={mask === '掩码' ? 'is-remove' : ''}>{mask}</td>
+        <div className="platform-table-wrap" tabIndex={0} aria-label="字段策略矩阵可滚动区域">
+          <table className="f08-policy-table" aria-label="字段策略矩阵">
+            <thead>
+              <tr>
+                <th>字段</th>
+                <th>决策</th>
+                <th>上下文</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="f08-warning">
-          <strong>字段策略优先级高于角色通用权限</strong>
-          <span>脱敏字段在列表、详情、导出与 API 中保持一致。</span>
+            </thead>
+            <tbody>
+              {draft.fieldPolicies.map((policy) => (
+                <tr key={policy.field}>
+                  <th>{fieldNames[policy.field] ?? policy.field}</th>
+                  <td>
+                    <select
+                      aria-label={`${fieldNames[policy.field] ?? policy.field}字段决策`}
+                      value={policy.decision}
+                      onChange={(event) =>
+                        update(policy.field, event.target.value as FieldPolicy['decision'])
+                      }
+                    >
+                      <option value="READ">可见</option>
+                      <option value="MASK">掩码</option>
+                      <option value="DENY">关闭</option>
+                    </select>
+                  </td>
+                  <td>{policy.contexts.join(' / ')}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
       <footer className="f08-workflow-footer">
-        <Button variant="secondary" onClick={onBack}>
+        <Button variant="secondary" disabled={busy} onClick={onBack}>
           返回权限预览
         </Button>
-        <Button onClick={onSimulate}>以用户视角模拟</Button>
+        <Button loading={busy} disabled={busy} onClick={onSimulate}>
+          以用户视角模拟
+        </Button>
       </footer>
     </section>
   );

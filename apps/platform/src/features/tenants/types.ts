@@ -7,4 +7,5 @@ export type PlatformTenant = {
   waybill: string;
   api: string;
   expires: string;
+  version: number;
 };

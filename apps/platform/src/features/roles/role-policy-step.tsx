@@ -1,25 +1,58 @@
 import { Button } from '@zhili/ui';
+import type { AccessPolicyDraft, PolicyStatement } from '../policies/access-policy';
 
-const permissionRows = [
-  ['运单管理', true, true, false],
-  ['仓库扫描', true, true, true],
-  ['应收应付', true, false, true],
-  ['平台设置', true, false, false],
+const resources = [
+  ['waybill', '运单管理'],
+  ['warehouse', '仓库扫描'],
+  ['billing', '应收应付'],
+  ['platform', '平台设置'],
+] as const;
+const actions = [
+  ['read', '查看'],
+  ['write', '编辑'],
+  ['approve', '审批'],
 ] as const;
 
 export function RolePolicyStep({
+  draft,
+  onChange,
   removeLastAdmin,
   onRemoveLastAdminChange,
   onBack,
   onPreview,
   onClose,
+  mockMode,
+  busy,
 }: {
+  draft: AccessPolicyDraft;
+  onChange: (draft: AccessPolicyDraft) => void;
   removeLastAdmin: boolean;
   onRemoveLastAdminChange: (checked: boolean) => void;
   onBack: () => void;
   onPreview: () => void;
   onClose: () => void;
+  mockMode: boolean;
+  busy: boolean;
 }) {
+  const toggle = (resource: string, action: string, allowed: boolean) => {
+    const current = draft.statements.find((item) => item.resource === resource);
+    const next: PolicyStatement = current ?? {
+      effect: 'ALLOW',
+      resource,
+      actions: [],
+      dataScope: 'TENANT',
+    };
+    const updated = {
+      ...next,
+      actions: allowed
+        ? [...new Set([...next.actions, action])]
+        : next.actions.filter((item) => item !== action),
+    };
+    onChange({
+      ...draft,
+      statements: [...draft.statements.filter((item) => item.resource !== resource), updated],
+    });
+  };
   return (
     <section
       className="f08-workflow-panel"
@@ -30,9 +63,11 @@ export function RolePolicyStep({
       <header className="f08-workflow-head">
         <div>
           <h2>角色策略编辑</h2>
-          <p>运营管理员 · 上海智立科技有限公司</p>
+          <p>
+            {draft.role.name} · {draft.tenant.name}
+          </p>
         </div>
-        <button type="button" aria-label="关闭角色策略" onClick={onClose}>
+        <button type="button" disabled={busy} aria-label="关闭角色策略" onClick={onClose}>
           ×
         </button>
       </header>
@@ -44,58 +79,99 @@ export function RolePolicyStep({
       </nav>
       <div className="f08-workflow-body">
         <div className="f08-scope">
-          <small>策略对象</small>
-          <strong>运营管理员（12 名成员）</strong>
+          <label>
+            策略对象
+            <select
+              aria-label="策略角色"
+              value={draft.role.id}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  role: event.target.value.endsWith('2')
+                    ? { id: event.target.value, name: '财务管理员', version: 7, memberCount: 4 }
+                    : { id: event.target.value, name: '运营管理员', version: 18, memberCount: 12 },
+                })
+              }
+            >
+              <option value="01JROLE000000000000000001">运营管理员</option>
+              <option value="01JROLE000000000000000002">财务管理员</option>
+            </select>
+          </label>
+          <label>
+            模拟用户
+            <select
+              aria-label="模拟用户"
+              value={draft.subject.id}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  subject: event.target.value.endsWith('2')
+                    ? { id: event.target.value, name: '王芳' }
+                    : { id: event.target.value, name: '李明' },
+                })
+              }
+            >
+              <option value="01JUSER000000000000000001">李明</option>
+              <option value="01JUSER000000000000000002">王芳</option>
+            </select>
+          </label>
           <span>作用域：当前租户</span>
         </div>
-        <table className="f08-policy-table" aria-label="角色权限矩阵">
-          <thead>
-            <tr>
-              <th>权限域</th>
-              <th>查看</th>
-              <th>编辑</th>
-              <th>审批</th>
-            </tr>
-          </thead>
-          <tbody>
-            {permissionRows.map(([name, view, edit, approve]) => (
-              <tr key={name}>
-                <th>{name}</th>
-                {[view, edit, approve].map((allowed, index) => (
-                  <td key={index}>
-                    <input
-                      aria-label={`${name}${['查看', '编辑', '审批'][index]}`}
-                      type="checkbox"
-                      defaultChecked={allowed}
-                    />
-                  </td>
+        <div className="platform-table-wrap" tabIndex={0} aria-label="角色权限矩阵可滚动区域">
+          <table className="f08-policy-table" aria-label="角色权限矩阵">
+            <thead>
+              <tr>
+                <th>权限域</th>
+                {actions.map(([, label]) => (
+                  <th key={label}>{label}</th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        <label className="f08-lockout-check">
-          <input
-            type="checkbox"
-            aria-label="撤销最后一个平台管理员"
-            checked={removeLastAdmin}
-            onChange={(event) => onRemoveLastAdminChange(event.target.checked)}
-          />
-          <span>
-            <strong>撤销最后一个平台管理员</strong>
-            <small>用于验证锁定保护；生产环境会在提交前强制阻断。</small>
-          </span>
-        </label>
-        <div className="f08-warning">
-          <strong>本次变更：新增 3 项 · 移除 1 项</strong>
-          <span>涉及财务审批与平台设置，提交前需要最终权限 Diff。</span>
+            </thead>
+            <tbody>
+              {resources.map(([resource, label]) => (
+                <tr key={resource}>
+                  <th>{label}</th>
+                  {actions.map(([action, actionLabel]) => (
+                    <td key={action}>
+                      <input
+                        aria-label={`${label}${actionLabel}`}
+                        type="checkbox"
+                        checked={
+                          draft.statements
+                            .find((item) => item.resource === resource)
+                            ?.actions.includes(action) ?? false
+                        }
+                        onChange={(event) => toggle(resource, action, event.target.checked)}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+        {mockMode ? (
+          <label className="f08-lockout-check">
+            <input
+              type="checkbox"
+              aria-label="撤销最后一个平台管理员"
+              checked={removeLastAdmin}
+              onChange={(event) => onRemoveLastAdminChange(event.target.checked)}
+            />
+            <span>
+              <strong>撤销最后一个平台管理员</strong>
+              <small>Mock 契约返回 422 锁定保护。</small>
+            </span>
+          </label>
+        ) : null}
       </div>
       <footer className="f08-workflow-footer">
-        <Button variant="secondary" onClick={onBack}>
+        <Button variant="secondary" disabled={busy} onClick={onBack}>
           返回
         </Button>
-        <Button onClick={onPreview}>预览最终权限</Button>
+        <Button loading={busy} disabled={busy} onClick={onPreview}>
+          预览最终权限
+        </Button>
       </footer>
     </section>
   );
@@ -116,10 +192,10 @@ export function AdminLockoutGuard({
       aria-label="管理员账号锁定保护"
     >
       <div className="f08-result-icon">!</div>
-      <small>FAILED-LOCKOUT</small>
+      <small>FAILED-LOCKOUT · 422</small>
       <h2>无法发布角色策略</h2>
-      <p>该变更将撤销最后一个平台管理员，系统已阻止提交。每个租户必须至少保留 1 名平台管理员。</p>
-      <div className="f08-result-detail">保护规则 PLATFORM-ADMIN-MIN-1 · 草稿仍已保留</div>
+      <p>服务端锁定保护要求至少保留 1 名平台管理员。</p>
+      <div className="f08-result-detail">草稿仍完整保留</div>
       <footer>
         <Button variant="secondary" onClick={onClose}>
           关闭

@@ -1,19 +1,28 @@
 import { Button } from '@zhili/ui';
+import type { AccessPolicyDraft } from './access-policy';
 
 export function PermissionDiffStep({
+  draft,
+  differences,
   stale,
   onStale,
   onReload,
   onBack,
   onNext,
   onClose,
+  mockMode,
+  busy,
 }: {
+  draft: AccessPolicyDraft;
+  differences: string[];
   stale: boolean;
   onStale: () => void;
   onReload: () => void;
   onBack: () => void;
   onNext: () => void;
   onClose: () => void;
+  mockMode: boolean;
+  busy: boolean;
 }) {
   const label = stale ? '最终权限 Diff · STALE' : '最终权限 Diff';
   return (
@@ -21,9 +30,11 @@ export function PermissionDiffStep({
       <header className="f08-workflow-head">
         <div>
           <h2>最终权限 Diff</h2>
-          <p>基线版本 v18 · 当前草稿 v19</p>
+          <p>
+            服务端基线 v{draft.role.version} · {draft.role.name}
+          </p>
         </div>
-        <button type="button" aria-label="关闭权限预览" onClick={onClose}>
+        <button type="button" disabled={busy} aria-label="关闭权限预览" onClick={onClose}>
           ×
         </button>
       </header>
@@ -36,69 +47,40 @@ export function PermissionDiffStep({
       <div className="f08-workflow-body">
         <div className="f08-scope">
           <small>变更对象</small>
-          <strong>运营管理员 · 12 名成员</strong>
-          <span>比较：v18 → v19</span>
+          <strong>
+            {draft.role.name} · {draft.role.memberCount} 名成员
+          </strong>
+          <span>用户：{draft.subject.name}</span>
         </div>
-        <table className="f08-policy-table" aria-label="最终权限差异">
-          <thead>
-            <tr>
-              <th>权限域</th>
-              <th>查看</th>
-              <th>编辑</th>
-              <th>审批</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <th>运单管理</th>
-              <td className="is-add">+</td>
-              <td className="is-add">+</td>
-              <td>—</td>
-            </tr>
-            <tr>
-              <th>仓库扫描</th>
-              <td>=</td>
-              <td>=</td>
-              <td>=</td>
-            </tr>
-            <tr>
-              <th>应收应付</th>
-              <td>=</td>
-              <td className="is-remove">−</td>
-              <td className="is-add">+</td>
-            </tr>
-            <tr>
-              <th>平台设置</th>
-              <td className="is-add">+</td>
-              <td>—</td>
-              <td>—</td>
-            </tr>
-          </tbody>
-        </table>
+        <ul aria-label="服务端权限差异">
+          {differences.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
         <div className={stale ? 'f08-warning' : 'f08-success'} role="status">
           <strong>
             {stale
               ? 'STALE · 权限基线已由其他管理员更新'
-              : '权限基线已同步 · 新增 3 项 · 移除 1 项'}
+              : `权限基线已同步 · ${differences.join(' · ')}`}
           </strong>
           <span>
-            {stale
-              ? '当前 Diff 基于旧版本 v18；重新加载后才能继续。'
-              : '当前 Diff 基于最新版本 v19，可继续配置字段策略。'}
+            {stale ? '必须重新请求服务端预览。' : '当前 Diff 来自 effective-permissions preview。'}
           </span>
         </div>
-        {!stale ? (
+        {mockMode && !stale ? (
           <Button variant="secondary" onClick={onStale}>
             模拟版本冲突
           </Button>
         ) : null}
       </div>
       <footer className="f08-workflow-footer">
-        <Button variant="secondary" onClick={onBack}>
+        <Button variant="secondary" disabled={busy} onClick={onBack}>
           返回编辑
         </Button>
         {stale ? (
-          <Button onClick={onReload}>重新加载并比较</Button>
+          <Button loading={busy} onClick={onReload}>
+            重新加载并比较
+          </Button>
         ) : (
           <Button onClick={onNext}>确认并配置字段</Button>
         )}

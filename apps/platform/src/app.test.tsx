@@ -2,9 +2,13 @@
 import '@testing-library/jest-dom/vitest';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
 import { platformPort } from './api';
+
+beforeEach(() => {
+  window.history.replaceState({}, '', '/?mock=1');
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -409,6 +413,200 @@ describe('平台控制台', () => {
       1,
       expect.objectContaining({ modules: expect.any(Array) })
     );
+  });
+
+  it('把用户修改的模块配额角色和字段策略原样提交给强类型端口', async () => {
+    const saveEntitlements = vi.spyOn(platformPort, 'saveEntitlements');
+    const updateRolePolicy = vi.spyOn(platformPort, 'updateRolePolicy');
+    const previewEffectivePermissions = vi.spyOn(platformPort, 'previewEffectivePermissions');
+    const previewFieldPolicy = vi.spyOn(platformPort, 'previewFieldPolicy');
+    const startPermissionSimulation = vi.spyOn(platformPort, 'startPermissionSimulation');
+    const verifyPermissionSimulation = vi.spyOn(platformPort, 'verifyPermissionSimulation');
+    const endPermissionSimulation = vi.spyOn(platformPort, 'endPermissionSimulation');
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '配置授权与策略' }));
+    await user.click(screen.getByRole('switch', { name: '授权 AI 自动化' }));
+    await user.click(screen.getByRole('switch', { name: '授权 仓库扫描' }));
+    await user.clear(screen.getByLabelText('授权运单配额'));
+    await user.type(screen.getByLabelText('授权运单配额'), '640000');
+    await user.click(screen.getByRole('button', { name: '继续：角色策略' }));
+    await user.selectOptions(screen.getByLabelText('策略角色'), '01JROLE000000000000000002');
+    await user.selectOptions(screen.getByLabelText('模拟用户'), '01JUSER000000000000000002');
+    await user.click(screen.getByRole('checkbox', { name: '运单管理审批' }));
+    await user.click(screen.getByRole('button', { name: '预览最终权限' }));
+    await user.click(screen.getByRole('button', { name: '确认并配置字段' }));
+    await user.selectOptions(screen.getByLabelText('客户手机号字段决策'), 'DENY');
+    await user.click(screen.getByRole('button', { name: '以用户视角模拟' }));
+    await user.click(screen.getByRole('button', { name: '结束模拟并验证' }));
+
+    expect(saveEntitlements).toHaveBeenCalledWith('01JTENANT0000000000000001', 1, {
+      modules: expect.arrayContaining([
+        expect.objectContaining({ moduleCode: 'ai-automation', enabled: true }),
+        expect.objectContaining({ moduleCode: 'warehouse-scan', enabled: false }),
+        expect.objectContaining({ quotas: { monthlyWaybills: 640000 } }),
+      ]),
+    });
+    expect(updateRolePolicy).toHaveBeenCalledWith('01JROLE000000000000000002', 7, {
+      statements: expect.arrayContaining([
+        expect.objectContaining({
+          effect: 'ALLOW',
+          resource: 'waybill',
+          actions: ['read', 'write', 'approve'],
+          dataScope: 'TENANT',
+        }),
+      ]),
+      reason: '季度权限复核',
+    });
+    expect(previewEffectivePermissions).toHaveBeenCalledWith('01JUSER000000000000000002', {
+      proposedRoleIds: ['01JROLE000000000000000002'],
+      proposedStatements: expect.arrayContaining([
+        expect.objectContaining({ resource: 'waybill', actions: ['read', 'write', 'approve'] }),
+      ]),
+    });
+    expect(previewFieldPolicy).toHaveBeenCalledWith({
+      subjectId: '01JUSER000000000000000002',
+      proposedPolicies: expect.arrayContaining([
+        {
+          resource: 'waybill',
+          field: 'customerPhone',
+          decision: 'DENY',
+          contexts: ['VIEW', 'EXPORT'],
+        },
+      ]),
+    });
+    expect(startPermissionSimulation).toHaveBeenCalledWith({
+      userId: '01JUSER000000000000000002',
+      reason: '季度权限复核',
+      durationMinutes: 15,
+    });
+    expect(verifyPermissionSimulation).toHaveBeenCalledWith(expect.any(String), {
+      resource: 'waybill',
+      action: 'read',
+      field: 'customerPhone',
+    });
+    expect(endPermissionSimulation).toHaveBeenCalledWith(expect.any(String));
+  });
+
+  it('授权弹窗支持 Escape 关闭并把焦点恢复到发起租户', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const tenantButton = screen.getByRole('button', {
+      name: '查看租户 上海智立科技有限公司',
+    });
+    await user.click(tenantButton);
+    await user.click(screen.getByRole('button', { name: '配置授权与策略' }));
+    expect(screen.getByRole('button', { name: '关闭授权配置' })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+
+    expect(screen.queryByRole('dialog', { name: '租户详情 · 授权配置' })).not.toBeInTheDocument();
+    await waitFor(() => expect(tenantButton).toHaveFocus());
+  });
+
+  it('保存期间禁止 Escape 和退出，失败后保留完整草稿供重试', async () => {
+    let rejectSave!: (error: Error) => void;
+    const pending = new Promise<never>((_, reject) => {
+      rejectSave = reject;
+    });
+    vi.spyOn(platformPort, 'updateRolePolicy').mockReturnValueOnce(pending);
+    const saveEntitlements = vi.spyOn(platformPort, 'saveEntitlements');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '配置授权与策略' }));
+    await user.click(screen.getByRole('switch', { name: '授权 AI 自动化' }));
+    await user.click(screen.getByRole('button', { name: '继续：角色策略' }));
+    await user.click(screen.getByRole('checkbox', { name: '运单管理审批' }));
+    await user.click(screen.getByRole('button', { name: '预览最终权限' }));
+    await user.click(screen.getByRole('button', { name: '确认并配置字段' }));
+    await user.selectOptions(screen.getByLabelText('客户手机号字段决策'), 'DENY');
+    await user.click(screen.getByRole('button', { name: '以用户视角模拟' }));
+    await user.click(screen.getByRole('button', { name: '结束模拟并验证' }));
+    expect(screen.getByRole('button', { name: '退出模拟' })).toBeDisabled();
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('dialog', { name: '用户视角模拟' })).toBeVisible();
+    rejectSave(new Error('409 STALE：角色版本已变化'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('409 STALE');
+    expect(screen.getByRole('dialog', { name: '用户视角模拟' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '结束模拟并验证' })).toBeEnabled();
+    await user.click(screen.getByRole('button', { name: '结束模拟并验证' }));
+    expect(await screen.findByRole('dialog', { name: '角色策略已验证并保存' })).toBeVisible();
+    expect(saveEntitlements).toHaveBeenCalledTimes(1);
+  });
+
+  it('恢复已过期代入会话时展示 expired 证据而不是静默丢弃', async () => {
+    localStorage.setItem(
+      'zhili.platform.impersonation',
+      JSON.stringify({
+        id: '01JIMPERSONATE000000000001',
+        permissionsVersion: 19,
+        tenant: {
+          ...{ id: '01JTENANT0000000000000001', name: '上海智立科技有限公司' },
+          slug: 'zhili-sh',
+        },
+        reason: '恢复测试',
+        expiresAt: Date.now() - 1000,
+      })
+    );
+    render(<App />);
+    expect(await screen.findByRole('region', { name: '代入已过期' })).toBeVisible();
+  });
+
+  it('恢复 active 会话时由 Port 权限版本检查判定 revoked', async () => {
+    localStorage.setItem(
+      'zhili.platform.impersonation',
+      JSON.stringify({
+        id: '01JIMPERSONATE000000000001',
+        permissionsVersion: 19,
+        tenant: { id: '01JTENANT0000000000000001', name: '上海智立科技有限公司', slug: 'zhili-sh' },
+        reason: '撤权恢复测试',
+        expiresAt: Date.now() + 60_000,
+      })
+    );
+    const check = vi
+      .spyOn(platformPort, 'checkImpersonation')
+      .mockResolvedValue({ status: 'REVOKED', permissionsVersion: 20, eventId: 'ACL-SERVER-20' });
+    render(<App />);
+    expect(await screen.findByRole('region', { name: '会话已撤权' })).toHaveTextContent(
+      '权限基线 v20'
+    );
+    expect(check).toHaveBeenCalledWith('01JIMPERSONATE000000000001', 19);
+  });
+
+  it('全局搜索索引全部四个系统运维页面', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const searchbox = screen.getByRole('combobox', { name: '平台全局搜索' });
+    for (const page of ['系统健康', '任务与队列', '审计日志', '版本发布']) {
+      await user.clear(searchbox);
+      await user.type(searchbox, page);
+      expect(
+        screen.getByRole('option', { name: new RegExp(`${page}.*页面.*系统运维`) })
+      ).toBeVisible();
+    }
+  });
+
+  it('运维主按钮调用 app-local Port 并展示服务端回执与可重试错误', async () => {
+    const execute = vi
+      .spyOn(platformPort, 'executeOperation')
+      .mockResolvedValueOnce({
+        operationId: 'OPS-HEALTH-21',
+        status: 'SUCCEEDED',
+        message: '24 个服务检查完成',
+      })
+      .mockRejectedValueOnce(new Error('503 健康检查暂不可用'));
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '系统健康' }));
+    await user.click(screen.getByRole('button', { name: '运行健康检查' }));
+    expect(execute).toHaveBeenCalledWith('系统健康');
+    expect(await screen.findByRole('status')).toHaveTextContent('OPS-HEALTH-21');
+    await user.click(screen.getByRole('button', { name: '运行健康检查' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('503 健康检查暂不可用');
+    expect(screen.getByRole('button', { name: '运行健康检查' })).toBeEnabled();
   });
 
   it('权限 Diff 进入 STALE 后阻断确认并可重新加载恢复', async () => {

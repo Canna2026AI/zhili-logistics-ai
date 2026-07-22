@@ -31,9 +31,13 @@ const copy: Record<
 
 export function SessionOutcome({
   kind,
+  permissionsVersion,
+  eventId,
   onRecover,
 }: {
   kind: SessionOutcomeKind;
+  permissionsVersion?: number;
+  eventId?: string;
   onRecover: () => void;
 }) {
   const value = copy[kind];
@@ -51,7 +55,11 @@ export function SessionOutcome({
       <small>{value.eyebrow}</small>
       <h2>{value.title}</h2>
       <p>{value.body}</p>
-      <div className="f08-result-detail">{value.detail}</div>
+      <div className="f08-result-detail">
+        {kind === 'revoked' && permissionsVersion
+          ? `撤权事件 ${eventId ?? 'SERVER'} · 权限基线 v${permissionsVersion} · 未保存内容已保留为草稿`
+          : value.detail}
+      </div>
       <Button onClick={onRecover}>{value.action}</Button>
     </section>
   );
