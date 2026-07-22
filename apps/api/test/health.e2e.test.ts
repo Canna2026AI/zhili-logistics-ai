@@ -1,6 +1,6 @@
 import 'reflect-metadata';
 import { createServer as createHttpServer } from 'node:http';
-import { createServer as createTcpServer } from 'node:net';
+import { createServer as createTcpServer, type Socket } from 'node:net';
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
@@ -17,6 +17,7 @@ import {
 } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres, { type Sql } from 'postgres';
@@ -30,9 +31,10 @@ import {
   API_HEALTH_PROBES,
   API_READINESS_TIMEOUT_MS,
   createDefaultHealthProbes,
+  createPostgresHealthProbe,
   type HealthProbe,
 } from '../src/health.controller';
-import { registerFeatureModule } from '../src/app.module';
+import { AppModule, registerFeatureModule } from '../src/app.module';
 import {
   API_BODY_LIMIT_BYTES,
   configureApiApplication,
@@ -56,7 +58,12 @@ let loginExecutions = 0;
 let unknownExecutions = 0;
 let shutdownCalls = 0;
 
-const probeImplementations: Record<string, () => Promise<void>> = {
+const probeImplementations: Record<string, (signal: AbortSignal) => Promise<void>> = {
+  postgresql: async () => undefined,
+  redis: async () => undefined,
+  objectStorage: async () => undefined,
+};
+const probeClosers: Record<string, () => Promise<void>> = {
   postgresql: async () => undefined,
   redis: async () => undefined,
   objectStorage: async () => undefined,
@@ -64,7 +71,8 @@ const probeImplementations: Record<string, () => Promise<void>> = {
 
 const probes: readonly HealthProbe[] = Object.keys(probeImplementations).map((name) => ({
   name,
-  check: () => probeImplementations[name]!(),
+  check: (signal) => probeImplementations[name]!(signal),
+  close: () => probeClosers[name]!(),
 }));
 
 @Injectable()
@@ -141,6 +149,17 @@ function authenticatedHeaders(
   };
 }
 
+async function waitFor(
+  predicate: () => boolean | Promise<boolean>,
+  timeoutMs = 1_000
+): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (!(await predicate())) {
+    if (performance.now() >= deadline) throw new Error('Condition was not met before timeout');
+    await delay(10);
+  }
+}
+
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:17-alpine').start();
   admin = postgres(container.getConnectionUri(), { max: 1 });
@@ -172,10 +191,14 @@ beforeAll(async () => {
     .getInstance()
     .addHook('onRequest', (request, _reply, done) => {
       if (request.headers['x-test-authenticated'] === 'true') {
+        const permissions =
+          request.headers['x-test-permissions'] === 'none'
+            ? []
+            : ['waybill.read', 'customer.write'];
         request.principal = createAuthenticatedPrincipal({
           tenantId,
           subjectId,
-          permissions: ['waybill.read', 'customer.write'],
+          permissions,
         });
       }
       done();
@@ -192,12 +215,14 @@ beforeEach(async () => {
   probeImplementations.postgresql = async () => undefined;
   probeImplementations.redis = async () => undefined;
   probeImplementations.objectStorage = async () => undefined;
+  probeClosers.postgresql = async () => undefined;
+  probeClosers.redis = async () => undefined;
+  probeClosers.objectStorage = async () => undefined;
   await admin`TRUNCATE idempotency_records, outbox_events`;
 });
 
 afterAll(async () => {
   if (!appClosed && app) await app.close();
-  if (database) await database.closeDatabaseClient();
   if (admin) await admin.end();
   if (container) await container.stop();
   for (const key of [
@@ -308,6 +333,37 @@ describe('Nest + Fastify API composition', () => {
     expect(serialized).not.toContain(process.env.S3_ENDPOINT);
   });
 
+  it('cancels and drains a real timed-out PostgreSQL query before readiness returns', async () => {
+    const slowProbe = createPostgresHealthProbe(loadEnv(process.env), 'SELECT pg_sleep(10)');
+    probeImplementations.postgresql = (signal) => slowProbe.check(signal);
+    probeClosers.postgresql = () => slowProbe.close();
+    const startedAt = performance.now();
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/health/ready',
+      headers: { 'x-request-id': 'request-postgres-timeout' },
+    });
+    const responseElapsedMs = performance.now() - startedAt;
+    const [active] = await admin<{ count: string }[]>`
+      SELECT count(*)::text AS count
+      FROM pg_stat_activity
+      WHERE application_name = 'zhili-health-readiness'
+        AND state = 'active'
+    `;
+    const closeStartedAt = performance.now();
+    await slowProbe.close();
+
+    expect(response.statusCode).toBe(503);
+    expect(responseElapsedMs).toBeLessThan(250);
+    expect(response.json().data.checks.postgresql).toMatchObject({
+      status: 'down',
+      detail: 'Dependency check timed out.',
+    });
+    expect(active?.count).toBe('0');
+    expect(performance.now() - closeStartedAt).toBeLessThan(200);
+  });
+
   it('probes the real PostgreSQL, authenticated Redis, and object-storage protocols', async () => {
     const redisCommands: string[] = [];
     const redisServer = createTcpServer((socket) => {
@@ -330,10 +386,15 @@ describe('Nest + Fastify API composition', () => {
       });
     });
     let objectStoragePath = '';
+    let objectStorageBodyCompleted = false;
     const objectStorageServer = createHttpServer((request, response) => {
       objectStoragePath = request.url ?? '';
       response.statusCode = 200;
-      response.end('ok');
+      response.write('x'.repeat(64 * 1024));
+      setTimeout(() => {
+        objectStorageBodyCompleted = true;
+        response.end('complete');
+      }, 25);
     });
     await Promise.all([
       new Promise<void>((resolveListen) => redisServer.listen(0, '127.0.0.1', resolveListen)),
@@ -363,6 +424,7 @@ describe('Nest + Fastify API composition', () => {
       ]);
       expect(redisCommands).toEqual(['AUTH', 'PING']);
       expect(objectStoragePath).toBe('/storage/minio/health/ready');
+      expect(objectStorageBodyCompleted).toBe(true);
     } finally {
       await Promise.all([
         new Promise<void>((resolveClose, rejectClose) =>
@@ -388,6 +450,13 @@ describe('Nest + Fastify API composition', () => {
       payload: { name: 'missing key' },
       headers: authenticatedHeaders('request-context-before-idempotency'),
     });
+    const authenticatedWithoutPermission = await app.inject({
+      method: 'GET',
+      url: '/api/v1/waybills/WB-FORBIDDEN',
+      headers: authenticatedHeaders('request-permission-before-context', {
+        'x-test-permissions': 'none',
+      }),
+    });
     const protectedRead = await app.inject({
       method: 'GET',
       url: '/api/v1/waybills/WB-1?tenantId=attacker-tenant&subjectId=attacker-subject',
@@ -407,6 +476,15 @@ describe('Nest + Fastify API composition', () => {
     expect(authenticatedWithoutKey.headers['x-request-id']).toBe(
       'request-context-before-idempotency'
     );
+    expect(authenticatedWithoutPermission.statusCode).toBe(403);
+    expect(authenticatedWithoutPermission.json()).toEqual({
+      code: 'FORBIDDEN',
+      message: 'Missing required permissions: waybill.read',
+      detail: 'Missing required permissions: waybill.read',
+      details: [],
+      remediation: 'Request the required permissions from a tenant administrator.',
+      requestId: 'request-permission-before-context',
+    });
     expect(protectedRead.statusCode).toBe(200);
     expect(protectedRead.json().data.requestContext).toEqual({
       tenantId,
@@ -512,11 +590,88 @@ describe('Nest + Fastify API composition', () => {
     expect(loginExecutions).toBe(0);
   });
 
-  it('runs application shutdown hooks and closes the Fastify instance', async () => {
-    await app.close();
-    appClosed = true;
+  it('closes real owned database and health-probe clients during application shutdown', async () => {
+    const redisSockets = new Set<Socket>();
+    const objectStorageSockets = new Set<Socket>();
+    const redisServer = createTcpServer((socket) => {
+      redisSockets.add(socket);
+      socket.once('close', () => redisSockets.delete(socket));
+      socket.resume();
+    });
+    const objectStorageServer = createHttpServer();
+    objectStorageServer.on('connection', (socket) => {
+      objectStorageSockets.add(socket);
+      socket.once('close', () => objectStorageSockets.delete(socket));
+    });
+    await Promise.all([
+      new Promise<void>((resolveListen) => redisServer.listen(0, '127.0.0.1', resolveListen)),
+      new Promise<void>((resolveListen) =>
+        objectStorageServer.listen(0, '127.0.0.1', resolveListen)
+      ),
+    ]);
 
-    expect(shutdownCalls).toBe(1);
-    await expect(app.inject({ method: 'GET', url: '/api/v1/health/live' })).rejects.toThrow();
+    const redisAddress = redisServer.address();
+    const objectAddress = objectStorageServer.address();
+    if (!redisAddress || typeof redisAddress === 'string') throw new Error('Redis test port');
+    if (!objectAddress || typeof objectAddress === 'string') throw new Error('S3 test port');
+    process.env.REDIS_URL = `redis://127.0.0.1:${redisAddress.port}`;
+    process.env.S3_ENDPOINT = `http://127.0.0.1:${objectAddress.port}`;
+
+    let ownedApp: NestFastifyApplication | undefined;
+    let ownedAppClosed = false;
+    try {
+      const ownedModule = await Test.createTestingModule({ imports: [AppModule] }).compile();
+      ownedApp =
+        ownedModule.createNestApplication<NestFastifyApplication>(createApiFastifyAdapter());
+      await configureApiApplication(ownedApp, { enableShutdownHooks: false });
+      await ownedApp.init();
+      await ownedApp.getHttpAdapter().getInstance().ready();
+
+      const ownedProbes = ownedModule.get<readonly HealthProbe[]>(API_HEALTH_PROBES);
+      const pendingProbeChecks = ownedProbes
+        .filter((probe) => probe.name !== 'postgresql')
+        .map((probe) => probe.check(new AbortController().signal));
+      await waitFor(() => redisSockets.size === 1 && objectStorageSockets.size === 1);
+
+      await app.close();
+      appClosed = true;
+      await database.getDatabaseClient().execute(sql`SELECT 1`);
+      const [openBeforeShutdown] = await admin<{ count: string }[]>`
+        SELECT count(*)::text AS count
+        FROM pg_stat_activity
+        WHERE usename = ${appRole}
+      `;
+      expect(Number(openBeforeShutdown?.count)).toBeGreaterThan(0);
+
+      await ownedApp.close();
+      ownedAppClosed = true;
+      const probeResults = await Promise.allSettled(pendingProbeChecks);
+      await delay(100);
+      const [openAfterShutdown] = await admin<{ count: string }[]>`
+        SELECT count(*)::text AS count
+        FROM pg_stat_activity
+        WHERE usename = ${appRole}
+      `;
+
+      expect(probeResults.map((result) => result.status)).toEqual(['rejected', 'rejected']);
+      expect(openAfterShutdown?.count).toBe('0');
+      expect(redisSockets.size).toBe(0);
+      expect(objectStorageSockets.size).toBe(0);
+      expect(shutdownCalls).toBe(1);
+      await expect(app.inject({ method: 'GET', url: '/api/v1/health/live' })).rejects.toThrow();
+    } finally {
+      if (ownedApp && !ownedAppClosed) await ownedApp.close();
+      for (const socket of [...redisSockets, ...objectStorageSockets]) socket.destroy();
+      await Promise.all([
+        new Promise<void>((resolveClose, rejectClose) =>
+          redisServer.close((error) => (error ? rejectClose(error) : resolveClose()))
+        ),
+        new Promise<void>((resolveClose, rejectClose) =>
+          objectStorageServer.close((error) => (error ? rejectClose(error) : resolveClose()))
+        ),
+      ]);
+      process.env.REDIS_URL = 'redis://127.0.0.1:1';
+      process.env.S3_ENDPOINT = 'http://127.0.0.1:1';
+    }
   });
 });

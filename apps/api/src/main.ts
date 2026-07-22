@@ -9,6 +9,7 @@ import { createLogger } from '@zhili/observability';
 import { AppModule } from './app.module';
 
 export const API_BODY_LIMIT_BYTES = 1024 * 1024;
+export const API_GLOBAL_PREFIX = '/api/v1';
 
 export function createApiFastifyAdapter(): FastifyAdapter {
   return new FastifyAdapter({ bodyLimit: API_BODY_LIMIT_BYTES, logger: false });
@@ -20,7 +21,7 @@ export async function configureApiApplication(
 ): Promise<void> {
   await app.register(fastifyHelmet);
   await app.register(fastifyCookie);
-  app.setGlobalPrefix('api/v1');
+  app.setGlobalPrefix(API_GLOBAL_PREFIX);
   if (options.enableShutdownHooks !== false) app.enableShutdownHooks();
 }
 

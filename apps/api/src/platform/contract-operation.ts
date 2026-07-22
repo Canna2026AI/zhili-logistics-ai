@@ -1,5 +1,5 @@
 import { RequestMethod, SetMetadata, type CustomDecorator, type Type } from '@nestjs/common';
-import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants.js';
 import { DiscoveryService, MetadataScanner } from '@nestjs/core';
 import { IDEMPOTENT_COMMAND_METADATA_KEY } from './idempotency';
 

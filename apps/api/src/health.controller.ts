@@ -1,11 +1,12 @@
 import { Controller, Get, Inject, Res } from '@nestjs/common';
-import { sql } from 'drizzle-orm';
 import type { FastifyReply } from 'fastify';
+import { request as requestHttp, type ClientRequest } from 'node:http';
+import { request as requestHttps } from 'node:https';
 import { connect as connectTcp } from 'node:net';
 import { connect as connectTls } from 'node:tls';
+import postgres, { type PendingQuery, type Row, type Sql } from 'postgres';
 import { PublicRoute } from '@zhili/auth';
 import type { AppEnv } from '@zhili/config';
-import { getDatabaseClient } from '@zhili/db';
 import { ContractOperation } from './platform/contract-operation';
 
 export const API_HEALTH_PROBES = Symbol('API_HEALTH_PROBES');
@@ -13,7 +14,9 @@ export const API_READINESS_TIMEOUT_MS = Symbol('API_READINESS_TIMEOUT_MS');
 
 export interface HealthProbe {
   readonly name: string;
+  readonly drainAfterAbort?: boolean;
   check(signal: AbortSignal): Promise<void>;
+  close(): Promise<void>;
 }
 
 interface HealthDependencyResult {
@@ -60,35 +63,113 @@ export class HealthController {
 
 export function createDefaultHealthProbes(env: AppEnv): readonly HealthProbe[] {
   return [
-    {
-      name: 'postgresql',
-      check: async () => {
-        await getDatabaseClient().execute(sql`SELECT 1`);
-      },
-    },
-    {
-      name: 'redis',
-      check: (signal) => redisPing(env.REDIS_URL, signal),
-    },
-    {
-      name: 'objectStorage',
-      check: async (signal) => {
-        const endpoint = new URL(env.S3_ENDPOINT);
-        endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/minio/health/ready`;
-        const response = await fetch(endpoint, { method: 'GET', signal });
-        if (!response.ok) throw new Error('Object storage readiness request failed');
-      },
-    },
+    createPostgresHealthProbe(env),
+    createRedisHealthProbe(env.REDIS_URL),
+    createObjectStorageHealthProbe(env.S3_ENDPOINT),
   ];
+}
+
+export function createPostgresHealthProbe(env: AppEnv, statement = 'SELECT 1'): HealthProbe {
+  interface ActiveQuery {
+    readonly client: Sql;
+    readonly completion: Promise<void>;
+    readonly query: PendingQuery<Row[]>;
+  }
+
+  const active = new Set<ActiveQuery>();
+  let closed = false;
+  return {
+    name: 'postgresql',
+    drainAfterAbort: true,
+    check: async (signal) => {
+      if (closed) throw new Error('PostgreSQL readiness probe is closed');
+      const client = postgres(env.DATABASE_URL, {
+        connect_timeout: 1,
+        connection: { application_name: 'zhili-health-readiness' },
+        max: 1,
+      });
+      const query = client.unsafe<Row[]>(statement);
+      let completion!: Promise<void>;
+      const operation: ActiveQuery = {
+        client,
+        query,
+        completion: (completion = executePostgresQuery(client, query, signal).finally(() => {
+          active.delete(operation);
+        })),
+      };
+      active.add(operation);
+      return completion;
+    },
+    close: async () => {
+      closed = true;
+      const operations = [...active];
+      for (const operation of operations) {
+        operation.query.cancel();
+        void operation.client.end({ timeout: 0 });
+      }
+      await Promise.allSettled(operations.map((operation) => operation.completion));
+    },
+  };
+}
+
+function createRedisHealthProbe(url: string): HealthProbe {
+  const sockets = new Set<ReturnType<typeof connectTcp>>();
+  const completions = new Set<Promise<void>>();
+  let closed = false;
+  return {
+    name: 'redis',
+    check: (signal) => {
+      if (closed) return Promise.reject(new Error('Redis readiness probe is closed'));
+      const completion = redisPing(url, signal, sockets);
+      completions.add(completion);
+      void completion.then(
+        () => completions.delete(completion),
+        () => completions.delete(completion)
+      );
+      return completion;
+    },
+    close: async () => {
+      closed = true;
+      for (const socket of sockets) socket.destroy(new Error('Redis readiness probe is closing'));
+      await Promise.allSettled([...completions]);
+    },
+  };
+}
+
+function createObjectStorageHealthProbe(endpointValue: string): HealthProbe {
+  const requests = new Set<ClientRequest>();
+  const completions = new Set<Promise<void>>();
+  let closed = false;
+  return {
+    name: 'objectStorage',
+    check: (signal) => {
+      if (closed) return Promise.reject(new Error('Object storage readiness probe is closed'));
+      const completion = objectStorageReady(endpointValue, signal, requests);
+      completions.add(completion);
+      void completion.then(
+        () => completions.delete(completion),
+        () => completions.delete(completion)
+      );
+      return completion;
+    },
+    close: async () => {
+      closed = true;
+      for (const request of requests) {
+        request.destroy(new Error('Object storage readiness probe is closing'));
+      }
+      await Promise.allSettled([...completions]);
+    },
+  };
 }
 
 async function runProbe(probe: HealthProbe, timeoutMs: number): Promise<HealthDependencyResult> {
   const startedAt = performance.now();
   const controller = new AbortController();
   let timeout: NodeJS.Timeout | undefined;
+  const operation = Promise.resolve().then(() => probe.check(controller.signal));
   try {
     await Promise.race([
-      Promise.resolve().then(() => probe.check(controller.signal)),
+      operation,
       new Promise<never>((_, reject) => {
         timeout = setTimeout(() => {
           reject(new HealthProbeTimeoutError());
@@ -98,6 +179,17 @@ async function runProbe(probe: HealthProbe, timeoutMs: number): Promise<HealthDe
     ]);
     return { status: 'up', latencyMs: elapsedMilliseconds(startedAt) };
   } catch (error) {
+    if (error instanceof HealthProbeTimeoutError) {
+      const settledOperation = operation.catch(() => undefined);
+      if (probe.drainAfterAbort) {
+        await settledOperation;
+      } else {
+        await Promise.race([
+          settledOperation,
+          new Promise<void>((resolve) => setTimeout(resolve, Math.min(timeoutMs, 100))),
+        ]);
+      }
+    }
     return {
       status: 'down',
       latencyMs: elapsedMilliseconds(startedAt),
@@ -130,7 +222,29 @@ function elapsedMilliseconds(startedAt: number): number {
   return Math.max(0, Math.round(performance.now() - startedAt));
 }
 
-function redisPing(urlValue: string, signal: AbortSignal): Promise<void> {
+async function executePostgresQuery(
+  client: Sql,
+  query: PendingQuery<Row[]>,
+  signal: AbortSignal
+): Promise<void> {
+  const onAbort = () => {
+    query.cancel();
+  };
+  signal.addEventListener('abort', onAbort, { once: true });
+  if (signal.aborted) onAbort();
+  try {
+    await query;
+  } finally {
+    signal.removeEventListener('abort', onAbort);
+    await client.end({ timeout: 0 });
+  }
+}
+
+function redisPing(
+  urlValue: string,
+  signal: AbortSignal,
+  sockets: Set<ReturnType<typeof connectTcp>>
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const url = new URL(urlValue);
     const secure = url.protocol === 'rediss:';
@@ -147,6 +261,7 @@ function redisPing(urlValue: string, signal: AbortSignal): Promise<void> {
           servername: url.hostname,
         })
       : connectTcp({ host: url.hostname, port });
+    sockets.add(socket);
     let settled = false;
     let responseBuffer = '';
     let state: 'auth' | 'ping' = url.password ? 'auth' : 'ping';
@@ -154,6 +269,7 @@ function redisPing(urlValue: string, signal: AbortSignal): Promise<void> {
       if (settled) return;
       settled = true;
       signal.removeEventListener('abort', onAbort);
+      sockets.delete(socket);
       socket.destroy();
       if (error) reject(error);
       else resolve();
@@ -193,6 +309,36 @@ function redisPing(urlValue: string, signal: AbortSignal): Promise<void> {
       }
       finish(new Error('Unexpected Redis readiness response'));
     });
+  });
+}
+
+function objectStorageReady(
+  endpointValue: string,
+  signal: AbortSignal,
+  requests: Set<ClientRequest>
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const endpoint = new URL(endpointValue);
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/minio/health/ready`;
+    const request = (endpoint.protocol === 'https:' ? requestHttps : requestHttp)(
+      endpoint,
+      { agent: false, method: 'GET', signal },
+      (response) => {
+        response.once('error', reject);
+        response.once('end', () => {
+          if (response.statusCode && response.statusCode >= 200 && response.statusCode < 300) {
+            resolve();
+          } else {
+            reject(new Error('Object storage readiness request failed'));
+          }
+        });
+        response.resume();
+      }
+    );
+    requests.add(request);
+    request.once('error', reject);
+    request.once('close', () => requests.delete(request));
+    request.end();
   });
 }
 

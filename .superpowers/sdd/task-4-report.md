@@ -179,3 +179,64 @@ git diff --check
 - Object-storage readiness intentionally targets MinIO's `/minio/health/ready`, matching the foundation plan. A future non-MinIO S3 provider will need a provider-specific signed readiness adapter rather than exposing raw endpoint failures.
 - Coverage is automatic for every controller present in the composed Nest module supplied to the guard. Future feature modules must include that composed application coverage test when they are registered.
 - Expected unknown-500 e2e requests emit two redacted Pino error records containing only `{ type: "Error" }` and request IDs; the secret-bearing exception text is absent.
+
+## Post-review Fix Report (2026-07-22)
+
+This section supersedes the earlier final counts where the review fixes added coverage.
+
+### Review RED evidence
+
+- The OpenAPI guard was changed first to compile the real `AppModule` / `registerFeatureModule(...)` composition and consume the same exported global-prefix constant as bootstrap. A temporary prefix drift produced the expected `5 failed, 2 passed` coverage result before the shared constant restored GREEN.
+- Real PostgreSQL cancellation and object-storage body-completion assertions initially produced `2 failed, 9 passed`: the PostgreSQL probe was not implemented and the object-storage response resolved before its body completed.
+- The new authorization-order assertion initially received `200` instead of the required `403`, proving the existing test hook could not express an authenticated principal without the required permission.
+- The first owned-client shutdown assertion timed out at 30 seconds. Directly destroying Redis and object-storage handles did not settle their tracked completion promises; shutdown waited forever.
+- The production artifact assertion first found `start: tsx dist/main.js`, then exposed two real Node ESM failures while hardening the build: an extensionless Nest internal import and bundled Pino dynamic `require`. The final artifact avoids both.
+- A concurrent final run caught a cancellation race with one `pg_sleep` backend still active after the readiness response. PostgreSQL probes now mark cancellation as drain-required, wait for the server-confirmed query rejection, and only then return the timeout response. The targeted cancellation test also passed while the database integration suite ran concurrently.
+
+### Review fixes
+
+- OpenAPI discovery now compiles the actual application module graph; fixture controllers enter through the production feature-module composition path. Bootstrap and coverage both use `API_GLOBAL_PREFIX`.
+- PostgreSQL readiness owns a cancellable one-shot client per check, labels it with `application_name=zhili-health-readiness`, cancels on `AbortSignal`, drains the cancellation before returning, and closes all active operations during application shutdown.
+- Redis and object-storage probes track owned handles and completions. Object-storage readiness consumes the full response body, while shutdown rejects and drains pending network work instead of hanging.
+- The real guard/interceptor pipeline now proves the ordered `401`, `403`, `400`, and successful protected-read cases. The final lifecycle test starts live TCP/HTTP probe connections plus a real application-role PostgreSQL connection, closes the Nest applications, and proves all owned clients are gone without a manual database close in `afterAll`.
+- Production `start` is `node dist/main.js`. Runtime `drizzle-orm`, `postgres`, and externalized `pino` are production dependencies. The build preserves TypeScript decorator metadata, bundles workspace sources into a Node 22 ESM artifact, and removes its temporary compiler output.
+- `production-start.e2e.test.ts` builds, creates a `pnpm deploy --prod` tree with injected workspace packages, proves `tsx` is absent while runtime database packages are present, boots the artifact, calls `/api/v1/health/live`, and terminates it through Nest's signal lifecycle.
+
+### Fresh post-review verification
+
+```text
+pnpm --filter @zhili/api typecheck
+# exit 0
+
+pnpm --filter @zhili/api lint
+# exit 0
+
+pnpm --filter @zhili/api test
+# 2 files passed; 55 tests passed
+
+pnpm --filter @zhili/api build
+# exit 0; Node 22 ESM production artifact emitted
+
+pnpm --filter @zhili/api test:e2e
+# 3 files passed; 19 tests passed
+
+pnpm --filter @zhili/db test:integration
+# 2 files passed; 12 tests passed
+
+pnpm --filter @zhili/api test:integration
+# 1 file passed; 21 tests passed
+
+pnpm contracts:generate:check
+# generated diff check exited 0
+
+pnpm contracts:lint
+# OpenAPI valid; exit 0
+
+pnpm contracts:test
+# 1 file passed; 13 tests passed
+
+git diff --check
+# exit 0
+```
+
+No known Critical or Important review concern remains. The production artifact intentionally targets Node 22, matching the repository engine constraint.

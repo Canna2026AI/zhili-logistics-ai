@@ -1,4 +1,10 @@
-import { Module, type DynamicModule, type OnApplicationShutdown, type Type } from '@nestjs/common';
+import {
+  Inject,
+  Module,
+  type DynamicModule,
+  type OnApplicationShutdown,
+  type Type,
+} from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR, DiscoveryModule, Reflector } from '@nestjs/core';
 import { AuthenticatedPrincipalGuard, PermissionGuard } from '@zhili/auth';
 import { loadEnv, type AppEnv } from '@zhili/config';
@@ -8,6 +14,7 @@ import {
   API_READINESS_TIMEOUT_MS,
   HealthController,
   createDefaultHealthProbes,
+  type HealthProbe,
 } from './health.controller';
 import { IdempotencyInterceptor } from './platform/idempotency';
 import { ProblemFilter } from './platform/problem-filter';
@@ -16,8 +23,14 @@ import { RequestContextInterceptor } from './platform/request-context';
 export const API_ENV = Symbol('API_ENV');
 
 class ApiLifecycle implements OnApplicationShutdown {
+  constructor(@Inject(API_HEALTH_PROBES) private readonly healthProbes: readonly HealthProbe[]) {}
+
   async onApplicationShutdown(): Promise<void> {
-    await closeDatabaseClient();
+    try {
+      await Promise.all(this.healthProbes.map((probe) => probe.close()));
+    } finally {
+      await closeDatabaseClient();
+    }
   }
 }
 
