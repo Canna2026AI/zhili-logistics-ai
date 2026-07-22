@@ -6,6 +6,43 @@
 -- This proposal intentionally contains PostgreSQL DDL only; the root integration branch owns
 -- Drizzle schema generation and the ordered B1 migration.
 
+-- Migration-history compatibility: installations that already recorded the published R2
+-- foundation will not rerun its newer provisioning statements. B1 therefore prepares the same
+-- persistent prerequisites only when absent and never alters existing role attributes or owners.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_auth') THEN
+    CREATE ROLE zhili_auth
+      NOLOGIN
+      NOSUPERUSER
+      NOCREATEDB
+      NOCREATEROLE
+      NOINHERIT
+      NOREPLICATION
+      NOBYPASSRLS;
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_control_plane') THEN
+    CREATE ROLE zhili_control_plane
+      NOLOGIN
+      NOSUPERUSER
+      NOCREATEDB
+      NOCREATEROLE
+      NOINHERIT
+      NOREPLICATION
+      NOBYPASSRLS;
+  END IF;
+END
+$$;
+
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+GRANT USAGE ON SCHEMA public TO zhili_auth, zhili_control_plane;
+
 CREATE TABLE tenants (
   id text PRIMARY KEY,
   slug text NOT NULL,
