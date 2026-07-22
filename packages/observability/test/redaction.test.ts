@@ -76,4 +76,25 @@ describe('redact', () => {
       msg: 'request completed',
     });
   });
+
+  it.each([
+    ['Chinese mobile', 'contact 13926548800', 'contact 139****8800'],
+    ['Authorization', 'Authorization: Bearer secret', 'Authorization: [REDACTED]'],
+    ['Cookie', 'Cookie: session=secret', 'Cookie: [REDACTED]'],
+    ['secret', 'secret=top-secret', 'secret=[REDACTED]'],
+    ['address', 'address: 广东省深圳市南山区科技园', 'address: [REDACTED]'],
+  ])('redacts standalone %s messages before emission', (_label, message, expectedMessage) => {
+    const lines: string[] = [];
+    const destination = new Writable({
+      write(chunk, _encoding, callback) {
+        lines.push(chunk.toString());
+        callback();
+      },
+    });
+    const logger = createLogger({ level: 'info' }, destination);
+
+    logger.info(message);
+
+    expect(JSON.parse(lines[0] ?? '{}')).toMatchObject({ msg: expectedMessage });
+  });
 });

@@ -2,6 +2,7 @@ import pino, {
   type DestinationStream,
   type Logger,
   type LoggerOptions,
+  type LogFn,
   type SerializerFn,
 } from 'pino';
 import { redact } from './redaction';
@@ -29,12 +30,32 @@ export function createLogger(
   options: LoggerOptions = {},
   destination?: DestinationStream
 ): Logger {
-  const { formatters: suppliedFormatters, serializers: suppliedSerializers, ...pinoOptions } = options;
+  const {
+    formatters: suppliedFormatters,
+    hooks: suppliedHooks,
+    serializers: suppliedSerializers,
+    ...pinoOptions
+  } = options;
 
   return pino(
     {
       ...pinoOptions,
       serializers: { ...suppliedSerializers, ...redactingSerializers },
+      hooks: {
+        ...suppliedHooks,
+        logMethod(args, method, level) {
+          const redactedArgs = args.map((argument) =>
+            typeof argument === 'string' ? redact(argument) : argument
+          ) as Parameters<LogFn>;
+
+          if (suppliedHooks?.logMethod) {
+            suppliedHooks.logMethod.call(this, redactedArgs, method, level);
+            return;
+          }
+
+          method.apply(this, redactedArgs);
+        },
+      },
       formatters: {
         ...suppliedFormatters,
         bindings(bindings) {

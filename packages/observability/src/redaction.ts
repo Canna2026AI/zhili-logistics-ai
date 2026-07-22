@@ -16,6 +16,9 @@ const SENSITIVE_KEY_NAMES = new Set([
 
 const ADDRESS_KEY_PATTERN = /(?:address|addr|street|location|地址)/i;
 const CHINESE_MOBILE_PATTERN = /(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)/g;
+const SENSITIVE_MESSAGE_PATTERN =
+  /\b(authorization|cookie|password|secret|token|api[ _-]?key|access[ _-]?key|session[ _-]?key|envelope[ _-]?master[ _-]?key)\b\s*([:=])(\s*)(?:Bearer\s+)?[^\s,;]+/gi;
+const ADDRESS_MESSAGE_PATTERN = /\b(address|addr|street|location)\b\s*([:=])\s*[^,;\n]+|地址\s*([:=])\s*[^,;\n]+/gi;
 
 export const redactedValue = '[REDACTED]';
 
@@ -33,7 +36,7 @@ function redactValue(value: unknown, key: string | undefined, seen: WeakMap<obje
   }
 
   if (typeof value === 'string') {
-    return value.replace(CHINESE_MOBILE_PATTERN, '$1****$2');
+    return redactMessage(value);
   }
 
   if (Array.isArray(value)) {
@@ -65,6 +68,18 @@ function redactValue(value: unknown, key: string | undefined, seen: WeakMap<obje
     clone[childKey] = redactValue(childValue, childKey, seen);
   }
   return clone;
+}
+
+function redactMessage(value: string): string {
+  return value
+    .replace(SENSITIVE_MESSAGE_PATTERN, '$1$2$3[REDACTED]')
+    .replace(ADDRESS_MESSAGE_PATTERN, (match, latinKey, latinSeparator, chineseSeparator) => {
+      if (latinKey) {
+        return `${latinKey}${latinSeparator} ${redactedValue}`;
+      }
+      return `地址${chineseSeparator} ${redactedValue}`;
+    })
+    .replace(CHINESE_MOBILE_PATTERN, '$1****$2');
 }
 
 function isSensitiveKey(key: string): boolean {
