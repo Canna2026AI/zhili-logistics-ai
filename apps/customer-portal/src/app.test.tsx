@@ -15,6 +15,184 @@ afterEach(() => {
 });
 
 describe('客户门户', () => {
+  it('折叠菜单提供十个页面、隔离背景并在 Escape 后恢复触发点焦点', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+    const trigger = screen.getByRole('button', { name: '折叠菜单' });
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await user.click(trigger);
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(container.querySelector('.portal-content')).toHaveAttribute('inert');
+    const drawer = screen.getByRole('dialog', { name: '客户门户菜单' });
+    const drawerNavigation = within(drawer).getByRole('navigation', {
+      name: '移动端完整导航',
+    });
+    expect(within(drawerNavigation).getAllByRole('button')).toHaveLength(10);
+    for (const destination of [
+      '工作台',
+      '新建运单',
+      '批量导入',
+      '查价',
+      '我的运单',
+      '轨迹查询',
+      '账单与付款',
+      '问题工单',
+      '地址簿',
+      'API',
+    ]) {
+      expect(within(drawerNavigation).getByRole('button', { name: destination })).toBeVisible();
+    }
+    expect(within(drawer).getByRole('button', { name: '关闭' })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: '客户门户菜单' })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveFocus();
+    expect(container.querySelector('.portal-content')).not.toHaveAttribute('inert');
+  });
+
+  it('折叠菜单选择移动端专属页面后关闭并进入真实页面', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '折叠菜单' }));
+    await user.click(
+      within(screen.getByRole('navigation', { name: '移动端完整导航' })).getByRole('button', {
+        name: 'API',
+      })
+    );
+
+    expect(screen.queryByRole('dialog', { name: '客户门户菜单' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'API 申请' })).toBeVisible();
+  });
+
+  it('全局搜索点击 canonical 运单结果进入对应轨迹对象', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const search = screen.getByRole('combobox', { name: '全局搜索' });
+
+    await user.type(search, 'S2505120004');
+    expect(search).toHaveAttribute('aria-expanded', 'true');
+    const results = screen.getByRole('listbox', { name: '全局搜索结果' });
+    expect(within(results).getByRole('option', { name: /运单 S2505120004/ })).toHaveTextContent(
+      'HBL2505120004'
+    );
+    await user.click(within(results).getByRole('option', { name: /运单 S2505120004/ }));
+
+    expect(screen.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
+    expect(screen.getByText('S2505120004')).toBeVisible();
+    expect(search).toHaveValue('');
+    expect(search).toHaveAttribute('aria-expanded', 'false');
+    expect(search).toHaveFocus();
+  });
+
+  it('全局搜索支持键盘选择结果并提交到第二个真实运单', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const search = screen.getByRole('combobox', { name: '全局搜索' });
+
+    await user.type(search, 'S250512000');
+    await user.keyboard('{ArrowDown}{Enter}');
+
+    expect(screen.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
+    expect(screen.getByText('S2505120002')).toBeVisible();
+    expect(search).toHaveFocus();
+  });
+
+  it('全局搜索使用单一虚拟焦点并在 Tab 边界关闭结果', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const search = screen.getByRole('combobox', { name: '全局搜索' });
+
+    await user.type(search, 'S250512000');
+    const results = screen.getByRole('listbox', { name: '全局搜索结果' });
+    const options = within(results).getAllByRole('option');
+    expect(options).toHaveLength(5);
+    for (const option of options) expect(option).toHaveAttribute('tabindex', '-1');
+    expect(search).toHaveFocus();
+    expect(search).toHaveAttribute('aria-activedescendant', options[0]?.id);
+
+    await user.keyboard('{ArrowDown}');
+    expect(search).toHaveFocus();
+    expect(search).toHaveAttribute('aria-activedescendant', options[1]?.id);
+    expect(options[1]).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{ArrowUp}{ArrowUp}');
+    expect(search).toHaveAttribute('aria-activedescendant', options[0]?.id);
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}');
+    expect(search).toHaveAttribute('aria-activedescendant', options[4]?.id);
+    await user.keyboard('{ArrowDown}');
+    expect(search).toHaveAttribute('aria-activedescendant', options[4]?.id);
+
+    await user.tab();
+    expect(screen.queryByRole('listbox', { name: '全局搜索结果' })).not.toBeInTheDocument();
+    expect(search).not.toHaveAttribute('aria-activedescendant');
+    expect(screen.getByLabelText('演示状态')).toHaveFocus();
+    expect(options.every((option) => option !== document.activeElement)).toBe(true);
+
+    await user.click(search);
+    expect(screen.getByRole('listbox', { name: '全局搜索结果' })).toBeVisible();
+    await user.tab({ shift: true });
+    expect(screen.queryByRole('listbox', { name: '全局搜索结果' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '折叠菜单' })).toHaveFocus();
+  });
+
+  it('全局搜索在外部点击时关闭且不把焦点留给结果选项', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const search = screen.getByRole('combobox', { name: '全局搜索' });
+
+    await user.type(search, 'S2505120004');
+    expect(screen.getByRole('listbox', { name: '全局搜索结果' })).toBeVisible();
+    await user.click(screen.getByRole('heading', { name: /下午好/ }));
+
+    expect(screen.queryByRole('listbox', { name: '全局搜索结果' })).not.toBeInTheDocument();
+    expect(document.activeElement).not.toHaveAttribute('role', 'option');
+  });
+
+  it('全局搜索不返回当前无法恢复详情的报价对象', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const search = screen.getByRole('combobox', { name: '全局搜索' });
+
+    await user.type(search, 'Q2505120042');
+    expect(screen.getByRole('listbox', { name: '全局搜索结果' })).toBeEmptyDOMElement();
+    expect(screen.getByRole('status', { name: '全局搜索状态' })).toHaveTextContent(
+      '未找到匹配结果'
+    );
+    expect(screen.queryByRole('option', { name: /Q2505120042/ })).not.toBeInTheDocument();
+  });
+
+  it('全局搜索呈现零结果并允许 Escape 关闭而保留受控查询', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const search = screen.getByRole('combobox', { name: '全局搜索' });
+
+    await user.type(search, 'NOT-A-CUSTOMER-RECORD');
+    expect(screen.getByRole('status', { name: '全局搜索状态' })).toHaveTextContent(
+      '未找到匹配结果'
+    );
+    expect(screen.getByRole('listbox', { name: '全局搜索结果' })).toBeEmptyDOMElement();
+    expect(search).toHaveAttribute('aria-controls', 'customer-global-search-results');
+    expect(search).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('status', { name: '全局搜索状态' })).not.toBeInTheDocument();
+    expect(search).toHaveAttribute('aria-expanded', 'false');
+    expect(search).toHaveValue('NOT-A-CUSTOMER-RECORD');
+    expect(search).toHaveFocus();
+  });
+
+  it('无权限状态禁用完整导航和全局搜索而不暴露结果', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.selectOptions(screen.getByLabelText('演示状态'), 'forbidden');
+
+    expect(screen.getByRole('button', { name: '折叠菜单' })).toBeDisabled();
+    expect(screen.getByRole('combobox', { name: '全局搜索' })).toBeDisabled();
+    expect(screen.queryByRole('listbox', { name: '全局搜索结果' })).not.toBeInTheDocument();
+  });
+
   it('工作台提供工单、通知、付款凭证和在线客服入口', () => {
     render(<App />);
     expect(screen.getByRole('heading', { name: '最近工单' })).toBeVisible();

@@ -1,5 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { Button, Dialog, StatusTag } from '@zhili/ui';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
 import { customerPort, type OrderInput, type QuoteResult, type VersionDifference } from './api';
 
 type Page =
@@ -28,6 +28,28 @@ const navigation: Page[] = [
   'API',
 ];
 
+const navigationContext: Record<Page, string> = {
+  工作台: '客户工作台与快捷操作',
+  新建运单: '创建运输订单与保存草稿',
+  批量导入: '上传 CSV 或 Excel 运单',
+  查价: '多渠道报价与规则版本',
+  我的运单: '当前企业运单列表',
+  轨迹查询: '运单事件与来源时间线',
+  账单与付款: '账单、预存款与付款记录',
+  问题工单: '客户可见问题与补充资料',
+  地址簿: '当前企业联系人地址',
+  API: '最小权限 API 申请',
+};
+
+type SearchResult = {
+  id: string;
+  type: '页面' | '运单' | '工单' | '账单' | '付款' | '地址';
+  label: string;
+  context: string;
+  page: Page;
+  waybillNo?: string;
+};
+
 type WaybillRow = [string, string, string, string, string, string, string];
 const waybillSeed: WaybillRow[] = [
   ['S2505120001', 'HBL2505120001', '运输中', '英国/洛杉矶', '20', '12,340.50', '在港装船'],
@@ -43,6 +65,13 @@ const readRows = (key: string) => {
     return JSON.parse(localStorage.getItem(key) ?? '') as WaybillRow[];
   } catch {
     return waybillSeed;
+  }
+};
+const readStringList = (key: string, fallback: string[]) => {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? JSON.stringify(fallback)) as string[];
+  } catch {
+    return fallback;
   }
 };
 
@@ -1100,6 +1129,13 @@ function CustomerPortalApp({
   const [differences, setDifferences] = useState<VersionDifference[]>([]);
   const [recovering, setRecovering] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeSearchResult, setActiveSearchResult] = useState(0);
+  const searchFormRef = useRef<HTMLFormElement>(null);
+  const searchResultsRef = useRef<HTMLDivElement>(null);
+  const activeSearchOptionRef = useRef<HTMLButtonElement>(null);
   const [rows, setRows] = useState<WaybillRow[]>(() => readRows(waybillsKey));
   const [paymentCreated, setPaymentCreated] = useState(
     () => localStorage.getItem(paymentKey) === 'created'
@@ -1109,12 +1145,108 @@ function CustomerPortalApp({
   useEffect(() => {
     if (paymentCreated) localStorage.setItem(paymentKey, 'created');
   }, [paymentCreated, paymentKey]);
-
+  useEffect(() => {
+    if (!searchOpen) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (searchFormRef.current?.contains(event.target as Node)) return;
+      setSearchOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+  }, [searchOpen]);
   const navigate = (next: Page) => {
     setPage(next);
     setScenario('normal');
     setRecoveryMessage('');
     setDifferences([]);
+    setMobileNavigationOpen(false);
+    setSearchOpen(false);
+  };
+  const searchIndex: SearchResult[] = [
+    ...navigation.map((item) => ({
+      id: `page-${item}`,
+      type: '页面' as const,
+      label: item,
+      context: navigationContext[item],
+      page: item,
+    })),
+    ...rows.map((row): SearchResult => ({
+      id: `waybill-${row[0]}`,
+      type: '运单',
+      label: row[0],
+      context: `${row[1]} · ${row[2]} · ${row[3]} · ${row[6]}`,
+      page: '轨迹查询',
+      waybillNo: row[0],
+    })),
+    {
+      id: 'issue-T250512001',
+      type: '工单',
+      label: 'T250512001',
+      context: '运单延误咨询 · 处理中',
+      page: '问题工单',
+    },
+    {
+      id: 'issue-T250511008',
+      type: '工单',
+      label: 'T250511008',
+      context: '发票未收到 · 处理中',
+      page: '问题工单',
+    },
+    {
+      id: 'statement-ST202605-0008',
+      type: '账单',
+      label: 'ST202605-0008',
+      context: '2026-05 · CNY 5,320.00 · 待付款 CNY 2,320.00',
+      page: '账单与付款',
+    },
+    ...(paymentCreated
+      ? [
+          {
+            id: 'payment-PAY-20260512-01',
+            type: '付款' as const,
+            label: 'PAY-20260512-01',
+            context: 'ST202605-0008 · 微信支付 · CNY 2,320.00 · 待支付',
+            page: '账单与付款' as const,
+          },
+        ]
+      : []),
+    ...readStringList(addressesKey, ['深圳南山发货仓']).map((address, index): SearchResult => ({
+      id: `address-${index}-${address}`,
+      type: '地址',
+      label: address,
+      context: `${companyName} · 当前企业地址簿`,
+      page: '地址簿',
+    })),
+  ];
+  const normalizedSearchQuery = searchQuery.trim().toLocaleLowerCase('zh-CN');
+  const searchResults = normalizedSearchQuery
+    ? searchIndex.filter((result) =>
+        `${result.type} ${result.label} ${result.context}`
+          .toLocaleLowerCase('zh-CN')
+          .includes(normalizedSearchQuery)
+      )
+    : [];
+  const activeSearchResultId = searchResults[activeSearchResult]?.id;
+  useLayoutEffect(() => {
+    if (!searchOpen || !activeSearchResultId) return;
+    const listbox = searchResultsRef.current;
+    const option = activeSearchOptionRef.current;
+    if (!listbox || !option) return;
+    const listboxRect = listbox.getBoundingClientRect();
+    const optionRect = option.getBoundingClientRect();
+    if (optionRect.top < listboxRect.top) {
+      listbox.scrollTop = Math.max(
+        0,
+        listbox.scrollTop - Math.ceil(listboxRect.top - optionRect.top)
+      );
+    } else if (optionRect.bottom > listboxRect.bottom) {
+      listbox.scrollTop += Math.ceil(optionRect.bottom - listboxRect.bottom);
+    }
+  }, [activeSearchResultId, searchOpen]);
+  const selectSearchResult = (result: SearchResult) => {
+    if (result.waybillNo) setTrackingNo(result.waybillNo);
+    setSearchQuery('');
+    navigate(result.page);
   };
   const recover = async () => {
     setRecovering(true);
@@ -1247,7 +1379,7 @@ function CustomerPortalApp({
 
   return (
     <div className="portal-shell">
-      <aside className="portal-sidebar">
+      <aside className="portal-sidebar" inert={mobileNavigationOpen}>
         <div className="portal-brand">
           <span>智</span>智立科技物流AI系统
         </div>
@@ -1256,6 +1388,7 @@ function CustomerPortalApp({
             <button
               key={item}
               data-active={page === item || undefined}
+              aria-current={page === item ? 'page' : undefined}
               disabled={scenario !== 'normal'}
               onClick={() => navigate(item)}
             >
@@ -1274,18 +1407,125 @@ function CustomerPortalApp({
           </div>
         </div>
       </aside>
-      <div className="portal-content">
+      <div className="portal-content" inert={mobileNavigationOpen}>
         <header>
-          <button className="portal-menu" aria-label="折叠菜单">
+          <button
+            className="portal-menu"
+            aria-label="折叠菜单"
+            aria-haspopup="dialog"
+            aria-controls="customer-mobile-navigation"
+            aria-expanded={mobileNavigationOpen}
+            disabled={scenario !== 'normal'}
+            onClick={() => setMobileNavigationOpen(true)}
+          >
             ☰
           </button>
-          <input aria-label="全局搜索" placeholder="运单号 / 主运单号 / 参考号" />
+          <form
+            ref={searchFormRef}
+            className="portal-global-search"
+            role="search"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const result = searchResults[activeSearchResult] ?? searchResults[0];
+              if (result) selectSearchResult(result);
+            }}
+          >
+            <input
+              role="combobox"
+              type="search"
+              aria-label="全局搜索"
+              aria-autocomplete="list"
+              aria-controls="customer-global-search-results"
+              aria-expanded={Boolean(searchOpen && normalizedSearchQuery)}
+              aria-activedescendant={
+                searchOpen && searchResults.length
+                  ? `customer-search-result-${searchResults[activeSearchResult]?.id ?? searchResults[0]?.id}`
+                  : undefined
+              }
+              autoComplete="off"
+              placeholder="搜索页面或业务记录"
+              value={searchQuery}
+              disabled={scenario !== 'normal'}
+              onFocus={() => {
+                if (normalizedSearchQuery) setSearchOpen(true);
+              }}
+              onChange={(event) => {
+                setSearchQuery(event.target.value);
+                setActiveSearchResult(0);
+                setSearchOpen(Boolean(event.target.value.trim()));
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  setSearchOpen(false);
+                  return;
+                }
+                if (event.key === 'Tab') {
+                  setSearchOpen(false);
+                  return;
+                }
+                if (!searchResults.length) return;
+                if (event.key === 'ArrowDown') {
+                  event.preventDefault();
+                  setSearchOpen(true);
+                  setActiveSearchResult((current) =>
+                    Math.min(current + 1, searchResults.length - 1)
+                  );
+                } else if (event.key === 'ArrowUp') {
+                  event.preventDefault();
+                  setSearchOpen(true);
+                  setActiveSearchResult((current) => Math.max(current - 1, 0));
+                }
+              }}
+            />
+            {searchOpen && normalizedSearchQuery ? (
+              <div className="portal-search-surface">
+                <div
+                  ref={searchResultsRef}
+                  id="customer-global-search-results"
+                  className="portal-search-results"
+                  role="listbox"
+                  aria-label="全局搜索结果"
+                >
+                  {searchResults.map((result, index) => (
+                    <button
+                      key={result.id}
+                      ref={index === activeSearchResult ? activeSearchOptionRef : undefined}
+                      id={`customer-search-result-${result.id}`}
+                      type="button"
+                      role="option"
+                      tabIndex={-1}
+                      aria-selected={index === activeSearchResult}
+                      onMouseEnter={() => setActiveSearchResult(index)}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => selectSearchResult(result)}
+                    >
+                      <strong>
+                        {result.type} {result.label}
+                      </strong>
+                      <span>{result.context}</span>
+                    </button>
+                  ))}
+                </div>
+                {searchResults.length === 0 ? (
+                  <p className="portal-search-empty" role="status" aria-label="全局搜索状态">
+                    未找到匹配结果
+                    <span>请检查运单号、业务编号或页面名称。</span>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+          </form>
           <label className="portal-scenario">
             演示状态
             <select
               aria-label="演示状态"
               value={scenario}
-              onChange={(event) => setScenario(event.target.value as Scenario)}
+              onChange={(event) => {
+                setScenario(event.target.value as Scenario);
+                setMobileNavigationOpen(false);
+                setSearchOpen(false);
+              }}
             >
               <option value="normal">正常</option>
               <option value="loading">加载</option>
@@ -1350,7 +1590,34 @@ function CustomerPortalApp({
           <span>账单 ST202605-0008 · 仅核销本企业物流账单</span>
         </div>
       </Dialog>
-      <nav className="portal-mobile-nav" aria-label="移动端导航">
+      <Drawer
+        open={mobileNavigationOpen}
+        title="客户门户菜单"
+        size={480}
+        onOpenChange={setMobileNavigationOpen}
+      >
+        <nav
+          id="customer-mobile-navigation"
+          className="portal-mobile-drawer-nav"
+          aria-label="移动端完整导航"
+        >
+          {navigation.map((item) => (
+            <button
+              key={item}
+              type="button"
+              data-active={page === item || undefined}
+              aria-label={item}
+              aria-current={page === item ? 'page' : undefined}
+              disabled={scenario !== 'normal'}
+              onClick={() => navigate(item)}
+            >
+              <strong>{item}</strong>
+              <span>{navigationContext[item]}</span>
+            </button>
+          ))}
+        </nav>
+      </Drawer>
+      <nav className="portal-mobile-nav" aria-label="移动端导航" inert={mobileNavigationOpen}>
         {(['工作台', '新建运单', '我的运单', '账单与付款', '问题工单'] as Page[]).map((item) => (
           <button key={item} disabled={scenario !== 'normal'} onClick={() => navigate(item)}>
             {item === '工作台'
