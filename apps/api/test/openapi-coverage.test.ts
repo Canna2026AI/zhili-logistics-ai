@@ -36,6 +36,11 @@ class CoveredFeatureController {
   @ContractOperation('loginWithPassword')
   @SkipIdempotency()
   loginWithPassword(): void {}
+
+  @Post('auth/sessions:refresh')
+  @ContractOperation('refreshSession')
+  @SkipIdempotency()
+  refreshSession(): void {}
 }
 
 @Module({ controllers: [CoveredFeatureController] })
@@ -119,6 +124,12 @@ describe('OpenAPI controller coverage guard', () => {
         method: 'POST',
         path: `${API_GLOBAL_PREFIX}/auth/password/sessions`,
         operationId: 'loginWithPassword',
+        idempotency: false,
+      },
+      {
+        method: 'POST',
+        path: `${API_GLOBAL_PREFIX}/auth/sessions:refresh`,
+        operationId: 'refreshSession',
         idempotency: false,
       },
     ]);

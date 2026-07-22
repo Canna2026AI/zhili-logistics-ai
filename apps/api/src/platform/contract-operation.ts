@@ -134,7 +134,7 @@ function implementedPath(globalPrefix: string, controllerPath: string, methodPat
     .map((part) => part.replace(/^\/+|\/+$/g, ''))
     .filter(Boolean)
     .join('/');
-  return `/${joined}`.replace(/:([A-Za-z0-9_]+)/g, '{$1}');
+  return `/${joined}`.replace(/(^|\/):([A-Za-z0-9_]+)/g, '$1{$2}');
 }
 
 function openApiServerPrefix(openApi: Record<string, unknown>): string {
