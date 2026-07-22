@@ -32,7 +32,16 @@ pnpm install --frozen-lockfile
 pnpm dev:ops
 ```
 
-五端默认端口为运营端 `4100`、客户门户 `4101`、PDA `4102`、平台端 `4103`、官网 `4104`；Storybook 使用 `6006`。完整质量门槛：
+五端预览入口：
+
+- 运营端：`http://127.0.0.1:4100/`
+- 客户门户：`http://127.0.0.1:4101/`
+- PDA 交互演示：`http://127.0.0.1:4102/?mock=1`
+- SaaS 平台端：`http://127.0.0.1:4103/`
+- 官网：`http://127.0.0.1:4104/zhili-logistics-ai/`
+
+PDA 不带 `?mock=1` 时会按生产安全策略连接同源 `/api/v1`，不会静默回退到假数据；
+Storybook 使用 `6006`。完整质量门槛：
 
 ```bash
 pnpm format:check

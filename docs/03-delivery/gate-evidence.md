@@ -7,8 +7,8 @@
 | 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题 | 无                                                                                 |
 | 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过  | 无                                                                                 |
 | Figma 同步   | IN_PROGRESS | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、19 个五端画布和 19 个原型热点     | 物流专用组件、10 条 Flow 全分支、独立复审待完成；Code Connect 受方案与发布条件阻塞 |
-| 前端         | PASSED      | `24f04b4`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过 | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                                 |
-| 后端         | OPEN        | —                        | 待 API、DB、Worker、RLS 和集成报告                                           | 前端门槛已通过；下一波从 Backend Foundation 开始                                   |
+| 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过 | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                                 |
+| 后端         | IN_PROGRESS | `5cb423d`                | Foundation API/DB/Worker/RLS/Compose 已合并并通过独立 0 C/I/M 审查与主分支门禁 | B1 三个领域工作树正在先行产出统一迁移所需的 schema proposals                       |
 | 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                          | 前置门槛未通过                                                                     |
 
 ## UI 门槛与 B 方案决策
@@ -87,3 +87,11 @@ Code Connect 当前是明确的外部门槛：Pro 方案与未发布的本地组
 - Customer 删除不可恢复的假报价，并覆盖 APG 虚拟焦点、Tab/Shift+Tab、Escape、外部点击、零结果、focus restore 与 forbidden 状态；Platform 覆盖实时公告与代入审计搜索索引。
 - 合入 main 后执行 frozen install、Prettier、Markdownlint、18 包 lint/typecheck/build 和 27 个 Turbo test/build 任务，全部退出码 0。
 - 合并后 Playwright 为 41/41，通过 Ops、Customer、PDA、Platform、Website 与共享 axe；Customer Vitest 33/33、Platform Vitest 17/17。
+
+## 2026-07-22 五端交互复验与后端基础合并证据
+
+- 五端开发服务固定绑定 `127.0.0.1:4100`–`4104`；浏览器逐端执行运营新建预报、客户新建运单、PDA 设备绑定与扫码入队、平台租户详情、官网登录弹窗，浏览器控制台无 error/warning。
+- PDA 默认入口连接同源生产 `/api/v1` 并在后端未启动时明确返回 404；交互预览使用显式 DEV `?mock=1`，不会把生产失败静默伪装成内存成功。
+- 复用现有五端服务执行 `pnpm e2e`，41/41 通过；包含五端、移动端、PDA 离线/PWA、权限、安全状态和 axe。
+- 后端基础分支经独立终审为 0 Critical / 0 Important / 0 Minor，合入主分支提交 `5cb423d`；合并后 `pnpm format:check`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 全部退出码 0。
+- 后端基础证据保存在 `.superpowers/sdd/task-6-report.md`；Compose 提供 PostgreSQL、Redis、MinIO、API、Worker、迁移、RLS、幂等、审计与 Outbox 冷启动/恢复验收。B1 仍在进行，因此后端总门槛不提前标记 `PASSED`。
