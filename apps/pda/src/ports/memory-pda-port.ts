@@ -51,6 +51,122 @@ function readScope(value: unknown): TakeoverScope | undefined {
   return { deviceId, tenantId, warehouseId, subjectId } as TakeoverScope;
 }
 
+function readStringArray(value: unknown) {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) return undefined;
+  return value as string[];
+}
+
+function sameUniqueStrings(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    new Set(left).size === left.length &&
+    new Set(right).size === right.length &&
+    left.every((item, index) => item === right[index])
+  );
+}
+
+function uniqueRecordStrings(records: Record<string, unknown>[], field: string) {
+  const values = records.map((record) => record[field]);
+  return (
+    values.every((value) => typeof value === 'string') &&
+    new Set(values as string[]).size === values.length
+  );
+}
+
+function uniqueRecordIntegers(records: Record<string, unknown>[], field: string) {
+  const values = records.map((record) => record[field]);
+  return values.every(Number.isSafeInteger) && new Set(values as number[]).size === values.length;
+}
+
+async function validateTakeoverArchiveContents(
+  manifest: Record<string, unknown>,
+  events: unknown[],
+  media: unknown[],
+  scope: TakeoverScope
+) {
+  if (!Array.isArray(manifest.events) || !Array.isArray(manifest.media)) {
+    throw new Error('模拟接管 manifest 事件或媒体清单缺失。');
+  }
+  const manifestEvents = manifest.events.filter(isRecord);
+  const manifestMedia = manifest.media.filter(isRecord);
+  const archiveEvents = events.filter(isRecord);
+  const archiveMedia = media.filter(isRecord);
+  const archiveEnvelopes = archiveEvents.map((event) => event.envelope).filter(isRecord);
+  if (
+    manifestEvents.length !== manifest.events.length ||
+    manifestMedia.length !== manifest.media.length ||
+    archiveEvents.length !== events.length ||
+    archiveMedia.length !== media.length
+  ) {
+    throw new Error('模拟接管事件或媒体条目结构无效。');
+  }
+  if (
+    !uniqueRecordStrings(manifestEvents, 'eventId') ||
+    !uniqueRecordStrings(archiveEnvelopes, 'eventId') ||
+    !uniqueRecordIntegers(manifestEvents, 'localSequence') ||
+    !uniqueRecordIntegers(archiveEnvelopes, 'localSequence') ||
+    !uniqueRecordStrings(manifestEvents, 'idempotencyKey') ||
+    !uniqueRecordStrings(archiveEnvelopes, 'idempotencyKey') ||
+    !uniqueRecordStrings(manifestMedia, 'mediaId') ||
+    !uniqueRecordStrings(archiveMedia, 'mediaId')
+  ) {
+    throw new Error('模拟接管事件或媒体清单包含重复 ID。');
+  }
+
+  for (let index = 0; index < manifestEvents.length; index += 1) {
+    const declared = manifestEvents[index]!;
+    const archived = archiveEvents[index]!;
+    const envelope = isRecord(archived.envelope) ? archived.envelope : undefined;
+    const declaredRefs = readStringArray(declared.mediaRefs);
+    const archivedRefs = envelope ? readStringArray(envelope.mediaRefs) : undefined;
+    if (
+      !envelope ||
+      typeof declared.eventId !== 'string' ||
+      typeof declared.localSequence !== 'number' ||
+      !Number.isSafeInteger(declared.localSequence) ||
+      typeof declared.idempotencyKey !== 'string' ||
+      !declaredRefs ||
+      envelope.eventId !== declared.eventId ||
+      envelope.localSequence !== declared.localSequence ||
+      envelope.idempotencyKey !== declared.idempotencyKey ||
+      !archivedRefs ||
+      !sameUniqueStrings(declaredRefs, archivedRefs)
+    ) {
+      throw new Error(`模拟接管 archive 事件 #${index + 1} 与 manifest 清单不一致。`);
+    }
+  }
+
+  for (let index = 0; index < manifestMedia.length; index += 1) {
+    const declared = manifestMedia[index]!;
+    const archived = archiveMedia[index]!;
+    const context = readScope(archived.context);
+    if (
+      typeof declared.mediaId !== 'string' ||
+      typeof declared.eventId !== 'string' ||
+      typeof declared.contentHash !== 'string' ||
+      typeof declared.mimeType !== 'string' ||
+      archived.mediaId !== declared.mediaId ||
+      archived.eventId !== declared.eventId ||
+      archived.contentHash !== declared.contentHash ||
+      archived.mimeType !== declared.mimeType ||
+      !context ||
+      !sameScope(context, scope) ||
+      typeof archived.bytesBase64 !== 'string'
+    ) {
+      throw new Error(`模拟接管 archive 媒体 #${index + 1} 与 manifest 清单或作用域不一致。`);
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = decodeBase64(archived.bytesBase64);
+    } catch {
+      throw new Error(`模拟接管 archive 媒体 #${index + 1} 不是规范 Base64。`);
+    }
+    if ((await sha256HexBytes(bytes)) !== declared.contentHash) {
+      throw new Error(`模拟接管 archive 媒体 #${index + 1} 的 SHA-256 哈希不一致。`);
+    }
+  }
+}
+
 export class MemoryPdaPort implements PdaPort {
   readonly synchronized = new Set<string>();
   readonly conflictResolutions: Array<{ conflictId: string; resolution: string; reason: string }> =
@@ -80,6 +196,10 @@ export class MemoryPdaPort implements PdaPort {
       privateKey: CryptoKey;
       scope: TakeoverScope;
     }
+  >();
+  private readonly takeoverUploadReceipts = new Map<
+    string,
+    { fingerprint: string; receipt: DeviceTakeoverExportReceipt }
   >();
 
   async bindDevice(
@@ -112,9 +232,19 @@ export class MemoryPdaPort implements PdaPort {
     return session;
   }
 
-  async getDeviceTasks(_deviceId: string) {
-    void _deviceId;
-    return [
+  async getDeviceTasks(deviceId: string) {
+    const binding = this.deviceBindings.get(deviceId);
+    if (!binding) throw new Error('模拟设备尚未成功绑定，禁止读取 device scoped tasks。');
+    const scopeRef = (
+      await sha256HexBytes(
+        new TextEncoder().encode(
+          [binding.tenantId, binding.warehouseId, binding.subjectId, binding.deviceId].join(':')
+        )
+      )
+    )
+      .slice(0, 8)
+      .toUpperCase();
+    const tasks = [
       ...[
         'S2505120004',
         'OK-1',
@@ -204,6 +334,10 @@ export class MemoryPdaPort implements PdaPort {
         version: 3,
       },
     ];
+    return tasks.map((task, index) => ({
+      ...task,
+      id: `01JPDATASK${String(index + 1).padStart(8, '0')}${scopeRef}`,
+    }));
   }
 
   async syncDeviceEvents(events: DeviceEventEnvelope[], _idempotencyKey: string) {
@@ -423,10 +557,25 @@ export class MemoryPdaPort implements PdaPort {
   async uploadEncryptedDeviceTakeoverExport(
     deviceId: string,
     authorizationId: string,
-    _idempotencyKey: string,
+    idempotencyKey: string,
     input: UploadEncryptedTakeoverInput
   ): Promise<DeviceTakeoverExportReceipt> {
-    void _idempotencyKey;
+    const fingerprint = canonicalize({
+      deviceId,
+      authorizationId,
+      manifestHash: input.manifestHash,
+      ciphertextHash: input.ciphertextHash,
+      actualCiphertextHash: await sha256HexBlob(input.ciphertext),
+      iv: input.iv,
+      wrappedKeyHash: await sha256HexBlob(input.wrappedKey),
+    });
+    const completed = this.takeoverUploadReceipts.get(idempotencyKey);
+    if (completed) {
+      if (completed.fingerprint !== fingerprint) {
+        throw new Error('模拟接管 Idempotency-Key 已用于不同密文，拒绝幂等键复用。');
+      }
+      return completed.receipt;
+    }
     const authorization = this.takeoverAuthorizations.get(authorizationId);
     if (
       !authorization ||
@@ -499,7 +648,7 @@ export class MemoryPdaPort implements PdaPort {
     });
     const mediaScopesMatch = media.every((item) => {
       if (!isRecord(item)) return false;
-      const context = item.context === undefined ? authorization.scope : readScope(item.context);
+      const context = readScope(item.context);
       return context ? sameScope(context, authorization.scope) : false;
     });
     if (
@@ -513,8 +662,8 @@ export class MemoryPdaPort implements PdaPort {
     ) {
       throw new Error('模拟接管 manifest 哈希、作用域或事件/媒体计数校验失败。');
     }
-    this.takeoverAuthorizations.delete(authorizationId);
-    return {
+    await validateTakeoverArchiveContents(manifest, events, media, authorization.scope);
+    const receipt: DeviceTakeoverExportReceipt = {
       exportId:
         `01JMOCKEXPORT${crypto.randomUUID().replaceAll('-', '').slice(0, 13).toUpperCase()}`.slice(
           0,
@@ -532,5 +681,8 @@ export class MemoryPdaPort implements PdaPort {
       receivedAt: new Date().toISOString(),
       verifiedAt: new Date().toISOString(),
     };
+    this.takeoverUploadReceipts.set(idempotencyKey, { fingerprint, receipt });
+    this.takeoverAuthorizations.delete(authorizationId);
+    return receipt;
   }
 }

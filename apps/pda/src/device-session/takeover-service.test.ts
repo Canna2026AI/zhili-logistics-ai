@@ -215,6 +215,59 @@ describe('DeviceTakeoverService', () => {
     expect(await store.getMedia()).toHaveLength(1);
   });
 
+  it('recovers the same VERIFIED export after pending receipt persistence fails without reauthorizing', async () => {
+    const { store, queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const authorize = vi.spyOn(port, 'authorizeDeviceTakeoverExport');
+    const upload = vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport');
+    const originalSetMeta = store.setMeta.bind(store);
+    let failPendingReceiptOnce = true;
+    vi.spyOn(store, 'setMeta').mockImplementation(async (key, value) => {
+      if (key === 'pending-takeover-finalize' && failPendingReceiptOnce) {
+        failPendingReceiptOnce = false;
+        throw new Error('browser closed before receipt persistence');
+      }
+      await originalSetMeta(key, value);
+    });
+    const progress = vi.fn();
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port, undefined, progress).exportAndClear(
+        session,
+        '设备损坏，由主管接管'
+      )
+    ).rejects.toThrow('before receipt persistence');
+
+    const firstReceipt = await upload.mock.results[0]!.value;
+    expect(progress.mock.calls.at(-1)?.[0]).toBe('SERVER_VERIFIED_CLEANUP_PENDING');
+    expect(await queue.getMeta('pending-takeover-upload')).toEqual(
+      expect.objectContaining({
+        authorizationId: firstReceipt.authorizationId,
+        ciphertextHash: firstReceipt.ciphertextHash,
+      })
+    );
+    expect(await store.getEvents()).toHaveLength(1);
+    expect(await store.getMedia()).toHaveLength(1);
+
+    const restartedQueue = new OfflineQueue(store);
+    const restartedMedia = new MediaQueue(store);
+    await Promise.all([restartedQueue.restore(), restartedMedia.restore()]);
+    const recovered = await new DeviceTakeoverService(
+      restartedQueue,
+      restartedMedia,
+      port
+    ).retryPendingFinalize(session);
+
+    expect(recovered).toEqual(firstReceipt);
+    expect(authorize).toHaveBeenCalledTimes(1);
+    expect(upload).toHaveBeenCalledTimes(2);
+    expect(upload.mock.calls[1]![2]).toBe(upload.mock.calls[0]![2]);
+    expect(upload.mock.calls[1]![3].ciphertextHash).toBe(upload.mock.calls[0]![3].ciphertextHash);
+    expect(restartedQueue.snapshot().events).toHaveLength(0);
+    expect(restartedMedia.snapshot()).toHaveLength(0);
+    expect(await restartedQueue.getMeta('pending-takeover-upload')).toBeUndefined();
+  });
+
   it('retries only the pending local finalization after restart without re-uploading', async () => {
     const { store, queue, media } = await setup();
     const port = new MemoryPdaPort();
@@ -435,6 +488,7 @@ describe('DeviceTakeoverService', () => {
     ).rejects.toThrow('接管授权已过期');
 
     expect(progress.mock.calls.at(-1)?.[0]).toBe('EXPIRED');
+    expect(await queue.getMeta('pending-takeover-upload')).toBeUndefined();
     expect(await store.getEvents()).toHaveLength(1);
     expect(await store.getMedia()).toHaveLength(1);
   });
@@ -453,6 +507,7 @@ describe('DeviceTakeoverService', () => {
     ).rejects.toThrow('crypto unavailable');
 
     expect(progress.mock.calls.at(-1)?.[0]).toBe('FAILED');
+    expect(await queue.getMeta('pending-takeover-upload')).toBeUndefined();
   });
 
   it('moves to FAILED when a non-expiry upload error occurs', async () => {
@@ -471,6 +526,9 @@ describe('DeviceTakeoverService', () => {
     ).rejects.toThrow('gateway unavailable');
 
     expect(progress.mock.calls.at(-1)?.[0]).toBe('FAILED');
+    expect(await queue.getMeta('pending-takeover-upload')).toEqual(
+      expect.objectContaining({ authorizationId: expect.any(String) })
+    );
   });
 
   it('requires the dedicated permission before requesting authorization', async () => {

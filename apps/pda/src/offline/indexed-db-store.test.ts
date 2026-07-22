@@ -309,6 +309,59 @@ describe('IndexedDbQueueStore', () => {
     store.close();
   });
 
+  it('rolls back receipt, pending markers, events and media when the finalization transaction aborts', async () => {
+    const store = new IndexedDbQueueStore('zhili-pda-test');
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const eventId = '01JFINALIZEABORT00000000001';
+    const evidence = await media.prepare(
+      context,
+      eventId,
+      new Blob(['must-survive-abort']),
+      'image/jpeg',
+      'media-finalize-abort'
+    );
+    await queue.enqueue(context, {
+      eventId,
+      action: 'CAPTURE_POD',
+      entityRef: 'FINALIZE-ABORT',
+      payload: {},
+      mediaRefs: [evidence.mediaId],
+      mediaItems: [evidence],
+      baseVersion: 1,
+    });
+    const pendingFinalize = {
+      receipt: takeoverReceipt,
+      eventIds: [eventId],
+      mediaIds: [evidence.mediaId],
+    };
+    const pendingUpload = { authorizationId: takeoverReceipt.authorizationId };
+    await Promise.all([
+      store.setMeta('pending-takeover-finalize', pendingFinalize),
+      store.setMeta('pending-takeover-upload', pendingUpload),
+    ]);
+    let faultInjected = false;
+    Object.assign(store, {
+      beforeFinalizeCommit: (abort: () => void) => {
+        faultInjected = true;
+        abort();
+      },
+    });
+
+    await expect(
+      store.finalizeTakeoverPackage(takeoverReceipt, [eventId], [evidence.mediaId])
+    ).rejects.toThrow();
+
+    expect(faultInjected).toBe(true);
+    expect(await store.getMeta('last-takeover-export-receipt')).toBeUndefined();
+    expect(await store.getMeta('pending-takeover-finalize')).toEqual(pendingFinalize);
+    expect(await store.getMeta('pending-takeover-upload')).toEqual(pendingUpload);
+    expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([eventId]);
+    expect((await store.getMedia()).map((item) => item.mediaId)).toEqual([evidence.mediaId]);
+    store.close();
+  });
+
   it('stores encrypted records and uses a non-exportable WebCrypto key', async () => {
     const codec = await WebCryptoQueueCodec.generate();
     const store = new IndexedDbQueueStore('zhili-pda-test', codec);

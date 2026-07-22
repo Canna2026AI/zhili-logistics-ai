@@ -316,4 +316,8 @@ export class OfflineQueue {
   setMeta<T>(key: string, value: T) {
     return this.store.setMeta(key, value);
   }
+
+  deleteMeta(key: string) {
+    return this.store.deleteMeta(key);
+  }
 }

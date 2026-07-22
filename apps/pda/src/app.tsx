@@ -164,7 +164,9 @@ export function App({
         try {
           const finalized = await takeoverService.retryPendingFinalize(restored);
           if (finalized) {
-            setSyncMessage(`已恢复接管本地提交：${finalized.exportId}。未重复上传密文。`);
+            setSyncMessage(
+              `已恢复接管回执并完成本地提交：${finalized.exportId}。未创建新的接管业务提交。`
+            );
           }
         } catch (caught) {
           setSyncMessage(explain(caught));

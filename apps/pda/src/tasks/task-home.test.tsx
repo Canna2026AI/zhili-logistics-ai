@@ -97,7 +97,17 @@ describe('TaskHome', () => {
   });
 
   it('shows task-derived workflow titles and distinct copy for all 19 actions', async () => {
-    const tasks = await new MemoryPdaPort().getDeviceTasks(session.deviceId);
+    const port = new MemoryPdaPort();
+    await port.bindDevice(
+      session.deviceId,
+      {
+        warehouseId: session.warehouseId,
+        subjectId: session.subjectId,
+        deviceCode: 'PDA-HOME-01',
+      },
+      'bind-task-home'
+    );
+    const tasks = await port.getDeviceTasks(session.deviceId);
     const { container } = render(<TaskHome session={session} tasks={tasks} onScan={vi.fn()} />);
 
     for (const action of DEVICE_TASK_ACTIONS) {

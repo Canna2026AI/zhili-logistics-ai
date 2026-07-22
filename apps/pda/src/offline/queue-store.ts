@@ -16,6 +16,7 @@ export interface QueueStore {
   setNextSequence(value: number): Promise<void>;
   getMeta<T>(key: string): Promise<T | undefined>;
   setMeta<T>(key: string, value: T): Promise<void>;
+  deleteMeta(key: string): Promise<void>;
   deleteWork(eventId: string, mediaIds: string[]): Promise<void>;
   deleteWorkPackage(eventIds: string[], mediaIds: string[]): Promise<void>;
   finalizeTakeoverPackage(
@@ -105,6 +106,10 @@ export class MemoryQueueStore implements QueueStore {
     this.meta.set(key, value);
   }
 
+  async deleteMeta(key: string) {
+    this.meta.delete(key);
+  }
+
   async deleteWork(eventId: string, mediaIds: string[]) {
     this.events.delete(eventId);
     this.eventDedupe.delete(eventId);
@@ -137,6 +142,7 @@ export class MemoryQueueStore implements QueueStore {
     }
     this.meta.set('last-takeover-export-receipt', receipt);
     this.meta.delete('pending-takeover-finalize');
+    this.meta.delete('pending-takeover-upload');
     for (const eventId of eventIds) {
       this.events.delete(eventId);
       this.eventDedupe.delete(eventId);
@@ -244,6 +250,10 @@ async function hashKey(value: string) {
 export class IndexedDbQueueStore implements QueueStore {
   private readonly database: Promise<IDBPDatabase<PdaQueueDatabase>>;
   private codecPromise?: Promise<QueueCodec>;
+
+  protected beforeFinalizeCommit(_abort: () => void) {
+    void _abort;
+  }
 
   constructor(
     readonly databaseName = 'zhili-pda-offline-v1',
@@ -408,6 +418,10 @@ export class IndexedDbQueueStore implements QueueStore {
     await database.put('meta', { id: key, value: await codec.encode(value) });
   }
 
+  async deleteMeta(key: string) {
+    await (await this.database).delete('meta', key);
+  }
+
   async deleteWork(eventId: string, mediaIds: string[]) {
     const database = await this.database;
     const transaction = database.transaction(['events', 'media'], 'readwrite');
@@ -460,16 +474,28 @@ export class IndexedDbQueueStore implements QueueStore {
       }
       throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
     }
-    await Promise.all([
+    const mutations = [
       transaction.objectStore('meta').put({
         id: 'last-takeover-export-receipt',
         value: encryptedReceipt,
       }),
       transaction.objectStore('meta').delete('pending-takeover-finalize'),
+      transaction.objectStore('meta').delete('pending-takeover-upload'),
       ...eventIds.map((eventId) => eventStore.delete(eventId)),
       ...mediaIds.map((mediaId) => mediaStore.delete(mediaId)),
-    ]);
-    await transaction.done;
+    ];
+    this.beforeFinalizeCommit(() => transaction.abort());
+    try {
+      await Promise.all(mutations);
+      await transaction.done;
+    } catch (error) {
+      try {
+        await transaction.done;
+      } catch {
+        /* consume the transaction abort after preserving the original failure */
+      }
+      throw error;
+    }
   }
 
   async appendEvent(

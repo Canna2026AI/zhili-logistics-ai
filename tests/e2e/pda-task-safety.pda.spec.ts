@@ -135,7 +135,7 @@ test('clicking the second same-type task transitions only its exact production r
   });
   await expect(page.getByTestId('selected-task')).toContainText('OUT_FOR_DELIVERY · v10');
 
-  await page.getByRole('button', { name: '任务' }).click();
+  await page.getByRole('button', { name: '任务', exact: true }).click();
   await expect(page.getByRole('button', { name: /LM-FIRST/ })).toContainText('LOADED');
   await expect(page.getByRole('button', { name: /LM-SECOND/ })).toContainText('OUT_FOR_DELIVERY');
 });

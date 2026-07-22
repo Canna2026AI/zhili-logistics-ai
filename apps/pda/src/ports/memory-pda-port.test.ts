@@ -22,7 +22,71 @@ async function sha256Hex(bytes: Uint8Array) {
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-async function createEncryptedTakeover(options?: { tamperManifest?: boolean }) {
+type TakeoverArchive = {
+  manifest: {
+    schemaVersion: number;
+    scope: {
+      deviceId: string;
+      tenantId: string;
+      warehouseId: string;
+      subjectId: string;
+    };
+    eventCount: number;
+    mediaCount: number;
+    events: Array<{
+      eventId: string;
+      localSequence: number;
+      idempotencyKey: string;
+      mediaRefs: string[];
+    }>;
+    media: Array<{
+      mediaId: string;
+      eventId: string;
+      contentHash: string;
+      mimeType: string;
+    }>;
+  };
+  events: Array<{
+    state: string;
+    envelope: {
+      eventId: string;
+      deviceId: string;
+      localSequence: number;
+      tenantId: string;
+      warehouseId: string;
+      subjectId: string;
+      action: string;
+      entityRef: string;
+      payload: Record<string, unknown>;
+      mediaRefs: string[];
+      baseVersion: number;
+      idempotencyKey: string;
+      occurredAt: string;
+      timezone: string;
+      appVersion: string;
+    };
+  }>;
+  media: Array<{
+    mediaId: string;
+    eventId: string;
+    contentHash: string;
+    mimeType: string;
+    bytesBase64: string;
+    context?: {
+      deviceId: string;
+      tenantId: string;
+      warehouseId: string;
+      subjectId: string;
+    };
+  }>;
+};
+
+async function createEncryptedTakeover(options?: {
+  tamperManifest?: boolean;
+  withMedia?: boolean;
+  duplicateEventField?: 'eventId' | 'localSequence' | 'idempotencyKey';
+  mutateArchive?: (archive: TakeoverArchive) => void;
+}) {
   const port = new MemoryPdaPort();
   const deviceId = '01JCRYPTODEVICE000000000001';
   const session = await port.bindDevice(
@@ -40,27 +104,54 @@ async function createEncryptedTakeover(options?: { tamperManifest?: boolean }) {
     warehouseId: session.warehouseId,
     subjectId: session.subjectId,
   };
+  const mediaBytes = new TextEncoder().encode('authentic-media-bytes');
+  const mediaId = 'media-crypto-1';
+  const eventEntries = [
+    {
+      eventId: '01JCRYPTOEVENT000000000001',
+      localSequence: 1,
+      idempotencyKey: 'pda:crypto:event:1',
+      mediaRefs: options?.withMedia ? [mediaId] : [],
+    },
+  ];
+  if (options?.duplicateEventField) {
+    const duplicate = {
+      eventId: '01JCRYPTOEVENT000000000002',
+      localSequence: 2,
+      idempotencyKey: 'pda:crypto:event:2',
+      mediaRefs: [] as string[],
+    };
+    if (options.duplicateEventField === 'eventId') duplicate.eventId = eventEntries[0]!.eventId;
+    if (options.duplicateEventField === 'localSequence')
+      duplicate.localSequence = eventEntries[0]!.localSequence;
+    if (options.duplicateEventField === 'idempotencyKey')
+      duplicate.idempotencyKey = eventEntries[0]!.idempotencyKey;
+    eventEntries.push(duplicate);
+  }
+  const mediaEntries = options?.withMedia
+    ? [
+        {
+          mediaId,
+          eventId: eventEntries[0]!.eventId,
+          contentHash: await sha256Hex(mediaBytes),
+          mimeType: 'image/jpeg',
+        },
+      ]
+    : [];
   const manifest = {
     schemaVersion: 1,
     scope,
-    eventCount: 1,
-    mediaCount: 0,
-    events: [
-      {
-        eventId: '01JCRYPTOEVENT000000000001',
-        localSequence: 1,
-        idempotencyKey: 'pda:crypto:event:1',
-        mediaRefs: [],
-      },
-    ],
-    media: [],
+    eventCount: eventEntries.length,
+    mediaCount: mediaEntries.length,
+    events: eventEntries,
+    media: mediaEntries,
   };
   const manifestHash = await sha256Hex(new TextEncoder().encode(canonical(manifest)));
   const authorization = await port.authorizeDeviceTakeoverExport(deviceId, 'takeover-auth-crypto', {
     reason: '设备损坏，由主管接管',
     manifestHash,
-    eventCount: 1,
-    mediaCount: 0,
+    eventCount: manifest.eventCount,
+    mediaCount: manifest.mediaCount,
   });
   const publicKey = await crypto.subtle.importKey(
     'jwk',
@@ -75,32 +166,35 @@ async function createEncryptedTakeover(options?: { tamperManifest?: boolean }) {
   ]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const archiveManifest = options?.tamperManifest ? { ...manifest, eventCount: 2 } : manifest;
-  const archive = {
+  const archive: TakeoverArchive = {
     manifest: archiveManifest,
-    events: [
-      {
-        state: 'PENDING',
-        envelope: {
-          eventId: manifest.events[0]!.eventId,
-          deviceId,
-          localSequence: 1,
-          tenantId: scope.tenantId,
-          warehouseId: scope.warehouseId,
-          subjectId: scope.subjectId,
-          action: 'WAREHOUSE_RECEIVE',
-          entityRef: 'CRYPTO-1',
-          payload: {},
-          mediaRefs: [],
-          baseVersion: 1,
-          idempotencyKey: manifest.events[0]!.idempotencyKey,
-          occurredAt: '2026-07-23T00:00:00.000Z',
-          timezone: 'Asia/Shanghai',
-          appVersion: '0.2.0',
-        },
+    events: eventEntries.map((entry) => ({
+      state: 'PENDING',
+      envelope: {
+        eventId: entry.eventId,
+        deviceId,
+        localSequence: entry.localSequence,
+        tenantId: scope.tenantId,
+        warehouseId: scope.warehouseId,
+        subjectId: scope.subjectId,
+        action: 'WAREHOUSE_RECEIVE',
+        entityRef: 'CRYPTO-1',
+        payload: {},
+        mediaRefs: entry.mediaRefs,
+        baseVersion: 1,
+        idempotencyKey: entry.idempotencyKey,
+        occurredAt: '2026-07-23T00:00:00.000Z',
+        timezone: 'Asia/Shanghai',
+        appVersion: '0.2.0',
       },
-    ],
-    media: [],
+    })),
+    media: mediaEntries.map((entry) => ({
+      ...entry,
+      bytesBase64: base64(mediaBytes),
+      context: scope,
+    })),
   };
+  options?.mutateArchive?.(archive);
   const plaintext = new TextEncoder().encode(canonical(archive));
   const ciphertext = new Uint8Array(
     await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext)
@@ -155,6 +249,47 @@ describe('MemoryPdaPort F09 demo tasks', () => {
     );
   });
 
+  it('rejects task lookup for an unbound device', async () => {
+    await expect(new MemoryPdaPort().getDeviceTasks('01JUNBOUNDDEVICE0000000001')).rejects.toThrow(
+      /绑定|device/i
+    );
+  });
+
+  it('generates different scoped task IDs for different device bindings', async () => {
+    const port = new MemoryPdaPort();
+    const firstDevice = '01JSCOPEDDEVICE00000000001';
+    const secondDevice = '01JSCOPEDDEVICE00000000002';
+    await port.bindDevice(
+      firstDevice,
+      {
+        warehouseId: '01JSCOPEDWAREHOUSE00000001',
+        subjectId: '01JSCOPEDSUBJECT0000000001',
+        deviceCode: 'PDA-SCOPE-01',
+      },
+      'bind-scope-1'
+    );
+    await port.bindDevice(
+      secondDevice,
+      {
+        warehouseId: '01JSCOPEDWAREHOUSE00000002',
+        subjectId: '01JSCOPEDSUBJECT0000000002',
+        deviceCode: 'PDA-SCOPE-02',
+      },
+      'bind-scope-2'
+    );
+
+    const [firstTasks, secondTasks] = await Promise.all([
+      port.getDeviceTasks(firstDevice),
+      port.getDeviceTasks(secondDevice),
+    ]);
+
+    expect(firstTasks.map((task) => task.reference)).toEqual(
+      secondTasks.map((task) => task.reference)
+    );
+    expect(firstTasks.map((task) => task.id)).not.toEqual(secondTasks.map((task) => task.id));
+    expect(new Set(firstTasks.map((task) => task.id)).size).toBe(firstTasks.length);
+  });
+
   it('rejects a takeover upload when the declared ciphertext hash is not authentic', async () => {
     const port = new MemoryPdaPort();
     const authorization = await port.authorizeDeviceTakeoverExport(
@@ -196,6 +331,46 @@ describe('MemoryPdaPort F09 demo tasks', () => {
 
     expect(receipt.status).toBe('VERIFIED');
     expect(receipt.scope).toEqual(authorization.scope);
+  });
+
+  it('returns the same VERIFIED receipt when the exact upload is retried with the same idempotency key', async () => {
+    const { port, authorization, input } = await createEncryptedTakeover();
+    const idempotencyKey = 'takeover-upload-idempotent';
+
+    const first = await port.uploadEncryptedDeviceTakeoverExport(
+      authorization.deviceId,
+      authorization.authorizationId,
+      idempotencyKey,
+      input
+    );
+    const recovered = await port.uploadEncryptedDeviceTakeoverExport(
+      authorization.deviceId,
+      authorization.authorizationId,
+      idempotencyKey,
+      input
+    );
+
+    expect(recovered).toEqual(first);
+  });
+
+  it('rejects reuse of a takeover upload idempotency key for different ciphertext', async () => {
+    const { port, authorization, input } = await createEncryptedTakeover();
+    const idempotencyKey = 'takeover-upload-idempotency-conflict';
+    await port.uploadEncryptedDeviceTakeoverExport(
+      authorization.deviceId,
+      authorization.authorizationId,
+      idempotencyKey,
+      input
+    );
+
+    await expect(
+      port.uploadEncryptedDeviceTakeoverExport(
+        authorization.deviceId,
+        authorization.authorizationId,
+        idempotencyKey,
+        { ...input, ciphertextHash: 'f'.repeat(64) }
+      )
+    ).rejects.toThrow(/Idempotency|幂等|不一致/);
   });
 
   it('rejects an IV that is not exactly 12 bytes', async () => {
@@ -251,4 +426,117 @@ describe('MemoryPdaPort F09 demo tasks', () => {
       )
     ).rejects.toThrow(/manifest|清单|哈希/);
   });
+
+  it.each([
+    ['eventId', (archive: TakeoverArchive) => (archive.events[0]!.envelope.eventId = 'OTHER')],
+    [
+      'localSequence',
+      (archive: TakeoverArchive) => (archive.events[0]!.envelope.localSequence = 9),
+    ],
+    [
+      'idempotencyKey',
+      (archive: TakeoverArchive) =>
+        (archive.events[0]!.envelope.idempotencyKey = 'pda:crypto:altered'),
+    ],
+    [
+      'mediaRefs',
+      (archive: TakeoverArchive) => (archive.events[0]!.envelope.mediaRefs = ['unlisted-media']),
+    ],
+  ])(
+    'rejects an authentic archive whose event %s differs from its manifest entry',
+    async (_, mutateArchive) => {
+      const { port, authorization, input } = await createEncryptedTakeover({ mutateArchive });
+      await expect(
+        port.uploadEncryptedDeviceTakeoverExport(
+          authorization.deviceId,
+          authorization.authorizationId,
+          `takeover-upload-event-${String(_)}`,
+          input
+        )
+      ).rejects.toThrow(/manifest|清单|事件/);
+    }
+  );
+
+  it.each([
+    ['mediaId', (archive: TakeoverArchive) => (archive.media[0]!.mediaId = 'other-media')],
+    ['eventId', (archive: TakeoverArchive) => (archive.media[0]!.eventId = 'other-event')],
+    ['contentHash', (archive: TakeoverArchive) => (archive.media[0]!.contentHash = 'f'.repeat(64))],
+    ['mimeType', (archive: TakeoverArchive) => (archive.media[0]!.mimeType = 'image/png')],
+  ])(
+    'rejects an authentic archive whose media %s differs from its manifest entry',
+    async (_, mutateArchive) => {
+      const { port, authorization, input } = await createEncryptedTakeover({
+        withMedia: true,
+        mutateArchive,
+      });
+      await expect(
+        port.uploadEncryptedDeviceTakeoverExport(
+          authorization.deviceId,
+          authorization.authorizationId,
+          `takeover-upload-media-${String(_)}`,
+          input
+        )
+      ).rejects.toThrow(/manifest|清单|媒体/);
+    }
+  );
+
+  it('recomputes media bytes SHA-256 instead of trusting the declared contentHash', async () => {
+    const { port, authorization, input } = await createEncryptedTakeover({
+      withMedia: true,
+      mutateArchive: (archive) => {
+        archive.media[0]!.bytesBase64 = base64(new TextEncoder().encode('tampered-media'));
+      },
+    });
+    await expect(
+      port.uploadEncryptedDeviceTakeoverExport(
+        authorization.deviceId,
+        authorization.authorizationId,
+        'takeover-upload-media-bytes',
+        input
+      )
+    ).rejects.toThrow(/SHA-256|哈希|媒体/);
+  });
+
+  it.each([
+    ['missing', (archive: TakeoverArchive) => delete archive.media[0]!.context],
+    [
+      'mismatched',
+      (archive: TakeoverArchive) => {
+        archive.media[0]!.context = {
+          ...archive.manifest.scope,
+          warehouseId: '01JOTHERWAREHOUSE000000001',
+        };
+      },
+    ],
+  ])('rejects media with %s context', async (_, mutateArchive) => {
+    const { port, authorization, input } = await createEncryptedTakeover({
+      withMedia: true,
+      mutateArchive,
+    });
+    await expect(
+      port.uploadEncryptedDeviceTakeoverExport(
+        authorization.deviceId,
+        authorization.authorizationId,
+        `takeover-upload-context-${String(_)}`,
+        input
+      )
+    ).rejects.toThrow(/作用域|context|媒体/);
+  });
+
+  it.each(['eventId', 'localSequence', 'idempotencyKey'] as const)(
+    'rejects duplicate manifest and archive event %s values',
+    async (duplicateEventField) => {
+      const { port, authorization, input } = await createEncryptedTakeover({
+        duplicateEventField,
+      });
+      await expect(
+        port.uploadEncryptedDeviceTakeoverExport(
+          authorization.deviceId,
+          authorization.authorizationId,
+          `takeover-upload-duplicate-${duplicateEventField}`,
+          input
+        )
+      ).rejects.toThrow(/重复|duplicate|事件/);
+    }
+  );
 });

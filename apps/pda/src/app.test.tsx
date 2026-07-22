@@ -136,6 +136,8 @@ describe('PDA application', () => {
 
     await screen.findByRole('heading', { name: '任务首页' });
     await waitFor(() => expect(screen.getByTestId('pending-count')).toHaveTextContent('0'));
+    await userEvent.click(screen.getByRole('button', { name: '离线' }));
+    expect(screen.getByText(/未创建新的接管业务提交/)).toBeVisible();
     expect(authorize).not.toHaveBeenCalled();
     expect(upload).not.toHaveBeenCalled();
     expect(await queue.getMeta('last-takeover-export-receipt')).toEqual(receipt);

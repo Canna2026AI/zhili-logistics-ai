@@ -9,6 +9,7 @@ import type { OfflineQueue } from '../offline/offline-queue';
 import { readBlobBytes } from '../offline/blob-bytes';
 import type { PdaPort } from '../ports/pda-port';
 import type { LocalDeviceSession } from '../session/session-guard';
+import { decodeBase64 } from '../takeover/package-codec';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -39,7 +40,9 @@ function base64(bytes: Uint8Array) {
   return btoa(binary);
 }
 
-function sameScope(left: DeviceContext, right: DeviceContext) {
+type TakeoverScope = Pick<DeviceContext, 'deviceId' | 'tenantId' | 'warehouseId' | 'subjectId'>;
+
+function sameScope(left: TakeoverScope, right: TakeoverScope) {
   return (
     left.deviceId === right.deviceId &&
     left.tenantId === right.tenantId &&
@@ -50,9 +53,9 @@ function sameScope(left: DeviceContext, right: DeviceContext) {
 
 function assertExactScope(
   actual: { deviceId: string; tenantId: string; warehouseId: string; subjectId: string },
-  expected: DeviceContext
+  expected: TakeoverScope
 ) {
-  if (!sameScope(actual as DeviceContext, expected)) {
+  if (!sameScope(actual, expected)) {
     throw new Error('管理员接管授权或回执作用域与本地设备绑定不一致，已保留全部数据。');
   }
 }
@@ -81,6 +84,47 @@ export interface PendingTakeoverFinalize {
   mediaIds: string[];
 }
 
+export interface PendingTakeoverUpload {
+  authorizationId: string;
+  deviceId: string;
+  scope: TakeoverScope;
+  manifestHash: string;
+  ciphertextHash: string;
+  idempotencyKey: string;
+  ciphertextBase64: string;
+  iv: string;
+  wrappedKeyBase64: string;
+  eventIds: string[];
+  mediaIds: string[];
+}
+
+function assertVerifiedReceipt(
+  receipt: DeviceTakeoverExportReceipt,
+  expected: {
+    authorizationId: string;
+    deviceId: string;
+    scope: TakeoverScope;
+    manifestHash: string;
+    ciphertextHash: string;
+    eventCount: number;
+    mediaCount: number;
+  }
+) {
+  assertExactScope(receipt.scope, expected.scope);
+  if (
+    receipt.status !== 'VERIFIED' ||
+    receipt.authorizationId !== expected.authorizationId ||
+    receipt.deviceId !== expected.deviceId ||
+    receipt.manifestHash !== expected.manifestHash ||
+    receipt.ciphertextHash !== expected.ciphertextHash ||
+    receipt.eventCount !== expected.eventCount ||
+    receipt.mediaCount !== expected.mediaCount ||
+    receipt.checksumAlgorithm !== 'SHA-256'
+  ) {
+    throw new Error('管理员接管回执未通过完整性验证，已保留全部数据。');
+  }
+}
+
 export class DeviceTakeoverService {
   constructor(
     private readonly queue: OfflineQueue,
@@ -92,21 +136,83 @@ export class DeviceTakeoverService {
 
   async retryPendingFinalize(session: LocalDeviceSession) {
     const pending = await this.queue.getMeta<PendingTakeoverFinalize>('pending-takeover-finalize');
-    if (!pending) return undefined;
+    if (pending) {
+      if (
+        pending.receipt.status !== 'VERIFIED' ||
+        pending.receipt.eventCount !== pending.eventIds.length ||
+        pending.receipt.mediaCount !== pending.mediaIds.length
+      ) {
+        this.onProgress?.('FAILED');
+        throw new Error('待恢复的接管回执与本地清理清单不一致，已保留全部数据。');
+      }
+      assertExactScope(pending.receipt.scope, session);
+      this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
+      await this.queue.finalizeTakeoverPackage(pending.receipt, pending.eventIds, pending.mediaIds);
+      await this.media.restore();
+      this.onProgress?.('VERIFIED');
+      return pending.receipt;
+    }
+
+    const upload = await this.queue.getMeta<PendingTakeoverUpload>('pending-takeover-upload');
+    if (!upload) return undefined;
+    assertExactScope(upload.scope, session);
     if (
-      pending.receipt.status !== 'VERIFIED' ||
-      pending.receipt.eventCount !== pending.eventIds.length ||
-      pending.receipt.mediaCount !== pending.mediaIds.length
+      upload.deviceId !== session.deviceId ||
+      upload.eventIds.length === 0 ||
+      upload.eventIds.length !== new Set(upload.eventIds).size ||
+      upload.mediaIds.length !== new Set(upload.mediaIds).size
     ) {
       this.onProgress?.('FAILED');
-      throw new Error('待恢复的接管回执与本地清理清单不一致，已保留全部数据。');
+      throw new Error('待恢复的接管上传清单无效，已保留全部数据。');
     }
-    assertExactScope(pending.receipt.scope, session);
-    this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
-    await this.queue.finalizeTakeoverPackage(pending.receipt, pending.eventIds, pending.mediaIds);
-    await this.media.restore();
-    this.onProgress?.('VERIFIED');
-    return pending.receipt;
+    let serverVerified = false;
+    try {
+      this.onProgress?.('UPLOADING');
+      const receipt = await this.port.uploadEncryptedDeviceTakeoverExport(
+        upload.deviceId,
+        upload.authorizationId,
+        upload.idempotencyKey,
+        {
+          manifestHash: upload.manifestHash,
+          ciphertextHash: upload.ciphertextHash,
+          ciphertext: new Blob([decodeBase64(upload.ciphertextBase64)], {
+            type: 'application/octet-stream',
+          }),
+          iv: upload.iv,
+          wrappedKey: new Blob([decodeBase64(upload.wrappedKeyBase64)], {
+            type: 'application/octet-stream',
+          }),
+        }
+      );
+      assertVerifiedReceipt(receipt, {
+        authorizationId: upload.authorizationId,
+        deviceId: upload.deviceId,
+        scope: upload.scope,
+        manifestHash: upload.manifestHash,
+        ciphertextHash: upload.ciphertextHash,
+        eventCount: upload.eventIds.length,
+        mediaCount: upload.mediaIds.length,
+      });
+      serverVerified = true;
+      this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
+      const finalize = {
+        receipt,
+        eventIds: upload.eventIds,
+        mediaIds: upload.mediaIds,
+      };
+      await this.queue.setMeta('pending-takeover-finalize', finalize);
+      await this.queue.finalizeTakeoverPackage(receipt, upload.eventIds, upload.mediaIds);
+      await this.media.restore();
+      this.onProgress?.('VERIFIED');
+      return receipt;
+    } catch (error) {
+      if (serverVerified) this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
+      else if (isExpiredError(error)) {
+        this.onProgress?.('EXPIRED');
+        await this.queue.deleteMeta('pending-takeover-upload');
+      } else this.onProgress?.('FAILED');
+      throw error;
+    }
   }
 
   async exportAndClear(session: LocalDeviceSession, reason: string) {
@@ -114,6 +220,8 @@ export class DeviceTakeoverService {
       throw new Error('缺少 pda.takeover.export 权限，禁止管理员接管导出。');
     }
     if (Array.from(reason.trim()).length < 5) throw new Error('管理员接管原因至少 5 个字符。');
+    const recovered = await this.retryPendingFinalize(session);
+    if (recovered) return recovered;
 
     let serverVerified = false;
     try {
@@ -185,10 +293,25 @@ export class DeviceTakeoverService {
       });
       const ciphertextHash = await sha256(new Uint8Array(ciphertext));
       this.onProgress?.('UPLOADING');
+      const uploadIdempotencyKey = `pda:takeover:upload:${authorization.authorizationId}:${ciphertextHash}`;
+      const pendingUpload: PendingTakeoverUpload = {
+        authorizationId: authorization.authorizationId,
+        deviceId: session.deviceId,
+        scope: authorization.scope,
+        manifestHash,
+        ciphertextHash,
+        idempotencyKey: uploadIdempotencyKey,
+        ciphertextBase64: base64(new Uint8Array(ciphertext)),
+        iv: base64(iv),
+        wrappedKeyBase64: base64(new Uint8Array(wrappedKey)),
+        eventIds: events.map((event) => event.envelope.eventId),
+        mediaIds: media.map((item) => item.mediaId),
+      };
+      await this.queue.setMeta('pending-takeover-upload', pendingUpload);
       const receipt = await this.port.uploadEncryptedDeviceTakeoverExport(
         session.deviceId,
         authorization.authorizationId,
-        `pda:takeover:upload:${authorization.authorizationId}:${ciphertextHash}`,
+        uploadIdempotencyKey,
         {
           manifestHash,
           ciphertextHash,
@@ -198,25 +321,22 @@ export class DeviceTakeoverService {
         }
       );
 
-      assertExactScope(receipt.scope, session);
-      if (
-        receipt.status !== 'VERIFIED' ||
-        receipt.authorizationId !== authorization.authorizationId ||
-        receipt.deviceId !== session.deviceId ||
-        receipt.manifestHash !== manifestHash ||
-        receipt.ciphertextHash !== ciphertextHash ||
-        receipt.eventCount !== events.length ||
-        receipt.mediaCount !== media.length
-      ) {
-        throw new Error('管理员接管回执未通过完整性验证，已保留全部数据。');
-      }
+      assertVerifiedReceipt(receipt, {
+        authorizationId: authorization.authorizationId,
+        deviceId: session.deviceId,
+        scope: session,
+        manifestHash,
+        ciphertextHash,
+        eventCount: events.length,
+        mediaCount: media.length,
+      });
+      serverVerified = true;
       const pending: PendingTakeoverFinalize = {
         receipt,
         eventIds: events.map((event) => event.envelope.eventId),
         mediaIds: media.map((item) => item.mediaId),
       };
       await this.queue.setMeta('pending-takeover-finalize', pending);
-      serverVerified = true;
       this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
       await this.queue.finalizeTakeoverPackage(receipt, pending.eventIds, pending.mediaIds);
       await this.media.restore();
@@ -224,8 +344,10 @@ export class DeviceTakeoverService {
       return receipt;
     } catch (error) {
       if (serverVerified) this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
-      else if (isExpiredError(error)) this.onProgress?.('EXPIRED');
-      else this.onProgress?.('FAILED');
+      else if (isExpiredError(error)) {
+        this.onProgress?.('EXPIRED');
+        await this.queue.deleteMeta('pending-takeover-upload');
+      } else this.onProgress?.('FAILED');
       throw error;
     }
   }
