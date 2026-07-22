@@ -54,7 +54,7 @@
     "verifyAsSubject",
     "endPermissionSimulation"
   ],
-  "F09": ["syncDeviceEvents", "resolveDeviceConflict"],
+  "F09": ["syncDeviceEvents", "getDeviceConflict", "resolveDeviceConflict"],
   "F10": [
     "createImportJob",
     "proposeAiMapping",
