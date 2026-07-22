@@ -61,7 +61,7 @@ export default defineConfig({
     },
     {
       name: 'pda',
-      testMatch: /pda\.spec\.ts/,
+      testMatch: /pda(?:-task-safety\.pda)?\.spec\.ts$/,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://127.0.0.1:4102',
@@ -129,6 +129,12 @@ export default defineConfig({
       command:
         'pnpm --filter @zhili/storybook exec storybook dev -p 6006 --no-open --host 127.0.0.1',
       url: 'http://127.0.0.1:6006',
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command:
+        'pnpm --filter @zhili/pda build && pnpm --filter @zhili/pda exec vite preview --host 127.0.0.1 --port 4202',
+      url: 'http://127.0.0.1:4202',
       reuseExistingServer: !process.env.CI,
     },
   ],

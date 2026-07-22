@@ -47,15 +47,16 @@ Owner 缩写：`ROOT` 为集成/契约，`UI` 为令牌与共享组件，`FO` �
 | WH-08 | P0 | 浏览器/本地代理打印、队列、重打和幂等 | OPS-PRINT-JOBS | F04 | `createPrintJob` / `reprintDocument` | PrintJob | `document.print` | DOC-E2E-08 | FW/BW | `scope-decisions.md` / PLANNED |
 | PDA-01 | P0 | PDA 登录、设备与仓库绑定、扫码广播/相机 | PDA-HOME | F09 | `bindDevice` / `getDeviceTasks` | DeviceSession | `pda.use` | PDA-DEVICE-01 | FD/BI | `page-matrix.md` / PLANNED |
 | PDA-02 | P0 | 离线事件持久化、重启恢复、去重和批量同步 | PDA-OFFLINE | F09 | `syncDeviceEvents` | DeviceEventEnvelope | `pda.sync` | F09-RESTART | FD/BW | `interaction-state-matrix.md` / PLANNED |
-| PDA-03 | P0 | 媒体补传、冲突详情和逐条解决 | PDA-CONFLICT | F09 | `uploadDeviceMedia` / `getDeviceConflict` / `resolveDeviceConflict` | DeviceConflict | `pda.conflict.resolve` | F09-CONFLICT | FD/BW | `interaction-state-matrix.md` / PLANNED |
+| PDA-03 | P0 | 媒体补传、冲突详情和逐条解决 | PDA-CONFLICT | F09 | `uploadDeviceMedia` / `getDeviceConflict` / `resolveDeviceConflict` | DeviceConflict | `pda.sync` / `pda.conflict.resolve` | F09-CONFLICT | FD/BW | `interaction-state-matrix.md` / PLANNED |
+| PDA-04 | P0 | 管理员授权、加密全量事件/媒体导出与可验证接管 | PDA-OFFLINE | F09 | `authorizeDeviceTakeoverExport` / `uploadEncryptedDeviceTakeoverExport` | DeviceTakeoverExportAuthorization / DeviceTakeoverExportReceipt | `pda.takeover.export` | F09-TAKEOVER-UPLOAD | FD/BW | `interaction-state-matrix.md` / PLANNED |
 | LINE-01 | P0 | 创建订舱、班次与提货计划 | OPS-BOOKING | F04 | `createBooking` | Booking | `linehaul.booking.create` | LINE-E2E-01 | FW/BW | `page-matrix.md` / PLANNED |
 | LINE-02 | P0 | 提单主从关系与运单归集 | OPS-BOL | F04 | `createBillOfLading` | BillOfLading | `linehaul.bol.write` | F04-NORMAL | FW/BW | `interaction-state-matrix.md` / PLANNED |
 | LINE-03 | P0 | 报关、集包、卡板和装柜兼容检查 | OPS-LOAD-UNIT | F04 | `validateLoadCompatibility` | CompatibilityResult | `linehaul.load.validate` | F04-FAILED-INCOMPATIBLE | FW/BW | `interaction-state-matrix.md` / PLANNED |
 | LINE-04 | P0 | FBA 箱号和 Amazon 货件关联 | OPS-FBA | — | `linkFbaShipment` | FbaShipmentLink | `linehaul.fba.write` | LINE-INT-04 | FW/BX | `scope-decisions.md` / PLANNED |
 | LM-01 | P0 | 尾程接货批次、清单与实扫差异 | OPS-LM-INTAKE | — | `createLastMileIntake` / `scanLastMileIntake` | LastMileIntake | `lastmile.intake` | LM-E2E-01 | FW/BW | `product-spec.md` / PLANNED |
 | LM-02 | P0 | 派送任务、路线、司机/合作方和时间窗 | OPS-LM-DELIVERY | — | `createDeliveryTask` | DeliveryTask | `lastmile.delivery.plan` | LM-E2E-02 | FW/BW | `product-spec.md` / PLANNED |
-| LM-03 | P0 | 打托、装车、派送和异常扫描 | PDA-LM-DELIVERY | — | `updateDeliveryTaskStatus` | DeliveryEvent | `lastmile.delivery.execute` | LM-DEVICE-03 | FD/BW | `page-matrix.md` / PLANNED |
-| LM-04 | P0 | 签收姓名、位置、照片/签名和 POD 版本 | PDA-POD | — | `captureProofOfDelivery` / `amendProofOfDelivery` | ProofOfDelivery | `lastmile.pod.write` | LM-INT-04 | FD/BW | `product-spec.md` / PLANNED |
+| LM-03 | P0 | 打托、装车、派送和异常扫描；权威状态/版本回执 | PDA-LM-DELIVERY | F09 | `updateDeliveryTaskStatus` | DeliveryEvent / DeliveryTaskTransitionReceipt | `lastmile.delivery.execute` | LM-DEVICE-03 | FD/BW | `page-matrix.md` / PLANNED |
+| LM-04 | P0 | 签收姓名、位置、照片/签名、POD 版本和权威任务回执 | PDA-POD | F09 | `captureProofOfDelivery` / `amendProofOfDelivery` | ProofOfDelivery / ProofOfDeliveryCaptureReceipt | `lastmile.pod.write` | LM-INT-04 | FD/BW | `product-spec.md` / PLANNED |
 | LM-05 | P0 | 合作方下发、回传、状态对账和重放 | OPS-LM-PARTNER | — | `syncLastMilePartner` / `replayPartnerEvent` | PartnerSyncEvent | `integration.lastmile.manage` | LM-CONTRACT-05 | FW/BX | `scope-decisions.md` / PLANNED |
 | LM-06 | P0 | 尾程应收应付和合作方对账 | OPS-LM-FINANCE | F07 | `generateLastMileCharges` | Charge | `finance.charge.generate` | LM-FIN-06 | FW/BF | `product-spec.md` / PLANNED |
 | TRK-01 | P0 | 承运商轨迹去重、乱序和来源时间 | OPS-TRACKING | F05 | `ingestTrackingEvent` | TrackingEvent | `tracking.ingest` | F05-OUT-OF-ORDER | FW/BT | `interaction-state-matrix.md` / PLANNED |

@@ -693,7 +693,13 @@ paths:
     post:
       tags: [Devices]
       operationId: uploadDeviceMedia
-      summary: Upload or resume one PDA media object
+      summary: Upload or resume one scoped PDA media reservation
+      description: >-
+        Stores encrypted-in-transit media against the authenticated tenant, warehouse,
+        subject, device and client event scope. Upload alone creates a reservation and
+        never completes business processing. The reservation becomes READY only after
+        an atomic transition or POD claim, or after device event sync returns APPLIED
+        or DUPLICATE for the same eventId. Unclaimed reservations expire by policy.
       x-feature-id: PDA-03
       x-permission: pda.sync
       x-audit-event: device.media.uploaded
@@ -708,11 +714,96 @@ paths:
               $ref: '#/components/schemas/UploadDeviceMediaRequest'
       responses:
         '201':
-          description: Media uploaded or original result returned for a duplicate.
+          description: Scoped reservation created or its idempotent result returned.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/DeviceMediaResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /devices/{deviceId}/takeover-exports:authorize:
+    post:
+      tags: [Devices]
+      operationId: authorizeDeviceTakeoverExport
+      summary: Authorize one short-lived encrypted PDA takeover export
+      description: >-
+        Authorizes the current administrator and server-owned device scope before any
+        export bytes leave the PDA. The response supplies an ephemeral RSA-OAEP-256
+        public key. The client cannot self-authorize and must never submit plaintext
+        events, manifests, media or content-encryption keys.
+      x-feature-id: PDA-04
+      x-permission: pda.takeover.export
+      x-audit-event: device.takeover-export.authorized
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthorizeDeviceTakeoverExportRequest'
+      responses:
+        '201':
+          description: Short-lived server authorization and wrapping key issued.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceTakeoverExportAuthorizationResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /devices/{deviceId}/takeover-exports/{authorizationId}:
+    post:
+      tags: [Devices]
+      operationId: uploadEncryptedDeviceTakeoverExport
+      summary: Upload an authorized encrypted PDA event and media package
+      description: >-
+        Accepts only an AES-256-GCM ciphertext containing the complete canonical
+        manifest, DeviceEvent envelopes and referenced media. The AES key must be
+        wrapped by the authorization RSA-OAEP-256 public key; the GCM authentication
+        tag is appended to ciphertext. Plaintext event, manifest and media parts are
+        forbidden. Authorization scope, expiry, manifest hash and ciphertext hash are
+        verified before a receipt can become VERIFIED.
+      x-feature-id: PDA-04
+      x-permission: pda.takeover.export
+      x-audit-event: device.takeover-export.uploaded
+      parameters:
+        - $ref: '#/components/parameters/DeviceId'
+        - $ref: '#/components/parameters/TakeoverAuthorizationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadEncryptedDeviceTakeoverExportRequest'
+      responses:
+        '201':
+          description: Auditable encrypted export receipt.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceTakeoverExportReceiptResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '410':
+          $ref: '#/components/responses/Expired'
         '413':
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
@@ -1002,6 +1093,11 @@ paths:
       tags: [LastMile]
       operationId: captureProofOfDelivery
       summary: Capture an immutable proof-of-delivery version
+      description: >-
+        Atomically persists the client deviceEventId, claims its scoped media
+        reservations, creates an immutable POD version and completes the delivery task.
+        Only the returned deliveryTask status and version are authoritative for client
+        state and successful local cleanup.
       x-feature-id: LM-04
       x-permission: lastmile.pod.write
       x-audit-event: last-mile.pod.captured
@@ -1017,15 +1113,22 @@ paths:
               $ref: '#/components/schemas/CaptureProofOfDeliveryRequest'
       responses:
         '201':
-          description: Immutable POD version captured.
+          description: Immutable POD and authoritative completed delivery task captured.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ProofOfDeliveryResponse'
+                $ref: '#/components/schemas/ProofOfDeliveryCaptureResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/StaleVersion'
         '422':
-          $ref: '#/components/responses/ValidationFailed'
+          $ref: '#/components/responses/StateTransitionFailed'
   /tracking/events:ingest:
     post:
       tags: [Tracking]
@@ -3012,6 +3115,12 @@ paths:
       tags: [LastMile]
       operationId: updateDeliveryTaskStatus
       summary: Advance delivery task state with scan evidence
+      description: >-
+        Atomically persists the client deviceEventId, validates the canonical transition,
+        claims the event's scoped media reservations and returns the authoritative task.
+        PLANNED -> PALLETIZED -> LOADED -> OUT_FOR_DELIVERY -> COMPLETED is the only
+        forward path. PLANNED, PALLETIZED, LOADED, OUT_FOR_DELIVERY and COMPLETED may each transition to EXCEPTION.
+        EXCEPTION is terminal.
       x-feature-id: LM-03
       x-permission: lastmile.delivery.execute
       x-audit-event: lastmile.delivery-task.transitioned
@@ -3026,7 +3135,16 @@ paths:
               $ref: '#/components/schemas/DeliveryEvent'
       responses:
         '200':
-          $ref: '#/components/responses/CommandSucceeded'
+          description: Transition applied with the authoritative delivery task version.
+          headers:
+            ETag:
+              $ref: '#/components/headers/ETag'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryTaskTransitionResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -4473,6 +4591,12 @@ components:
       in: path
       required: true
       schema: {$ref: '#/components/schemas/Ulid'}
+    TakeoverAuthorizationId:
+      name: authorizationId
+      in: path
+      required: true
+      description: Server-issued short-lived takeover export authorization.
+      schema: {$ref: '#/components/schemas/Ulid'}
     LoadUnitId:
       name: loadUnitId
       in: path
@@ -4704,6 +4828,8 @@ components:
         - SHIPMENT_ON_HOLD
         - STALE_VERSION
         - STATE_TRANSITION_NOT_ALLOWED
+        - TAKEOVER_AUTHORIZATION_EXPIRED
+        - TAKEOVER_EXPORT_INTEGRITY_FAILED
         - TRACKING_EVENT_DUPLICATE
         - VALIDATION_FAILED
         - WAREHOUSE_SWITCH_BLOCKED
@@ -5223,7 +5349,7 @@ components:
           uniqueItems: true
           items:
             type: string
-            enum: [pda.use, pda.sync, pda.conflict.resolve, lastmile.delivery.execute, lastmile.pod.write]
+            enum: [pda.use, pda.sync, pda.conflict.resolve, pda.takeover.export, lastmile.delivery.execute, lastmile.pod.write]
         expiresAt: {type: string, format: date-time}
     DeviceSessionResponse:
       type: object
@@ -5249,20 +5375,44 @@ components:
         meta: {$ref: '#/components/schemas/Meta'}
     UploadDeviceMediaRequest:
       type: object
+      additionalProperties: false
       required: [eventId, mediaId, contentHash, file]
       properties:
-        eventId: {$ref: '#/components/schemas/Ulid'}
+        eventId:
+          $ref: '#/components/schemas/Ulid'
+          description: Must equal the transition or POD deviceEventId that will claim this reservation.
         mediaId: {type: string}
-        contentHash: {type: string}
+        contentHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Lowercase SHA-256 of the uploaded media bytes.
         file: {type: string, format: binary}
+    DeviceScope:
+      type: object
+      additionalProperties: false
+      description: Server-owned tenant, warehouse, subject and device binding.
+      required: [tenantId, warehouseId, subjectId, deviceId]
+      properties:
+        tenantId: {$ref: '#/components/schemas/Ulid'}
+        warehouseId: {$ref: '#/components/schemas/Ulid'}
+        subjectId: {$ref: '#/components/schemas/Ulid'}
+        deviceId: {$ref: '#/components/schemas/Ulid'}
     DeviceMedia:
       type: object
-      required: [mediaId, eventId, status, objectRef]
+      additionalProperties: false
+      description: >-
+        A server-scoped reservation for one client event. UPLOADED means reserved bytes were accepted but not claimed. READY only after an atomic transition or POD claim, or after device event sync returns APPLIED or DUPLICATE
+        for the same eventId; upload by itself never completes the media.
+      required: [mediaId, eventId, scope, status, objectRef, expiresAt]
       properties:
         mediaId: {type: string}
         eventId: {$ref: '#/components/schemas/Ulid'}
+        scope: {$ref: '#/components/schemas/DeviceScope'}
         status: {type: string, enum: [UPLOADED, SCANNING, READY, REJECTED]}
-        objectRef: {type: string}
+        objectRef:
+          type: string
+          description: Opaque reservation reference; never a public object URL.
+        expiresAt: {type: string, format: date-time}
     DeviceMediaResponse:
       type: object
       required: [data, meta]
@@ -5301,10 +5451,17 @@ components:
           items: {$ref: '#/components/schemas/DeviceEventEnvelope'}
     DeviceEventSyncResult:
       type: object
-      required: [eventId, disposition]
+      description: >-
+        APPLIED or DUPLICATE atomically claims scoped mediaRefs and makes accepted media
+        READY. CONFLICT and REJECTED leave reservations unclaimed for retry or takeover.
+      required: [eventId, disposition, claimedMediaRefs]
       properties:
         eventId: {$ref: '#/components/schemas/Ulid'}
         disposition: {type: string, enum: [APPLIED, DUPLICATE, CONFLICT, REJECTED]}
+        claimedMediaRefs:
+          type: array
+          uniqueItems: true
+          items: {type: string}
         serverVersion: {type: integer}
         conflictId: {oneOf: [{$ref: '#/components/schemas/Ulid'}, {type: 'null'}]}
         conflictVersion: {type: integer, minimum: 1}
@@ -5316,6 +5473,113 @@ components:
         data:
           type: array
           items: {$ref: '#/components/schemas/DeviceEventSyncResult'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    AuthorizeDeviceTakeoverExportRequest:
+      type: object
+      additionalProperties: false
+      description: Declares the complete local package before a server key is issued.
+      required: [reason, manifestHash, eventCount, mediaCount]
+      properties:
+        reason: {type: string, minLength: 5, maxLength: 500}
+        manifestHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Lowercase SHA-256 of the canonical plaintext manifest.
+        eventCount: {type: integer, minimum: 1}
+        mediaCount: {type: integer, minimum: 0}
+    RsaOaepPublicJwk:
+      type: object
+      additionalProperties: false
+      description: Ephemeral public wrapping key. Private key material is never returned.
+      required: [kty, kid, use, alg, key_ops, n, e]
+      properties:
+        kty: {type: string, enum: [RSA]}
+        kid: {type: string, minLength: 1}
+        use: {type: string, enum: [enc]}
+        alg: {type: string, enum: [RSA-OAEP-256]}
+        key_ops:
+          type: array
+          minItems: 1
+          maxItems: 1
+          items: {type: string, enum: [wrapKey]}
+        n: {type: string, minLength: 1, description: Base64url modulus without padding.}
+        e: {type: string, minLength: 1, description: Base64url exponent without padding.}
+    DeviceTakeoverExportAuthorization:
+      type: object
+      additionalProperties: false
+      description: >-
+        Server-issued authorization bound to one device scope and declared manifest. It
+        expires no later than five minutes after issuance and cannot be client-created.
+      required: [authorizationId, deviceId, scope, manifestHash, eventCount, mediaCount, expiresAt, keyEncryptionAlgorithm, contentEncryptionAlgorithm, publicKeyJwk, maxCiphertextBytes, status]
+      properties:
+        authorizationId: {$ref: '#/components/schemas/Ulid'}
+        deviceId: {$ref: '#/components/schemas/Ulid'}
+        scope: {$ref: '#/components/schemas/DeviceScope'}
+        manifestHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        eventCount: {type: integer, minimum: 1}
+        mediaCount: {type: integer, minimum: 0}
+        expiresAt: {type: string, format: date-time}
+        keyEncryptionAlgorithm: {type: string, enum: [RSA-OAEP-256]}
+        contentEncryptionAlgorithm: {type: string, enum: [A256GCM]}
+        publicKeyJwk: {$ref: '#/components/schemas/RsaOaepPublicJwk'}
+        maxCiphertextBytes: {type: integer, minimum: 1}
+        status: {type: string, enum: [AUTHORIZED]}
+    DeviceTakeoverExportAuthorizationResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/DeviceTakeoverExportAuthorization'}
+        meta: {$ref: '#/components/schemas/Meta'}
+    UploadEncryptedDeviceTakeoverExportRequest:
+      type: object
+      additionalProperties: false
+      description: >-
+        Multipart envelope with no plaintext business payload. ciphertext is an
+        AES-256-GCM encrypted archive of the canonical manifest, all events and all
+        referenced media, with the 128-bit authentication tag appended. wrappedKey is
+        the 256-bit AES key wrapped by the authorization RSA-OAEP-256 public key.
+      required: [manifestHash, ciphertextHash, ciphertext, iv, wrappedKey]
+      properties:
+        manifestHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        ciphertextHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: Lowercase SHA-256 of ciphertext including its GCM tag.
+        ciphertext: {type: string, format: binary}
+        iv:
+          type: string
+          format: byte
+          description: Exactly 12 random bytes, base64 encoded for multipart transport.
+        wrappedKey: {type: string, format: binary}
+    DeviceTakeoverExportReceipt:
+      type: object
+      additionalProperties: false
+      description: >-
+        Server audit receipt. Clients may clear protected local events and media only
+        when status is VERIFIED and both returned hashes match the submitted package.
+      required: [exportId, authorizationId, deviceId, scope, manifestHash, ciphertextHash, eventCount, mediaCount, checksumAlgorithm, status, receivedAt]
+      properties:
+        exportId: {$ref: '#/components/schemas/Ulid'}
+        authorizationId: {$ref: '#/components/schemas/Ulid'}
+        deviceId: {$ref: '#/components/schemas/Ulid'}
+        scope: {$ref: '#/components/schemas/DeviceScope'}
+        manifestHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        ciphertextHash: {type: string, pattern: '^[a-f0-9]{64}$'}
+        eventCount: {type: integer, minimum: 1}
+        mediaCount: {type: integer, minimum: 0}
+        checksumAlgorithm: {type: string, enum: [SHA-256]}
+        status: {type: string, enum: [RECEIVED, VERIFIED, REJECTED]}
+        receivedAt: {type: string, format: date-time}
+        verifiedAt: {type: [string, 'null'], format: date-time}
+    DeviceTakeoverExportReceiptResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/DeviceTakeoverExportReceipt'}
         meta: {$ref: '#/components/schemas/Meta'}
     ResolveDeviceConflictRequest:
       type: object
@@ -5500,13 +5764,21 @@ components:
           properties:
             startsAt: {type: string, format: date-time}
             endsAt: {type: string, format: date-time}
+    DeliveryTaskStatus:
+      type: string
+      description: >-
+        Canonical state machine: PLANNED -> PALLETIZED -> LOADED -> OUT_FOR_DELIVERY -> COMPLETED.
+        PLANNED, PALLETIZED, LOADED, OUT_FOR_DELIVERY and COMPLETED may each transition to EXCEPTION.
+        EXCEPTION is terminal; COMPLETED has no forward transition other than EXCEPTION.
+      enum: [PLANNED, PALLETIZED, LOADED, OUT_FOR_DELIVERY, COMPLETED, EXCEPTION]
     DeliveryTask:
       type: object
+      additionalProperties: false
       required: [id, taskNo, status, waybillCount, version]
       properties:
         id: {$ref: '#/components/schemas/Ulid'}
         taskNo: {type: string}
-        status: {type: string, enum: [PLANNED, LOADED, OUT_FOR_DELIVERY, COMPLETED, EXCEPTION]}
+        status: {$ref: '#/components/schemas/DeliveryTaskStatus'}
         waybillCount: {type: integer, minimum: 1}
         version: {type: integer, minimum: 1}
     DeliveryTaskResponse:
@@ -5515,15 +5787,74 @@ components:
       properties:
         data: {$ref: '#/components/schemas/DeliveryTask'}
         meta: {$ref: '#/components/schemas/Meta'}
+    DeliveryScanEvidence:
+      type: object
+      additionalProperties: false
+      required: [scannedCode]
+      properties:
+        scannedCode: {type: string, minLength: 1}
+        palletId: {type: string}
+        vehicleId: {type: string}
+        exceptionCode: {type: string}
+        note: {type: string, maxLength: 500}
+    DeliveryEvent:
+      type: object
+      additionalProperties: false
+      description: >-
+        Client-authored device event intent for a canonical delivery task transition.
+        deviceEventId is persisted and audited by the server; targetStatus is validated
+        against DeliveryTaskStatus and the current authoritative aggregate version.
+      required: [deviceEventId, targetStatus, occurredAt, mediaRefs, scanEvidence]
+      properties:
+        deviceEventId: {$ref: '#/components/schemas/Ulid'}
+        targetStatus: {$ref: '#/components/schemas/DeliveryTaskStatus'}
+        occurredAt: {type: string, format: date-time}
+        mediaRefs:
+          type: array
+          uniqueItems: true
+          description: Scoped reservations whose eventId must equal deviceEventId.
+          items: {type: string}
+        scanEvidence: {$ref: '#/components/schemas/DeliveryScanEvidence'}
+    LastMileDeviceCommandDisposition:
+      type: string
+      enum: [APPLIED, DUPLICATE]
+    DeliveryTaskTransitionReceipt:
+      type: object
+      additionalProperties: false
+      description: >-
+        Server confirmation of the exact client device event and aggregate mutation.
+        Only this authoritative deliveryTask status and version may update or clear client state.
+      required: [deviceEventId, disposition, deliveryTask, claimedMediaRefs]
+      properties:
+        deviceEventId: {$ref: '#/components/schemas/Ulid'}
+        disposition: {$ref: '#/components/schemas/LastMileDeviceCommandDisposition'}
+        deliveryTask: {$ref: '#/components/schemas/DeliveryTask'}
+        claimedMediaRefs:
+          type: array
+          uniqueItems: true
+          items: {type: string}
+    DeliveryTaskTransitionResponse:
+      type: object
+      additionalProperties: false
+      required: [data, meta]
+      properties:
+        data: {$ref: '#/components/schemas/DeliveryTaskTransitionReceipt'}
+        meta: {$ref: '#/components/schemas/Meta'}
     CaptureProofOfDeliveryRequest:
       type: object
-      required: [recipientName, signedAt, evidenceRefs]
+      additionalProperties: false
+      required: [deviceEventId, recipientName, signedAt, evidenceRefs]
       properties:
+        deviceEventId: {$ref: '#/components/schemas/Ulid'}
         recipientName: {type: string}
         signedAt: {type: string, format: date-time}
         latitude: {type: number, minimum: -90, maximum: 90}
         longitude: {type: number, minimum: -180, maximum: 180}
-        evidenceRefs: {type: array, minItems: 1, items: {type: string}}
+        evidenceRefs:
+          type: array
+          minItems: 1
+          description: Scoped media reservations whose eventId must equal deviceEventId.
+          items: {type: string}
         note: {type: string}
     ProofOfDelivery:
       type: object
@@ -5535,11 +5866,29 @@ components:
         recipientName: {type: string}
         signedAt: {type: string, format: date-time}
         evidenceRefs: {type: array, items: {type: string}}
-    ProofOfDeliveryResponse:
+    ProofOfDeliveryCaptureReceipt:
       type: object
+      additionalProperties: false
+      description: >-
+        Server confirmation of the exact client device event, immutable POD and completed
+        aggregate. Only this authoritative deliveryTask status and version may update or
+        clear client state; claimedMediaRefs are safe for successful local cleanup.
+      required: [deviceEventId, disposition, deliveryTask, proofOfDelivery, claimedMediaRefs]
+      properties:
+        deviceEventId: {$ref: '#/components/schemas/Ulid'}
+        disposition: {$ref: '#/components/schemas/LastMileDeviceCommandDisposition'}
+        deliveryTask: {$ref: '#/components/schemas/DeliveryTask'}
+        proofOfDelivery: {$ref: '#/components/schemas/ProofOfDelivery'}
+        claimedMediaRefs:
+          type: array
+          uniqueItems: true
+          items: {type: string}
+    ProofOfDeliveryCaptureResponse:
+      type: object
+      additionalProperties: false
       required: [data, meta]
       properties:
-        data: {$ref: '#/components/schemas/ProofOfDelivery'}
+        data: {$ref: '#/components/schemas/ProofOfDeliveryCaptureReceipt'}
         meta: {$ref: '#/components/schemas/Meta'}
     IngestTrackingEventRequest:
       type: object
@@ -6134,10 +6483,6 @@ components:
         - $ref: '#/components/schemas/DomainRecord'
     FbaShipmentLink:
       description: Amazon shipment and FBA carton linkage.
-      allOf:
-        - $ref: '#/components/schemas/DomainRecord'
-    DeliveryEvent:
-      description: Last-mile delivery task transition and scan evidence.
       allOf:
         - $ref: '#/components/schemas/DomainRecord'
     PartnerSyncEvent:

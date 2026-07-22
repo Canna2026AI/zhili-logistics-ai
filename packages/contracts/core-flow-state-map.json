@@ -183,6 +183,18 @@
   },
   "F09": {
     "F09-NORMAL": { "source": "api", "action": "syncDeviceEvents" },
+    "F09-MEDIA-RESERVATION": {
+      "source": "api",
+      "action": "uploadDeviceMedia"
+    },
+    "F09-LAST-MILE": {
+      "source": "api",
+      "action": "updateDeliveryTaskStatus"
+    },
+    "F09-POD": {
+      "source": "api",
+      "action": "captureProofOfDelivery"
+    },
     "F09-DUPLICATE": {
       "source": "api",
       "action": "syncDeviceEvents",
@@ -202,6 +214,19 @@
       "source": "client",
       "action": "clientAction:resumeAfterRestart",
       "errorCode": "WAREHOUSE_SWITCH_BLOCKED"
+    },
+    "F09-TAKEOVER-AUTH": {
+      "source": "api",
+      "action": "authorizeDeviceTakeoverExport"
+    },
+    "F09-TAKEOVER-UPLOAD": {
+      "source": "api",
+      "action": "uploadEncryptedDeviceTakeoverExport"
+    },
+    "F09-TAKEOVER-EXPIRED": {
+      "source": "api",
+      "action": "uploadEncryptedDeviceTakeoverExport",
+      "errorCode": "TAKEOVER_AUTHORIZATION_EXPIRED"
     }
   },
   "F10": {

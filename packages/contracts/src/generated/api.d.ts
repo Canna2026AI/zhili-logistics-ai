@@ -438,8 +438,51 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Upload or resume one PDA media object */
+    /**
+     * Upload or resume one scoped PDA media reservation
+     * @description Stores encrypted-in-transit media against the authenticated tenant, warehouse, subject, device and client event scope. Upload alone creates a reservation and never completes business processing. The reservation becomes READY only after an atomic transition or POD claim, or after device event sync returns APPLIED or DUPLICATE for the same eventId. Unclaimed reservations expire by policy.
+     */
     post: operations['uploadDeviceMedia'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/devices/{deviceId}/takeover-exports:authorize': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Authorize one short-lived encrypted PDA takeover export
+     * @description Authorizes the current administrator and server-owned device scope before any export bytes leave the PDA. The response supplies an ephemeral RSA-OAEP-256 public key. The client cannot self-authorize and must never submit plaintext events, manifests, media or content-encryption keys.
+     */
+    post: operations['authorizeDeviceTakeoverExport'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/devices/{deviceId}/takeover-exports/{authorizationId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Upload an authorized encrypted PDA event and media package
+     * @description Accepts only an AES-256-GCM ciphertext containing the complete canonical manifest, DeviceEvent envelopes and referenced media. The AES key must be wrapped by the authorization RSA-OAEP-256 public key; the GCM authentication tag is appended to ciphertext. Plaintext event, manifest and media parts are forbidden. Authorization scope, expiry, manifest hash and ciphertext hash are verified before a receipt can become VERIFIED.
+     */
+    post: operations['uploadEncryptedDeviceTakeoverExport'];
     delete?: never;
     options?: never;
     head?: never;
@@ -625,7 +668,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Capture an immutable proof-of-delivery version */
+    /**
+     * Capture an immutable proof-of-delivery version
+     * @description Atomically persists the client deviceEventId, claims its scoped media reservations, creates an immutable POD version and completes the delivery task. Only the returned deliveryTask status and version are authoritative for client state and successful local cleanup.
+     */
     post: operations['captureProofOfDelivery'];
     delete?: never;
     options?: never;
@@ -1936,7 +1982,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Advance delivery task state with scan evidence */
+    /**
+     * Advance delivery task state with scan evidence
+     * @description Atomically persists the client deviceEventId, validates the canonical transition, claims the event's scoped media reservations and returns the authoritative task. PLANNED -> PALLETIZED -> LOADED -> OUT_FOR_DELIVERY -> COMPLETED is the only forward path. PLANNED, PALLETIZED, LOADED, OUT_FOR_DELIVERY and COMPLETED may each transition to EXCEPTION. EXCEPTION is terminal.
+     */
     post: operations['updateDeliveryTaskStatus'];
     delete?: never;
     options?: never;
@@ -2890,6 +2939,8 @@ export interface components {
       | 'SHIPMENT_ON_HOLD'
       | 'STALE_VERSION'
       | 'STATE_TRANSITION_NOT_ALLOWED'
+      | 'TAKEOVER_AUTHORIZATION_EXPIRED'
+      | 'TAKEOVER_EXPORT_INTEGRITY_FAILED'
       | 'TRACKING_EVENT_DUPLICATE'
       | 'VALIDATION_FAILED'
       | 'WAREHOUSE_SWITCH_BLOCKED';
@@ -3270,6 +3321,7 @@ export interface components {
         | 'pda.use'
         | 'pda.sync'
         | 'pda.conflict.resolve'
+        | 'pda.takeover.export'
         | 'lastmile.delivery.execute'
         | 'lastmile.pod.write'
       )[];
@@ -3295,18 +3347,32 @@ export interface components {
       meta: components['schemas']['Meta'];
     };
     UploadDeviceMediaRequest: {
+      /** @description Must equal the transition or POD deviceEventId that will claim this reservation. */
       eventId: components['schemas']['Ulid'];
       mediaId: string;
+      /** @description Lowercase SHA-256 of the uploaded media bytes. */
       contentHash: string;
       /** Format: binary */
       file: string;
     };
+    /** @description Server-owned tenant, warehouse, subject and device binding. */
+    DeviceScope: {
+      tenantId: components['schemas']['Ulid'];
+      warehouseId: components['schemas']['Ulid'];
+      subjectId: components['schemas']['Ulid'];
+      deviceId: components['schemas']['Ulid'];
+    };
+    /** @description A server-scoped reservation for one client event. UPLOADED means reserved bytes were accepted but not claimed. READY only after an atomic transition or POD claim, or after device event sync returns APPLIED or DUPLICATE for the same eventId; upload by itself never completes the media. */
     DeviceMedia: {
       mediaId: string;
       eventId: components['schemas']['Ulid'];
+      scope: components['schemas']['DeviceScope'];
       /** @enum {string} */
       status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED';
+      /** @description Opaque reservation reference; never a public object URL. */
       objectRef: string;
+      /** Format: date-time */
+      expiresAt: string;
     };
     DeviceMediaResponse: {
       data: components['schemas']['DeviceMedia'];
@@ -3335,10 +3401,12 @@ export interface components {
     SyncDeviceEventsRequest: {
       events: components['schemas']['DeviceEventEnvelope'][];
     };
+    /** @description APPLIED or DUPLICATE atomically claims scoped mediaRefs and makes accepted media READY. CONFLICT and REJECTED leave reservations unclaimed for retry or takeover. */
     DeviceEventSyncResult: {
       eventId: components['schemas']['Ulid'];
       /** @enum {string} */
       disposition: 'APPLIED' | 'DUPLICATE' | 'CONFLICT' | 'REJECTED';
+      claimedMediaRefs: string[];
       serverVersion?: number;
       conflictId?: components['schemas']['Ulid'] | null;
       conflictVersion?: number;
@@ -3346,6 +3414,90 @@ export interface components {
     };
     SyncDeviceEventsResponse: {
       data: components['schemas']['DeviceEventSyncResult'][];
+      meta: components['schemas']['Meta'];
+    };
+    /** @description Declares the complete local package before a server key is issued. */
+    AuthorizeDeviceTakeoverExportRequest: {
+      reason: string;
+      /** @description Lowercase SHA-256 of the canonical plaintext manifest. */
+      manifestHash: string;
+      eventCount: number;
+      mediaCount: number;
+    };
+    /** @description Ephemeral public wrapping key. Private key material is never returned. */
+    RsaOaepPublicJwk: {
+      /** @enum {string} */
+      kty: 'RSA';
+      kid: string;
+      /** @enum {string} */
+      use: 'enc';
+      /** @enum {string} */
+      alg: 'RSA-OAEP-256';
+      key_ops: 'wrapKey'[];
+      /** @description Base64url modulus without padding. */
+      n: string;
+      /** @description Base64url exponent without padding. */
+      e: string;
+    };
+    /** @description Server-issued authorization bound to one device scope and declared manifest. It expires no later than five minutes after issuance and cannot be client-created. */
+    DeviceTakeoverExportAuthorization: {
+      authorizationId: components['schemas']['Ulid'];
+      deviceId: components['schemas']['Ulid'];
+      scope: components['schemas']['DeviceScope'];
+      manifestHash: string;
+      eventCount: number;
+      mediaCount: number;
+      /** Format: date-time */
+      expiresAt: string;
+      /** @enum {string} */
+      keyEncryptionAlgorithm: 'RSA-OAEP-256';
+      /** @enum {string} */
+      contentEncryptionAlgorithm: 'A256GCM';
+      publicKeyJwk: components['schemas']['RsaOaepPublicJwk'];
+      maxCiphertextBytes: number;
+      /** @enum {string} */
+      status: 'AUTHORIZED';
+    };
+    DeviceTakeoverExportAuthorizationResponse: {
+      data: components['schemas']['DeviceTakeoverExportAuthorization'];
+      meta: components['schemas']['Meta'];
+    };
+    /** @description Multipart envelope with no plaintext business payload. ciphertext is an AES-256-GCM encrypted archive of the canonical manifest, all events and all referenced media, with the 128-bit authentication tag appended. wrappedKey is the 256-bit AES key wrapped by the authorization RSA-OAEP-256 public key. */
+    UploadEncryptedDeviceTakeoverExportRequest: {
+      manifestHash: string;
+      /** @description Lowercase SHA-256 of ciphertext including its GCM tag. */
+      ciphertextHash: string;
+      /** Format: binary */
+      ciphertext: string;
+      /**
+       * Format: byte
+       * @description Exactly 12 random bytes, base64 encoded for multipart transport.
+       */
+      iv: string;
+      /** Format: binary */
+      wrappedKey: string;
+    };
+    /** @description Server audit receipt. Clients may clear protected local events and media only when status is VERIFIED and both returned hashes match the submitted package. */
+    DeviceTakeoverExportReceipt: {
+      exportId: components['schemas']['Ulid'];
+      authorizationId: components['schemas']['Ulid'];
+      deviceId: components['schemas']['Ulid'];
+      scope: components['schemas']['DeviceScope'];
+      manifestHash: string;
+      ciphertextHash: string;
+      eventCount: number;
+      mediaCount: number;
+      /** @enum {string} */
+      checksumAlgorithm: 'SHA-256';
+      /** @enum {string} */
+      status: 'RECEIVED' | 'VERIFIED' | 'REJECTED';
+      /** Format: date-time */
+      receivedAt: string;
+      /** Format: date-time */
+      verifiedAt?: string | null;
+    };
+    DeviceTakeoverExportReceiptResponse: {
+      data: components['schemas']['DeviceTakeoverExportReceipt'];
       meta: components['schemas']['Meta'];
     };
     ResolveDeviceConflictRequest: {
@@ -3491,11 +3643,16 @@ export interface components {
         endsAt: string;
       };
     };
+    /**
+     * @description Canonical state machine: PLANNED -> PALLETIZED -> LOADED -> OUT_FOR_DELIVERY -> COMPLETED. PLANNED, PALLETIZED, LOADED, OUT_FOR_DELIVERY and COMPLETED may each transition to EXCEPTION. EXCEPTION is terminal; COMPLETED has no forward transition other than EXCEPTION.
+     * @enum {string}
+     */
+    DeliveryTaskStatus:
+      'PLANNED' | 'PALLETIZED' | 'LOADED' | 'OUT_FOR_DELIVERY' | 'COMPLETED' | 'EXCEPTION';
     DeliveryTask: {
       id: components['schemas']['Ulid'];
       taskNo: string;
-      /** @enum {string} */
-      status: 'PLANNED' | 'LOADED' | 'OUT_FOR_DELIVERY' | 'COMPLETED' | 'EXCEPTION';
+      status: components['schemas']['DeliveryTaskStatus'];
       waybillCount: number;
       version: number;
     };
@@ -3503,12 +3660,44 @@ export interface components {
       data: components['schemas']['DeliveryTask'];
       meta: components['schemas']['Meta'];
     };
+    DeliveryScanEvidence: {
+      scannedCode: string;
+      palletId?: string;
+      vehicleId?: string;
+      exceptionCode?: string;
+      note?: string;
+    };
+    /** @description Client-authored device event intent for a canonical delivery task transition. deviceEventId is persisted and audited by the server; targetStatus is validated against DeliveryTaskStatus and the current authoritative aggregate version. */
+    DeliveryEvent: {
+      deviceEventId: components['schemas']['Ulid'];
+      targetStatus: components['schemas']['DeliveryTaskStatus'];
+      /** Format: date-time */
+      occurredAt: string;
+      /** @description Scoped reservations whose eventId must equal deviceEventId. */
+      mediaRefs: string[];
+      scanEvidence: components['schemas']['DeliveryScanEvidence'];
+    };
+    /** @enum {string} */
+    LastMileDeviceCommandDisposition: 'APPLIED' | 'DUPLICATE';
+    /** @description Server confirmation of the exact client device event and aggregate mutation. Only this authoritative deliveryTask status and version may update or clear client state. */
+    DeliveryTaskTransitionReceipt: {
+      deviceEventId: components['schemas']['Ulid'];
+      disposition: components['schemas']['LastMileDeviceCommandDisposition'];
+      deliveryTask: components['schemas']['DeliveryTask'];
+      claimedMediaRefs: string[];
+    };
+    DeliveryTaskTransitionResponse: {
+      data: components['schemas']['DeliveryTaskTransitionReceipt'];
+      meta: components['schemas']['Meta'];
+    };
     CaptureProofOfDeliveryRequest: {
+      deviceEventId: components['schemas']['Ulid'];
       recipientName: string;
       /** Format: date-time */
       signedAt: string;
       latitude?: number;
       longitude?: number;
+      /** @description Scoped media reservations whose eventId must equal deviceEventId. */
       evidenceRefs: string[];
       note?: string;
     };
@@ -3521,8 +3710,16 @@ export interface components {
       signedAt: string;
       evidenceRefs: string[];
     };
-    ProofOfDeliveryResponse: {
-      data: components['schemas']['ProofOfDelivery'];
+    /** @description Server confirmation of the exact client device event, immutable POD and completed aggregate. Only this authoritative deliveryTask status and version may update or clear client state; claimedMediaRefs are safe for successful local cleanup. */
+    ProofOfDeliveryCaptureReceipt: {
+      deviceEventId: components['schemas']['Ulid'];
+      disposition: components['schemas']['LastMileDeviceCommandDisposition'];
+      deliveryTask: components['schemas']['DeliveryTask'];
+      proofOfDelivery: components['schemas']['ProofOfDelivery'];
+      claimedMediaRefs: string[];
+    };
+    ProofOfDeliveryCaptureResponse: {
+      data: components['schemas']['ProofOfDeliveryCaptureReceipt'];
       meta: components['schemas']['Meta'];
     };
     IngestTrackingEventRequest: {
@@ -4015,8 +4212,6 @@ export interface components {
     CompatibilityResult: components['schemas']['DomainRecord'];
     /** @description Amazon shipment and FBA carton linkage. */
     FbaShipmentLink: components['schemas']['DomainRecord'];
-    /** @description Last-mile delivery task transition and scan evidence. */
-    DeliveryEvent: components['schemas']['DomainRecord'];
     /** @description Checkpointed partner command, callback or reconciliation event. */
     PartnerSyncEvent: components['schemas']['DomainRecord'];
     /** @description Tracking stall detection evidence and automation outcome. */
@@ -4351,6 +4546,8 @@ export interface components {
     ReceiptId: components['schemas']['Ulid'];
     ConflictId: components['schemas']['Ulid'];
     DeviceId: components['schemas']['Ulid'];
+    /** @description Server-issued short-lived takeover export authorization. */
+    TakeoverAuthorizationId: components['schemas']['Ulid'];
     LoadUnitId: components['schemas']['Ulid'];
     DeliveryTaskId: components['schemas']['Ulid'];
     IssueId: components['schemas']['Ulid'];
@@ -5085,7 +5282,7 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Media uploaded or original result returned for a duplicate. */
+      /** @description Scoped reservation created or its idempotent result returned. */
       201: {
         headers: {
           [name: string]: unknown;
@@ -5094,6 +5291,78 @@ export interface operations {
           'application/json': components['schemas']['DeviceMediaResponse'];
         };
       };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      413: components['responses']['PayloadTooLarge'];
+      422: components['responses']['ValidationFailed'];
+    };
+  };
+  authorizeDeviceTakeoverExport: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable key for the same intended command, retained for at least 24 hours. */
+        'Idempotency-Key': components['parameters']['IdempotencyKey'];
+      };
+      path: {
+        deviceId: components['parameters']['DeviceId'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AuthorizeDeviceTakeoverExportRequest'];
+      };
+    };
+    responses: {
+      /** @description Short-lived server authorization and wrapping key issued. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeviceTakeoverExportAuthorizationResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      422: components['responses']['ValidationFailed'];
+    };
+  };
+  uploadEncryptedDeviceTakeoverExport: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable key for the same intended command, retained for at least 24 hours. */
+        'Idempotency-Key': components['parameters']['IdempotencyKey'];
+      };
+      path: {
+        deviceId: components['parameters']['DeviceId'];
+        /** @description Server-issued short-lived takeover export authorization. */
+        authorizationId: components['parameters']['TakeoverAuthorizationId'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'multipart/form-data': components['schemas']['UploadEncryptedDeviceTakeoverExportRequest'];
+      };
+    };
+    responses: {
+      /** @description Auditable encrypted export receipt. */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeviceTakeoverExportReceiptResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      410: components['responses']['Expired'];
       413: components['responses']['PayloadTooLarge'];
       422: components['responses']['ValidationFailed'];
     };
@@ -5420,17 +5689,20 @@ export interface operations {
       };
     };
     responses: {
-      /** @description Immutable POD version captured. */
+      /** @description Immutable POD and authoritative completed delivery task captured. */
       201: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
-          'application/json': components['schemas']['ProofOfDeliveryResponse'];
+          'application/json': components['schemas']['ProofOfDeliveryCaptureResponse'];
         };
       };
+      401: components['responses']['Unauthorized'];
+      403: components['responses']['Forbidden'];
       409: components['responses']['StaleVersion'];
-      422: components['responses']['ValidationFailed'];
+      422: components['responses']['StateTransitionFailed'];
     };
   };
   ingestTrackingEvent: {
@@ -7367,7 +7639,17 @@ export interface operations {
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Transition applied with the authoritative delivery task version. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeliveryTaskTransitionResponse'];
+        };
+      };
+      401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
       409: components['responses']['StaleVersion'];
       422: components['responses']['StateTransitionFailed'];

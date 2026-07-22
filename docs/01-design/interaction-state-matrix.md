@@ -115,17 +115,23 @@
 
 ## 10. Flow 09 PDA 离线扫描与冲突处理
 
-正常步骤：`clientAction:enqueueOfflineScan → clientAction:persistLocalQueue → clientAction:resumeAfterRestart → syncDeviceEvents → resolveDeviceConflict`。
+正常步骤：`clientAction:enqueueOfflineScan → clientAction:persistLocalQueue → uploadDeviceMedia（建立作用域保留）→ syncDeviceEvents / updateDeliveryTaskStatus / captureProofOfDelivery → clientAction:clearAppliedEventAndClaimedMedia`。冲突事件进入 `getDeviceConflict → resolveDeviceConflict`；无法同步且需要换绑时，仅允许 `authorizeDeviceTakeoverExport → uploadEncryptedDeviceTakeoverExport`。
 
 | 分支 | State ID | 必须呈现与处理 |
 | --- | --- | --- |
-| 正常 | `F09-NORMAL` | 顶部始终显示在线/离线、待同步数和照片进度；成功反馈含运单与动作 |
+| 正常 | `F09-NORMAL` | 顶部始终显示在线/离线、待同步数和照片进度；只有服务端 `APPLIED/DUPLICATE` 可触发成功清理 |
+| 媒体保留 | `F09-MEDIA-RESERVATION` | `UPLOADED` 仅表示已建立 tenant/warehouse/subject/device/event 作用域保留；不得视为业务完成或单独清理 |
+| 尾程 | `F09-LAST-MILE` | 打托、装车、派送严格执行 `PLANNED → PALLETIZED → LOADED → OUT_FOR_DELIVERY → COMPLETED`，主链每个状态均可转 `EXCEPTION` |
+| POD | `F09-POD` | 请求携带客户端 `deviceEventId`；页面只使用响应中权威 `deliveryTask.status/version`，不得本地 `version + 1` |
 | 重复 | `F09-DUPLICATE` | 本地去抖与服务端幂等都命中原结果；明确“已处理”而非错误 |
 | 冲突 | `F09-CONFLICT` | 展示本地事件、服务器状态、差异和允许决策：保留服务器、重新应用、提交人工 |
 | 队列满/登录失效 | `F09-BLOCKED` | 队列接近上限先警告；满后停止新业务扫描但允许导出/同步；登录失效保护本地数据 |
-| 重启/换仓 | `F09-RESTART` | 加密队列重启恢复；存在未同步事件时禁止换用户/仓库，除非管理员导出并接管 |
+| 重启/换仓 | `F09-RESTART` | 加密队列重启恢复；存在未同步事件时禁止换用户/仓库，除非管理员完成服务端授权的加密导出 |
+| 接管授权 | `F09-TAKEOVER-AUTH` | 服务端校验 `pda.takeover.export`、当前作用域与 manifest hash，返回不超过 5 分钟的 authorizationId 和 RSA-OAEP-256 公钥 JWK |
+| 加密导出 | `F09-TAKEOVER-UPLOAD` | 完整 manifest + events + media 用 AES-256-GCM 加密，AES key 用授权公钥封装；禁止明文或客户端自授权 |
+| 授权过期 | `F09-TAKEOVER-EXPIRED` | 保留本地事件与媒体，丢弃旧密文并重新申请授权；不得降级为明文导出 |
 
-离线事件 envelope 必含 `eventId/deviceId/localSequence/tenantId/warehouseId/subjectId/action/entityRef/payload/mediaRefs/baseVersion/idempotencyKey/occurredAt/timezone/appVersion`。服务端返回 `APPLIED/DUPLICATE/CONFLICT/REJECTED` 和可执行补救。
+离线事件 envelope 必含 `eventId/deviceId/localSequence/tenantId/warehouseId/subjectId/action/entityRef/payload/mediaRefs/baseVersion/idempotencyKey/occurredAt/timezone/appVersion`。在线尾程/POD 请求必须携带同一客户端 `deviceEventId`，响应中的 `deviceEventId + disposition + deliveryTask.status/version + claimedMediaRefs` 是成功清理事件与媒体的唯一依据。通用同步则仅在同一事件返回 `APPLIED/DUPLICATE` 时原子 claim `mediaRefs`；`CONFLICT/REJECTED` 必须保留本地数据。管理员接管只能在导出 receipt 为 `VERIFIED` 且返回的 manifest/ciphertext SHA-256 均匹配时清理本地包。
 
 ## 11. Flow 10 AI Excel 映射到关键写入审批
 
