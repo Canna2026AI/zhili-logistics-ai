@@ -55,9 +55,14 @@ CREATE TABLE outbox_events (
   payload jsonb NOT NULL,
   dedupe_key text NOT NULL,
   occurred_at timestamptz NOT NULL DEFAULT now(),
+  trace_id text,
   published_at timestamptz,
   attempts integer NOT NULL DEFAULT 0,
   last_error text,
+  lease_owner text,
+  lease_expires_at timestamptz,
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  dead_lettered_at timestamptz,
   CONSTRAINT outbox_events_id_ulid_check
     CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
   CONSTRAINT outbox_events_tenant_ulid_check
@@ -70,7 +75,9 @@ CREATE TABLE outbox_events (
     UNIQUE (tenant_id, dedupe_key)
 );
 
-CREATE INDEX outbox_events_pending_idx ON outbox_events (published_at, occurred_at);
+CREATE INDEX outbox_events_pending_claim_idx
+  ON outbox_events (next_attempt_at, occurred_at)
+  WHERE published_at IS NULL AND dead_lettered_at IS NULL;
 CREATE INDEX outbox_events_aggregate_idx
   ON outbox_events (tenant_id, aggregate_type, aggregate_id, aggregate_version);
 

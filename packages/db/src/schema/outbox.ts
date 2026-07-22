@@ -26,13 +26,22 @@ export const outboxEvents = pgTable(
     occurredAt: timestamp('occurred_at', { mode: 'date', withTimezone: true })
       .notNull()
       .defaultNow(),
+    traceId: text('trace_id'),
     publishedAt: timestamp('published_at', { mode: 'date', withTimezone: true }),
     attempts: integer('attempts').notNull().default(0),
     lastError: text('last_error'),
+    leaseOwner: text('lease_owner'),
+    leaseExpiresAt: timestamp('lease_expires_at', { mode: 'date', withTimezone: true }),
+    nextAttemptAt: timestamp('next_attempt_at', { mode: 'date', withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    deadLetteredAt: timestamp('dead_lettered_at', { mode: 'date', withTimezone: true }),
   },
   (table) => [
     unique('outbox_events_tenant_dedupe_unique').on(table.tenantId, table.dedupeKey),
-    index('outbox_events_pending_idx').on(table.publishedAt, table.occurredAt),
+    index('outbox_events_pending_claim_idx')
+      .on(table.nextAttemptAt, table.occurredAt)
+      .where(sql`${table.publishedAt} IS NULL AND ${table.deadLetteredAt} IS NULL`),
     index('outbox_events_aggregate_idx').on(
       table.tenantId,
       table.aggregateType,
