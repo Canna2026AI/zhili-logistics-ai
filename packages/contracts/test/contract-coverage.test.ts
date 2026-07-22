@@ -108,6 +108,15 @@ describe("OpenAPI UI-foundation gate", () => {
     expect(contract).toContain("ConflictFieldDifference:");
   });
 
+  it("returns server-owned PDA tenant, permissions and task versions", () => {
+    expect(contract).toContain(
+      "required: [deviceId, tenantId, warehouseId, subjectId, permissions, expiresAt]",
+    );
+    expect(contract).toContain(
+      "required: [id, type, reference, status, priority, version]",
+    );
+  });
+
   it("has generated TypeScript path types", () => {
     const generatedPath = resolve(packageRoot, "src/generated/api.d.ts");
     expect(existsSync(generatedPath)).toBe(true);

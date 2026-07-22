@@ -5212,11 +5212,18 @@ components:
         deviceCode: {type: string}
     DeviceSession:
       type: object
-      required: [deviceId, warehouseId, subjectId, expiresAt]
+      required: [deviceId, tenantId, warehouseId, subjectId, permissions, expiresAt]
       properties:
         deviceId: {$ref: '#/components/schemas/Ulid'}
+        tenantId: {$ref: '#/components/schemas/Ulid'}
         warehouseId: {$ref: '#/components/schemas/Ulid'}
         subjectId: {$ref: '#/components/schemas/Ulid'}
+        permissions:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum: [pda.use, pda.sync, pda.conflict.resolve, lastmile.delivery.execute, lastmile.pod.write]
         expiresAt: {type: string, format: date-time}
     DeviceSessionResponse:
       type: object
@@ -5226,13 +5233,14 @@ components:
         meta: {$ref: '#/components/schemas/Meta'}
     DeviceTask:
       type: object
-      required: [id, type, reference, status, priority]
+      required: [id, type, reference, status, priority, version]
       properties:
         id: {$ref: '#/components/schemas/Ulid'}
         type: {type: string, enum: [RECEIVE, MOVE, PICK, LOAD, DISPATCH, LAST_MILE_DELIVERY, STOCKTAKE]}
         reference: {type: string}
         status: {type: string}
         priority: {type: string, enum: [LOW, NORMAL, HIGH, URGENT]}
+        version: {type: integer, minimum: 1}
     DeviceTaskListResponse:
       type: object
       required: [data, meta]
