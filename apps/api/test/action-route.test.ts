@@ -14,11 +14,13 @@ import { IdempotentCommand } from '../src/platform/idempotency';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parse } from 'yaml';
+import { RequirePermissions } from '@zhili/auth';
 
 @Controller('warehouse/receipts')
 class ReceiptActionController {
   @Post(internalActionPath(':receiptId', 'confirm'))
   @ContractOperation('confirmReceipt', ':receiptId:confirm')
+  @RequirePermissions('warehouse.receipt.confirm')
   @IdempotentCommand()
   confirm(@Param('receiptId') receiptId: string): object {
     return { receiptId, action: 'confirm' };
@@ -26,6 +28,7 @@ class ReceiptActionController {
 
   @Post(internalActionPath(':receiptId', 'undo'))
   @ContractOperation('undoReceipt', ':receiptId:undo')
+  @RequirePermissions('warehouse.receipt.confirm')
   @IdempotentCommand()
   undo(@Param('receiptId') receiptId: string): object {
     return { receiptId, action: 'undo' };
@@ -36,6 +39,7 @@ class ReceiptActionController {
 class PodActionController {
   @Post('proof-of-delivery')
   @ContractOperation('captureProofOfDelivery')
+  @RequirePermissions('lastmile.pod.write')
   @IdempotentCommand()
   capture(): object {
     return { action: 'capture' };
@@ -43,6 +47,7 @@ class PodActionController {
 
   @Post(internalActionPath('proof-of-delivery', 'amend'))
   @ContractOperation('amendProofOfDelivery', 'proof-of-delivery:amend')
+  @RequirePermissions('lastmile.pod.write')
   @IdempotentCommand()
   amend(): object {
     return { action: 'amend' };
@@ -140,24 +145,28 @@ describe('Fastify colon-action URL rewriting', () => {
         path: `${API_GLOBAL_PREFIX}/warehouse/receipts/{receiptId}:confirm`,
         operationId: 'confirmReceipt',
         idempotency: true,
+        permissions: ['warehouse.receipt.confirm'],
       },
       {
         method: 'POST',
         path: `${API_GLOBAL_PREFIX}/warehouse/receipts/{receiptId}:undo`,
         operationId: 'undoReceipt',
         idempotency: true,
+        permissions: ['warehouse.receipt.confirm'],
       },
       {
         method: 'POST',
         path: `${API_GLOBAL_PREFIX}/last-mile/delivery-tasks/{deliveryTaskId}/proof-of-delivery`,
         operationId: 'captureProofOfDelivery',
         idempotency: true,
+        permissions: ['lastmile.pod.write'],
       },
       {
         method: 'POST',
         path: `${API_GLOBAL_PREFIX}/last-mile/delivery-tasks/{deliveryTaskId}/proof-of-delivery:amend`,
         operationId: 'amendProofOfDelivery',
         idempotency: true,
+        permissions: ['lastmile.pod.write'],
       },
     ]);
     expect(() => assertOpenApiCoverage(document, operations)).not.toThrow();

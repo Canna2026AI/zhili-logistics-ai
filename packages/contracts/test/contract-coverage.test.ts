@@ -970,7 +970,7 @@ describe("OpenAPI UI-foundation gate", () => {
     }
   });
 
-  it("includes every stable HTTP problem-filter fallback in ErrorCode", () => {
+  it("includes every shared runtime problem code in ErrorCode", () => {
     const errorCodeSchema = openapi.components.schemas.ErrorCode as {
       enum?: unknown[];
     };
@@ -982,12 +982,16 @@ describe("OpenAPI UI-foundation gate", () => {
       "FORBIDDEN",
       "NOT_FOUND",
       "CONFLICT",
+      "IDEMPOTENCY_KEY_REUSED",
+      "IDEMPOTENCY_RESPONSE_UNAVAILABLE",
+      "INVALID_IDEMPOTENCY_KEY",
       "SESSION_EXPIRED",
       "PRECONDITION_FAILED",
       "PAYLOAD_TOO_LARGE",
       "UNPROCESSABLE_ENTITY",
       "RATE_LIMITED",
       "INTERNAL_ERROR",
+      "UNTRUSTED_REQUEST_CONTEXT",
     ]) {
       expect(errorCodes, `missing public problem code ${code}`).toContain(code);
     }

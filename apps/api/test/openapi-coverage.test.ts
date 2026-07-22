@@ -6,6 +6,7 @@ import { DiscoveryService } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
+import { RequirePermissions } from '@zhili/auth';
 import { IdempotentCommand, SkipIdempotency } from '../src/platform/idempotency';
 import { internalActionPath } from '../src/platform/action-route';
 import {
@@ -27,10 +28,12 @@ const openApiPath = resolve(
 class CoveredFeatureController {
   @Get('waybills/:waybillId')
   @ContractOperation('getWaybill')
+  @RequirePermissions('waybill.read')
   getWaybill(): void {}
 
   @Post('customers')
   @ContractOperation('createCustomer')
+  @RequirePermissions('customer.write')
   @IdempotentCommand()
   createCustomer(): void {}
 
@@ -88,12 +91,14 @@ describe('OpenAPI controller coverage guard', () => {
         path: `${API_GLOBAL_PREFIX}/health/live`,
         operationId: 'getServiceLiveness',
         idempotency: undefined,
+        permissions: undefined,
       },
       {
         method: 'GET',
         path: `${API_GLOBAL_PREFIX}/health/ready`,
         operationId: 'getServiceReadiness',
         idempotency: undefined,
+        permissions: undefined,
       },
     ]);
 
@@ -103,36 +108,42 @@ describe('OpenAPI controller coverage guard', () => {
         path: `${API_GLOBAL_PREFIX}/health/live`,
         operationId: 'getServiceLiveness',
         idempotency: undefined,
+        permissions: undefined,
       },
       {
         method: 'GET',
         path: `${API_GLOBAL_PREFIX}/health/ready`,
         operationId: 'getServiceReadiness',
         idempotency: undefined,
+        permissions: undefined,
       },
       {
         method: 'GET',
         path: `${API_GLOBAL_PREFIX}/waybills/{waybillId}`,
         operationId: 'getWaybill',
         idempotency: undefined,
+        permissions: ['waybill.read'],
       },
       {
         method: 'POST',
         path: `${API_GLOBAL_PREFIX}/customers`,
         operationId: 'createCustomer',
         idempotency: true,
+        permissions: ['customer.write'],
       },
       {
         method: 'POST',
         path: `${API_GLOBAL_PREFIX}/auth/password/sessions`,
         operationId: 'loginWithPassword',
         idempotency: false,
+        permissions: undefined,
       },
       {
         method: 'POST',
         path: `${API_GLOBAL_PREFIX}/auth/sessions:refresh`,
         operationId: 'refreshSession',
         idempotency: false,
+        permissions: undefined,
       },
     ]);
   });
@@ -189,6 +200,100 @@ describe('OpenAPI controller coverage guard', () => {
     expect(() => collectControllerOperations([UnsafeActionController], API_GLOBAL_PREFIX)).toThrow(
       'use internalActionPath()'
     );
+  });
+
+  it('rejects a colon-action contract path that does not invert its internal runtime path', () => {
+    @Controller('warehouse/receipts')
+    class MisdirectedActionController {
+      @Post(internalActionPath(':receiptId', 'undo'))
+      @ContractOperation('confirmReceipt', ':receiptId:confirm')
+      @RequirePermissions('warehouse.receipt.confirm')
+      @IdempotentCommand()
+      confirm(): void {}
+    }
+
+    expect(() =>
+      collectControllerOperations([MisdirectedActionController], API_GLOBAL_PREFIX)
+    ).toThrow('does not match its internal runtime path');
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['wrong', 'order.read'],
+  ])('rejects %s permission metadata against OpenAPI x-permission', async (_label, permission) => {
+    @Controller()
+    class IncorrectPermissionController {
+      @Post('customers')
+      @ContractOperation('createCustomer')
+      @IdempotentCommand()
+      createCustomer(): void {}
+    }
+
+    if (permission) {
+      RequirePermissions(permission)(
+        IncorrectPermissionController.prototype,
+        'createCustomer',
+        Object.getOwnPropertyDescriptor(IncorrectPermissionController.prototype, 'createCustomer')!
+      );
+    }
+
+    const document = await openApiDocument();
+    const operations = collectControllerOperations(
+      [IncorrectPermissionController],
+      API_GLOBAL_PREFIX
+    );
+    expect(() => assertOpenApiCoverage(document, operations)).toThrow('x-permission');
+  });
+
+  it('honors controller-level permission metadata with the same override semantics as the guard', async () => {
+    @Controller()
+    @RequirePermissions('customer.write')
+    class ClassPermissionController {
+      @Post('customers')
+      @ContractOperation('createCustomer')
+      @IdempotentCommand()
+      createCustomer(): void {}
+    }
+
+    const document = await openApiDocument();
+    const operations = collectControllerOperations([ClassPermissionController], API_GLOBAL_PREFIX);
+    expect(operations[0]?.permissions).toEqual(['customer.write']);
+    expect(() => assertOpenApiCoverage(document, operations)).not.toThrow();
+  });
+
+  it('lets method permission metadata override controller metadata like the runtime guard', async () => {
+    @Controller()
+    @RequirePermissions('order.read')
+    class MethodPermissionController {
+      @Post('customers')
+      @ContractOperation('createCustomer')
+      @RequirePermissions('customer.write')
+      @IdempotentCommand()
+      createCustomer(): void {}
+    }
+
+    const document = await openApiDocument();
+    const operations = collectControllerOperations([MethodPermissionController], API_GLOBAL_PREFIX);
+    expect(operations[0]?.permissions).toEqual(['customer.write']);
+    expect(() => assertOpenApiCoverage(document, operations)).not.toThrow();
+  });
+
+  it('rejects permission metadata when the OpenAPI operation has no x-permission', async () => {
+    @Controller()
+    class UnexpectedPermissionController {
+      @Post('auth/password/sessions')
+      @ContractOperation('loginWithPassword')
+      @RequirePermissions('identity.session.write')
+      @SkipIdempotency()
+      login(): void {}
+    }
+
+    const document = await openApiDocument();
+    const operations = collectControllerOperations(
+      [UnexpectedPermissionController],
+      API_GLOBAL_PREFIX
+    );
+    expect(() => assertOpenApiCoverage(document, operations)).toThrow('has no x-permission');
   });
 
   it('fails metadata true when OpenAPI does not declare Idempotency-Key', async () => {

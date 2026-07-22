@@ -90,11 +90,13 @@ function httpContext(
 }
 
 describe('strong ETag parsing', () => {
-  it.each([undefined, '', '1', 'W/"1"', '"0"', '"01"', '"-1"', '"9007199254740992"'])(
-    'rejects a missing or non-strong positive integer ETag: %s',
-    (value) => {
-      expect(() => parseStrongEtag(value)).toThrow(PreconditionRequiredException);
-    }
+  it('distinguishes a missing If-Match precondition', () => {
+    expectPreconditionCode(undefined, 'PRECONDITION_REQUIRED');
+  });
+
+  it.each(['', '1', 'W/"1"', '"0"', '"01"', '"-1"', '"9007199254740992"'])(
+    'classifies a present but invalid strong ETag as invalid: %s',
+    (value) => expectPreconditionCode(value, 'PRECONDITION_INVALID')
   );
 
   it('returns the positive version from a strong ETag', () => {
@@ -102,6 +104,20 @@ describe('strong ETag parsing', () => {
     expect(parseStrongEtag('"9007199254740991"')).toBe(Number.MAX_SAFE_INTEGER);
   });
 });
+
+function expectPreconditionCode(
+  value: string | undefined,
+  code: 'PRECONDITION_REQUIRED' | 'PRECONDITION_INVALID'
+): void {
+  let thrown: unknown;
+  try {
+    parseStrongEtag(value);
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(PreconditionRequiredException);
+  expect((thrown as PreconditionRequiredException).getResponse()).toMatchObject({ code });
+}
 
 describe('idempotency input', () => {
   it.each([undefined, '', 'short', 'a'.repeat(129)])(

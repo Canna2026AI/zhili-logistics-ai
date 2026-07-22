@@ -413,6 +413,40 @@ describe('PostgreSQL idempotency pipeline', () => {
     expect(executions).toBe(1);
   });
 
+  it('stores and replays a deterministic expired-command 410', async () => {
+    const interceptor = new IdempotencyInterceptor();
+    let executions = 0;
+    const handler = async () => {
+      executions += 1;
+      throw new HttpException(
+        {
+          code: 'QUOTE_EXPIRED',
+          detail: 'The accepted quote is no longer valid.',
+          remediation: 'Request and accept a new quote before retrying.',
+        },
+        410
+      );
+    };
+    const common = {
+      body: { quoteId: '01J0000000000000000000000Q' },
+      key: 'expired-quote-410-0001',
+      handler,
+    };
+
+    const first = await invoke(interceptor, {
+      ...common,
+      requestId: 'request-expired-quote-first',
+    });
+    const replay = await invoke(interceptor, {
+      ...common,
+      requestId: 'request-expired-quote-replay',
+    });
+
+    expect(first.status).toBe(410);
+    expect(replay).toEqual(first);
+    expect(executions).toBe(1);
+  });
+
   it('serializes concurrent duplicate keys with a PostgreSQL transaction advisory lock', async () => {
     const interceptor = new IdempotencyInterceptor();
     let executions = 0;
