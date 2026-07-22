@@ -1,18 +1,59 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, StatusTag } from '@zhili/ui';
-import { customerPort } from '../../api';
+import { CustomerApiError, customerPort, type ReceiptAllocationSnapshot } from '../../api';
 import { SummaryItem, SummaryList, WorkflowShell, type WorkflowTone } from '../workflow-shell';
 
 type BillingStep =
   'list' | 'detail' | 'pay' | 'pending' | 'partial' | 'conflict' | 'success' | 'failed';
 
 type BillingFlowProps = {
-  requestLegacyPayment: () => void;
-  paymentCreated: boolean;
   notify: (message: string) => void;
   receiptKey: string;
   mockMode?: boolean;
 };
+
+type PaymentOrder = {
+  id: string;
+  paymentOrderNo: string;
+  status: string;
+  version: number;
+};
+
+type BillingSession = {
+  step: RecoverableBillingStep;
+  paymentOrder: PaymentOrder;
+  receiptVersion: number;
+  allocation: ReceiptAllocationSnapshot | null;
+};
+
+type RecoverableBillingStep = Extract<BillingStep, 'pending' | 'partial' | 'conflict'>;
+const recoverableSteps = new Set<RecoverableBillingStep>(['pending', 'partial', 'conflict']);
+const isRecoverableStep = (step: BillingStep): step is RecoverableBillingStep =>
+  recoverableSteps.has(step as RecoverableBillingStep);
+const receiptId = '01JRECEIPT0000000000000001';
+
+function readBillingSession(key: string): BillingSession | null {
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(key) ?? 'null'
+    ) as Partial<BillingSession> | null;
+    if (
+      !parsed ||
+      !parsed.paymentOrder?.id ||
+      !parsed.paymentOrder.paymentOrderNo ||
+      !isRecoverableStep(parsed.step as BillingStep) ||
+      !Number.isSafeInteger(parsed.receiptVersion) ||
+      Number(parsed.receiptVersion) < 1
+    )
+      return null;
+    return parsed as BillingSession;
+  } catch {
+    return null;
+  }
+}
+
+const money = (value: string) =>
+  `¥${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const meta: Record<
   BillingStep,
@@ -48,7 +89,7 @@ const meta: Record<
   },
   partial: {
     title: '付款成功，部分金额待分配',
-    description: '116 个运单已自动匹配，2 个运单需人工确认。',
+    description: '支付已确认，正在显示服务端权威核销快照。',
     active: 2,
     tone: 'warning',
     status: 'PARTIAL · 已核销 99.12%',
@@ -76,25 +117,32 @@ const meta: Record<
   },
 };
 
-export function BillingFlow({
-  requestLegacyPayment,
-  paymentCreated,
-  notify,
-  receiptKey,
-  mockMode = false,
-}: BillingFlowProps) {
-  const [step, setStep] = useState<BillingStep>('list');
+export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlowProps) {
+  const workflowKey = `${receiptKey}:billing-workflow`;
+  const [restored] = useState(() => readBillingSession(workflowKey));
+  const [step, setStep] = useState<BillingStep>(restored?.step ?? 'list');
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState<File | null>(null);
   const [receiptName, setReceiptName] = useState(() => localStorage.getItem(receiptKey) ?? '');
-  const [paymentOrder, setPaymentOrder] = useState<{
-    id: string;
-    paymentOrderNo: string;
-    status: string;
-    version: number;
-  } | null>(null);
-  const [receiptVersion, setReceiptVersion] = useState(1);
+  const [paymentOrder, setPaymentOrder] = useState<PaymentOrder | null>(
+    restored?.paymentOrder ?? null
+  );
+  const [receiptVersion, setReceiptVersion] = useState(restored?.receiptVersion ?? 1);
+  const [allocation, setAllocation] = useState<ReceiptAllocationSnapshot | null>(
+    restored?.allocation ?? null
+  );
   const current = meta[step];
+
+  useEffect(() => {
+    if (paymentOrder && isRecoverableStep(step)) {
+      localStorage.setItem(
+        workflowKey,
+        JSON.stringify({ step, paymentOrder, receiptVersion, allocation } satisfies BillingSession)
+      );
+    } else if (step === 'list' || step === 'success' || step === 'failed') {
+      localStorage.removeItem(workflowKey);
+    }
+  }, [allocation, paymentOrder, receiptVersion, step, workflowKey]);
 
   const pay = async () => {
     setBusy(true);
@@ -121,8 +169,11 @@ export function BillingFlow({
       const current = await customerPort.getPaymentOrder(paymentOrder.id);
       setPaymentOrder(current);
       if (current.status === 'SUCCEEDED') {
+        const snapshot = await customerPort.getReceiptAllocation(receiptId);
+        setAllocation(snapshot);
+        setReceiptVersion(snapshot.version);
         setStep('partial');
-        notify('支付已由服务端确认：已自动核销 116 个运单。');
+        notify(`支付已由服务端确认：已自动核销 ${snapshot.matchedCount} 个运单。`);
       } else if (current.status === 'FAILED' || current.status === 'CLOSED') {
         setStep('failed');
         notify(`支付订单状态：${current.status}。`);
@@ -139,7 +190,7 @@ export function BillingFlow({
     setBusy(true);
     try {
       await customerPort.allocateReceipt(
-        '01JRECEIPT0000000000000001',
+        receiptId,
         receiptVersion,
         '01JSTATEMENT00000000000001',
         '600.00'
@@ -149,7 +200,11 @@ export function BillingFlow({
     } catch (error) {
       const message = error instanceof Error ? error.message : '核销失败。';
       notify(message);
-      if (/409|冲突|版本|STALE/i.test(message)) setStep('conflict');
+      if (
+        (error instanceof CustomerApiError && [409, 412].includes(error.status)) ||
+        /409|412|冲突|版本|STALE/i.test(message)
+      )
+        setStep('conflict');
     } finally {
       setBusy(false);
     }
@@ -157,11 +212,9 @@ export function BillingFlow({
   const refreshAllocation = async () => {
     setBusy(true);
     try {
-      const refreshed = await customerPort.refreshReceiptAllocation(
-        '01JRECEIPT0000000000000001',
-        receiptVersion
-      );
+      const refreshed = await customerPort.refreshReceiptAllocation(receiptId, receiptVersion);
       setReceiptVersion(refreshed.version);
+      setAllocation(refreshed);
       setStep('partial');
       notify(`已刷新服务端核销版本 v${refreshed.version}，可安全重试。`);
     } catch (error) {
@@ -175,7 +228,11 @@ export function BillingFlow({
     <WorkflowShell
       code="F06 · 账单支付"
       title={current.title}
-      description={current.description}
+      description={
+        step === 'partial' && allocation
+          ? `${allocation.matchedCount} 个运单已自动匹配，${allocation.pendingItems.length} 个运单需人工确认。`
+          : current.description
+      }
       steps={['选择账单', '发起支付', '分配金额', '核销完成']}
       activeStep={current.active}
       panelTitle={
@@ -187,7 +244,11 @@ export function BillingFlow({
               ? '版本差异'
               : '账单信息'
       }
-      status={current.status}
+      status={
+        step === 'partial' && allocation
+          ? `PARTIAL · 已核销 ${money(allocation.allocated)}，待分配 ${money(allocation.unapplied)}`
+          : current.status
+      }
       tone={current.tone}
       summaryTitle={step === 'conflict' ? '安全保护' : '资金状态'}
       summary={
@@ -204,12 +265,22 @@ export function BillingFlow({
               <SummaryItem
                 label="已分配"
                 value={
-                  step === 'success' ? '¥68,420.00' : step === 'partial' ? '¥67,820.00' : '¥0.00'
+                  step === 'success'
+                    ? '¥68,420.00'
+                    : step === 'partial' && allocation
+                      ? money(allocation.allocated)
+                      : '¥0.00'
                 }
               />
               <SummaryItem
                 label="待分配"
-                value={step === 'success' ? '¥0.00' : step === 'partial' ? '¥600.00' : '¥68,420.00'}
+                value={
+                  step === 'success'
+                    ? '¥0.00'
+                    : step === 'partial' && allocation
+                      ? money(allocation.unapplied)
+                      : '¥68,420.00'
+                }
               />
             </>
           )}
@@ -325,18 +396,6 @@ export function BillingFlow({
                     </button>
                   </td>
                 </tr>
-                <tr>
-                  <td>ST202605-0008</td>
-                  <td>CNY 5,320.00</td>
-                  <td>
-                    <StatusTag tone="warning">待付款</StatusTag>
-                  </td>
-                  <td>
-                    <button aria-label="支付 ST202605-0008" onClick={requestLegacyPayment}>
-                      支付
-                    </button>
-                  </td>
-                </tr>
               </tbody>
             </table>
           </div>
@@ -352,14 +411,16 @@ export function BillingFlow({
                 </tr>
               </thead>
               <tbody>
-                {paymentCreated ? (
+                {paymentOrder ? (
                   <tr>
-                    <td>PAY-20260512-01</td>
-                    <td>ST202605-0008</td>
-                    <td>CNY 2,320.00</td>
+                    <td>{paymentOrder.paymentOrderNo}</td>
+                    <td>INV-202607-018</td>
+                    <td>CNY 68,420.00</td>
                     <td>微信支付</td>
                     <td>
-                      <StatusTag tone="info">待支付</StatusTag>
+                      <StatusTag tone={paymentOrder.status === 'SUCCEEDED' ? 'success' : 'info'}>
+                        {paymentOrder.status}
+                      </StatusTag>
                     </td>
                   </tr>
                 ) : (
@@ -410,32 +471,37 @@ export function BillingFlow({
       ) : step === 'conflict' ? (
         <div className="customer-workflow__choice-list">
           <div>
-            <strong>你的版本 · v32 / 14:51:02</strong>
-            <span>付款后待分配 ¥600.00</span>
+            <strong>本地版本 · v{receiptVersion}</strong>
+            <span>待分配 {allocation ? money(allocation.unapplied) : '等待刷新'}</span>
           </div>
           <div>
-            <strong>最新版本 · v33 / 14:52:18</strong>
-            <span>陈思已完成一笔核销</span>
+            <strong>服务端检测到更新</strong>
+            <span>刷新后获取最新版本、操作人和核销明细</span>
           </div>
           <div>
-            <strong>变化金额</strong>
-            <span>已核销 ¥320.00</span>
+            <strong>本地输入已保留</strong>
+            <span>不会自动重试或重复扣款</span>
           </div>
         </div>
       ) : step === 'partial' ? (
         <div className="customer-workflow__choice-list">
           <div>
-            <strong>自动匹配 · 116 单</strong>
-            <span>¥67,820.00</span>
+            <strong>自动匹配 · {allocation?.matchedCount ?? 0} 单</strong>
+            <span>{allocation ? money(allocation.allocated) : '等待服务端核销快照'}</span>
           </div>
-          <div>
-            <strong>SHP-20260708-141 · 缺少回单</strong>
-            <span>¥320.00</span>
-          </div>
-          <div>
-            <strong>SHP-20260709-208 · 费用争议</strong>
-            <span>¥280.00</span>
-          </div>
+          {allocation?.pendingItems.map((item) => (
+            <div key={item.reference}>
+              <strong>
+                {item.reference} · {item.reason}
+              </strong>
+              <span>{money(item.amount)}</span>
+            </div>
+          ))}
+          {allocation ? (
+            <p>
+              权威版本 v{allocation.version} · {allocation.updatedBy} · {allocation.updatedAt}
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="customer-workflow__result">

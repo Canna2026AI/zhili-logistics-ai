@@ -42,6 +42,7 @@ export function WorkflowShell({
         {steps.map((step, index) => (
           <li
             key={step}
+            aria-current={index === activeStep ? 'step' : undefined}
             data-active={index === activeStep || undefined}
             data-done={index < activeStep || undefined}
           >

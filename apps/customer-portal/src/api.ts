@@ -104,6 +104,18 @@ export type VersionDifference = {
   server: string;
 };
 
+export type ReceiptAllocationSnapshot = {
+  receiptId: string;
+  version: number;
+  total: string;
+  allocated: string;
+  unapplied: string;
+  matchedCount: number;
+  updatedAt: string;
+  updatedBy: string;
+  pendingItems: Array<{ reference: string; reason: string; amount: string }>;
+};
+
 export const customerMockFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
   const path = new URL(request.url).pathname;
@@ -419,17 +431,36 @@ const mockCustomerCommandFetch = async (
       differences: [{ field: 'snapshotAt', local: '10:18', server: '10:21' }],
     };
   if (path === '/api/v1/portal/dashboard:refresh') return { version: 'v13', refreshedAt: '10:21' };
+  const receiptSnapshot = path.match(/^\/api\/v1\/portal\/receipts\/([^/]+):snapshot$/);
+  if (receiptSnapshot)
+    return {
+      receiptId: receiptSnapshot[1],
+      version: 1,
+      total: '68420.00',
+      allocated: '67820.00',
+      unapplied: '600.00',
+      matchedCount: 116,
+      updatedAt: '2026-07-23T14:51:02.000Z',
+      updatedBy: '支付对账服务',
+      pendingItems: [
+        { reference: 'SHP-20260708-141', reason: '缺少回单', amount: '320.00' },
+        { reference: 'SHP-20260709-208', reason: '费用争议', amount: '280.00' },
+      ],
+    };
   const refreshedReceipt = path.match(/^\/api\/v1\/portal\/receipts\/([^/]+):refresh$/);
   if (refreshedReceipt)
     return {
       receiptId: refreshedReceipt[1],
       version: 2,
-      differences: [
-        {
-          field: 'allocated',
-          local: '¥67,820.00',
-          server: '¥67,820.00',
-        },
+      total: '68420.00',
+      allocated: '67820.00',
+      unapplied: '600.00',
+      matchedCount: 116,
+      updatedAt: '2026-07-23T14:52:18.000Z',
+      updatedBy: '陈思',
+      pendingItems: [
+        { reference: 'SHP-20260708-141', reason: '缺少回单', amount: '320.00' },
+        { reference: 'SHP-20260709-208', reason: '费用争议', amount: '280.00' },
       ],
     };
   if (path === '/api/v1/portal/notifications:retry-failed') {
@@ -472,24 +503,93 @@ export function createCustomerCommandTransport(
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      const problem = (await response.json().catch(() => ({}))) as { message?: string };
-      throw new Error(problem.message ?? `客户门户命令失败（HTTP ${response.status}）`);
+      const problem = (await response.json().catch(() => ({}))) as {
+        code?: string;
+        message?: string;
+        remediation?: string;
+      };
+      throw new CustomerApiError(
+        response.status,
+        problem.code ?? 'CUSTOMER_COMMAND_FAILED',
+        problem.message ?? `客户门户命令失败（HTTP ${response.status}）`,
+        problem.remediation
+      );
     }
     if (response.status === 204) return {} as TResponse;
-    return (await response.json()) as TResponse;
+    const payload = (await response.json()) as TResponse | { data: TResponse };
+    return payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
+  };
+}
+
+export function createCustomerUploadTransport(
+  search: string,
+  mode: string = import.meta.env.MODE,
+  productionFetch: typeof fetch = globalThis.fetch
+) {
+  const useMock = mode === 'test' || new URLSearchParams(search).get('mock') === '1';
+  return async <TResponse>(path: string, form: FormData): Promise<TResponse> => {
+    if (useMock) {
+      return (await mockCustomerCommandFetch(path, {
+        fileName: (form.get('file') as File | null)?.name ?? '',
+        contact: String(form.get('contact') ?? ''),
+        note: String(form.get('note') ?? ''),
+      })) as TResponse;
+    }
+    const response = await productionFetch(path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Idempotency-Key': key() },
+      body: form,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const problem = payload as { code?: string; message?: string; remediation?: string };
+      throw new CustomerApiError(
+        response.status,
+        problem.code ?? 'EVIDENCE_UPLOAD_FAILED',
+        problem.message ?? `异常资料上传失败（HTTP ${response.status}）`,
+        problem.remediation
+      );
+    }
+    return (
+      payload && typeof payload === 'object' && 'data' in payload
+        ? (payload as { data: TResponse }).data
+        : payload
+    ) as TResponse;
   };
 }
 
 const runtimeSearch = typeof window === 'undefined' ? '' : window.location.search;
 const runtimeTransport = resolveCustomerTransport(runtimeSearch);
 const customerCommand = createCustomerCommandTransport(runtimeSearch);
+const customerUpload = createCustomerUploadTransport(runtimeSearch);
 const client = createZhiliClient({
   baseUrl: import.meta.env.MODE === 'test' ? 'http://localhost/api/v1' : '/api/v1',
   ...(runtimeTransport ? { fetch: runtimeTransport } : {}),
 });
 
-function ensure<T>(data: T | undefined, error: unknown): T {
-  if (!data || error) throw new Error('业务服务暂时不可用，请保留输入后重试。');
+export class CustomerApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly remediation?: string
+  ) {
+    super(message);
+    this.name = 'CustomerApiError';
+  }
+}
+
+function ensure<T>(data: T | undefined, error: unknown, response?: Response): T {
+  if (!data || error) {
+    const problem = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+    throw new CustomerApiError(
+      response?.status ?? 0,
+      String(problem.code ?? 'CUSTOMER_API_FAILED'),
+      String(problem.message ?? '业务服务暂时不可用，请保留输入后重试。'),
+      typeof problem.remediation === 'string' ? problem.remediation : undefined
+    );
+  }
   return data;
 }
 
@@ -675,17 +775,19 @@ export const customerPort = {
       },
       body: { allocations: [{ statementId, amount: { amount, currency: 'CNY' } }] },
     });
-    return ensure(response.data, response.error).data;
+    return ensure(response.data, response.error, response.response).data;
+  },
+  getReceiptAllocation(receiptId: string) {
+    return customerCommand<Record<string, never>, ReceiptAllocationSnapshot>(
+      `/api/v1/portal/receipts/${receiptId}:snapshot`,
+      {}
+    );
   },
   refreshReceiptAllocation(receiptId: string, localVersion: number) {
-    return customerCommand<
-      { localVersion: number },
-      {
-        receiptId: string;
-        version: number;
-        differences: VersionDifference[];
-      }
-    >(`/api/v1/portal/receipts/${receiptId}:refresh`, { localVersion });
+    return customerCommand<{ localVersion: number }, ReceiptAllocationSnapshot>(
+      `/api/v1/portal/receipts/${receiptId}:refresh`,
+      { localVersion }
+    );
   },
   async createImport(fileName: string) {
     const response = await client.POST('/imports', {
@@ -713,19 +815,17 @@ export const customerPort = {
       statementNo: 'ST202605-0008',
     });
   },
-  submitIssueEvidence(
-    issueId: string,
-    input: { fileName: string; fileType: string; fileSize: number; contact: string; note: string }
-  ) {
-    return customerCommand<
-      typeof input,
-      {
-        issueId: string;
-        status: 'PARTIAL' | 'SUCCEEDED';
-        version: number;
-        failedNotificationIds: string[];
-      }
-    >(`/api/v1/portal/issues/${issueId}/materials`, input);
+  submitIssueEvidence(issueId: string, input: { file: File; contact: string; note: string }) {
+    const form = new FormData();
+    form.set('file', input.file, input.file.name);
+    form.set('contact', input.contact);
+    form.set('note', input.note);
+    return customerUpload<{
+      issueId: string;
+      status: 'PARTIAL' | 'SUCCEEDED';
+      version: number;
+      failedNotificationIds: string[];
+    }>(`/api/v1/portal/issues/${issueId}/materials`, form);
   },
   async createTicket(title: string) {
     const response = await client.POST('/issues', {

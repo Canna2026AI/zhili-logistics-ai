@@ -65,11 +65,12 @@ export function TrackingFlow({
   const [step, setStep] = useState<TrackingStep>('stale');
   const [busy, setBusy] = useState(false);
   const [issue, setIssue] = useState<{ id: string; issueNo: string; version: number } | null>(null);
+  const [description, setDescription] = useState('请核实下一程装车时间');
   const current = meta[step];
   const submit = async () => {
     setBusy(true);
     try {
-      const created = await customerPort.createTicket('轨迹停滞：请核实下一程装车时间');
+      const created = await customerPort.createTicket(description.trim());
       setIssue({ id: created.id, issueNo: created.issueNo, version: created.version });
       setStep('created');
       notify(`工单 ${created.issueNo} 已创建。`);
@@ -120,7 +121,7 @@ export function TrackingFlow({
         <>
           {step === 'stale' ? <Button onClick={() => setStep('create')}>创建工单</Button> : null}
           {step === 'create' ? (
-            <Button disabled={busy} onClick={() => void submit()}>
+            <Button disabled={busy || !description.trim()} onClick={() => void submit()}>
               {busy ? '提交中…' : '提交工单'}
             </Button>
           ) : null}
@@ -156,7 +157,11 @@ export function TrackingFlow({
           </label>
           <label>
             问题描述
-            <textarea aria-label="问题描述" defaultValue="请核实下一程装车时间" />
+            <textarea
+              aria-label="问题描述"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
           </label>
         </div>
       ) : step === 'created' || step === 'close' ? (

@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { validatePreconditionFailed } from '../../../packages/contracts/test/precondition-schema.js';
 import { createCustomerCommandTransport, customerMockFetch } from './api';
+import { createCustomerUploadTransport } from './api';
 
 const contract = readFileSync(
   resolve(import.meta.dirname, '../../../packages/contracts/openapi/zhili.openapi.yaml'),
@@ -273,5 +274,40 @@ describe('customer app-local command transport', () => {
       command('/api/v1/portal/preferences/shortcuts', { shortcuts: ['工作台'] })
     ).resolves.toMatchObject({ status: 'SUCCEEDED' });
     expect(productionFetch).not.toHaveBeenCalled();
+  });
+
+  it('uploads real evidence bytes as multipart without forcing a JSON content type', async () => {
+    const productionFetch = vi.fn(async (_path: string | URL | Request, init?: RequestInit) => {
+      const form = init?.body as FormData;
+      const file = form.get('file') as File;
+      expect(await file.text()).toBe('real-gate-bytes');
+      return new Response(
+        JSON.stringify({
+          issueId: 'issue-1',
+          status: 'SUCCEEDED',
+          version: 2,
+          failedNotificationIds: [],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    });
+    const upload = createCustomerUploadTransport('', 'production', productionFetch);
+    const form = new FormData();
+    form.set('file', new File(['real-gate-bytes'], 'gate.jpg', { type: 'image/jpeg' }));
+    form.set('contact', '李楠');
+
+    await upload('/api/v1/portal/issues/issue-1/materials', form);
+
+    expect(productionFetch).toHaveBeenCalledWith(
+      '/api/v1/portal/issues/issue-1/materials',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      })
+    );
+    const headers = productionFetch.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers['content-type']).toBeUndefined();
+    expect(headers['Idempotency-Key']).toBeTruthy();
   });
 });

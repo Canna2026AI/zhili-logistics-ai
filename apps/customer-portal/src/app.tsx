@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
+import { Button, Drawer, StatusTag } from '@zhili/ui';
 import { customerPort, type OrderInput, type QuoteResult, type VersionDifference } from './api';
 import { AccountFlow } from './features/account/account-flow';
 import { BillingFlow } from './features/billing/billing-flow';
@@ -689,7 +689,6 @@ function CustomerPortalApp({
   const draftKey = storageKey(tenantId, customerId, 'draft');
   const receiptKey = storageKey(tenantId, customerId, 'receipt');
   const addressesKey = storageKey(tenantId, customerId, 'addresses');
-  const paymentKey = storageKey(tenantId, customerId, 'payment');
   const ordersKey = storageKey(tenantId, customerId, 'orders');
   const [page, setPage] = useState<Page>('工作台');
   const [scenario, setScenario] = useState<Scenario>('normal');
@@ -698,7 +697,6 @@ function CustomerPortalApp({
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [differences, setDifferences] = useState<VersionDifference[]>([]);
   const [recovering, setRecovering] = useState(false);
-  const [paymentOpen, setPaymentOpen] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -707,15 +705,9 @@ function CustomerPortalApp({
   const searchResultsRef = useRef<HTMLDivElement>(null);
   const activeSearchOptionRef = useRef<HTMLButtonElement>(null);
   const [rows, setRows] = useState<WaybillRow[]>(() => readRows(waybillsKey));
-  const [paymentCreated, setPaymentCreated] = useState(
-    () => localStorage.getItem(paymentKey) === 'created'
-  );
   const [trackingNo, setTrackingNo] = useState('S2505120004');
   const [draftSaved, setDraftSaved] = useState(() => localStorage.getItem(draftKey) === 'saved');
   useEffect(() => localStorage.setItem(waybillsKey, JSON.stringify(rows)), [rows, waybillsKey]);
-  useEffect(() => {
-    if (paymentCreated) localStorage.setItem(paymentKey, 'created');
-  }, [paymentCreated, paymentKey]);
   useEffect(() => {
     if (!searchOpen) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -770,17 +762,6 @@ function CustomerPortalApp({
       context: '2026-05 · CNY 5,320.00 · 待付款 CNY 2,320.00',
       page: '账单与付款',
     },
-    ...(paymentCreated
-      ? [
-          {
-            id: 'payment-PAY-20260512-01',
-            type: '付款' as const,
-            label: 'PAY-20260512-01',
-            context: 'ST202605-0008 · 微信支付 · CNY 2,320.00 · 待支付',
-            page: '账单与付款' as const,
-          },
-        ]
-      : []),
     ...readStringList(addressesKey, ['深圳南山发货仓']).map((address, index): SearchResult => ({
       id: `address-${index}-${address}`,
       type: '地址',
@@ -939,15 +920,7 @@ function CustomerPortalApp({
   else if (page === '轨迹查询')
     content = <TrackingFlow waybillNo={trackingNo} notify={setToast} mockMode={mockMode} />;
   else if (page === '账单与付款')
-    content = (
-      <BillingFlow
-        requestLegacyPayment={() => setPaymentOpen(true)}
-        paymentCreated={paymentCreated}
-        notify={setToast}
-        receiptKey={receiptKey}
-        mockMode={mockMode}
-      />
-    );
+    content = <BillingFlow notify={setToast} receiptKey={receiptKey} mockMode={mockMode} />;
   else if (page === '问题工单') content = <ExceptionFlow notify={setToast} mockMode={mockMode} />;
   else if (page === 'API')
     content = (
@@ -1153,38 +1126,6 @@ function CustomerPortalApp({
           </button>
         </div>
       ) : null}
-      <Dialog
-        open={paymentOpen}
-        title="确认支付"
-        description="将创建微信支付订单。支付失败不会改变账单快照，可重新创建支付订单。"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setPaymentOpen(false)}>
-              取消
-            </Button>
-            <Button
-              onClick={() =>
-                void customerPort
-                  .createPayment()
-                  .then((payment) => {
-                    setPaymentCreated(true);
-                    setPaymentOpen(false);
-                    setToast(`支付订单已创建：${payment.paymentOrderNo}，请在 15 分钟内完成。`);
-                  })
-                  .catch((error: Error) => setToast(error.message))
-              }
-            >
-              确认支付
-            </Button>
-          </>
-        }
-        onOpenChange={setPaymentOpen}
-      >
-        <div className="portal-danger">
-          <strong>CNY 2,320.00</strong>
-          <span>账单 ST202605-0008 · 仅核销本企业物流账单</span>
-        </div>
-      </Dialog>
       <Drawer
         open={mobileNavigationOpen}
         title="客户门户菜单"
@@ -1214,7 +1155,12 @@ function CustomerPortalApp({
       </Drawer>
       <nav className="portal-mobile-nav" aria-label="移动端导航" inert={mobileNavigationOpen}>
         {(['工作台', '新建运单', '我的运单', '账单与付款', '问题工单'] as Page[]).map((item) => (
-          <button key={item} disabled={scenario !== 'normal'} onClick={() => navigate(item)}>
+          <button
+            key={item}
+            aria-current={page === item ? 'page' : undefined}
+            disabled={scenario !== 'normal'}
+            onClick={() => navigate(item)}
+          >
             {item === '工作台'
               ? '首页'
               : item === '新建运单'

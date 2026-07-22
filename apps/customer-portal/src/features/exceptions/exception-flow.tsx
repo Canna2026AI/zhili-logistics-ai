@@ -73,9 +73,7 @@ export function ExceptionFlow({
     setBusy(true);
     try {
       const result = await customerPort.submitIssueEvidence('01JISSUE00000000000000001', {
-        fileName: file.name,
-        fileType: file.type || 'application/octet-stream',
-        fileSize: file.size,
+        file,
         contact,
         note,
       });

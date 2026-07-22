@@ -492,22 +492,19 @@ describe('客户门户', () => {
     expect(saved).toContain('77.25');
   });
 
-  it('付款需要危险确认，成功后写入付款记录', async () => {
+  it('账单付款只保留统一的权威状态流程，不暴露旧支付弹窗入口', async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: '账单与付款' }));
     expect(screen.getByText('预存款 CNY 128,560.00')).toBeVisible();
     expect(screen.getByText('未分配收款 CNY 1,200.00')).toBeVisible();
-    expect(screen.getByRole('table', { name: '付款记录' })).not.toHaveTextContent(
-      'PAY-20260512-01'
-    );
-    await user.click(screen.getByRole('button', { name: '支付 ST202605-0008' }));
-    const dialog = screen.getByRole('dialog', { name: '确认支付' });
-    expect(dialog).toHaveTextContent('CNY 2,320.00');
-    await user.click(screen.getByRole('button', { name: '确认支付' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('支付订单已创建');
-    expect(screen.getByRole('table', { name: '付款记录' })).toHaveTextContent('PAY-20260512-01');
+    expect(screen.queryByRole('button', { name: '支付 ST202605-0008' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: '确认支付' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '查看账单 INV-202607-018' }));
+    await user.click(screen.getByRole('button', { name: '立即支付' }));
+    await user.click(screen.getByRole('button', { name: '确认付款' }));
+    expect(await screen.findByRole('heading', { name: '支付订单已创建' })).toBeVisible();
   });
 
   it('报价使用 canonical 分项且费用守恒', async () => {

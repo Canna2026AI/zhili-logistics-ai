@@ -34,6 +34,7 @@ describe('Figma Customer 关键工作流', () => {
 
   it('F03 补充异常资料后保留通知部分失败并可单独重试', async () => {
     const submitIssueEvidence = vi.spyOn(customerApi.customerPort, 'submitIssueEvidence');
+    const evidence = new File(['real-gate-bytes'], 'gate-east.jpg', { type: 'image/jpeg' });
     const user = userEvent.setup();
     render(<App />);
 
@@ -41,17 +42,14 @@ describe('Figma Customer 关键工作流', () => {
     expect(screen.getByRole('heading', { name: '待处理物流异常' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: /EXC-24118/ }));
     await user.click(screen.getByRole('button', { name: '补充资料' }));
-    await user.upload(
-      screen.getByLabelText('入口照片'),
-      new File(['gate'], 'gate-east.jpg', { type: 'image/jpeg' })
-    );
+    await user.upload(screen.getByLabelText('入口照片'), evidence);
     await user.click(screen.getByRole('button', { name: '提交资料' }));
 
     expect(await screen.findByRole('heading', { name: '资料已提交，通知部分失败' })).toBeVisible();
     expect(submitIssueEvidence).toHaveBeenCalledWith(
       '01JISSUE00000000000000001',
       expect.objectContaining({
-        fileName: 'gate-east.jpg',
+        file: evidence,
         contact: '李楠 139****8712',
         note: '东门货运通道 B3',
       })
@@ -62,6 +60,7 @@ describe('Figma Customer 关键工作流', () => {
   });
 
   it('F05 从轨迹停滞创建工单并完成关闭', async () => {
+    const createTicket = vi.spyOn(customerApi.customerPort, 'createTicket');
     const resolveIssue = vi.spyOn(customerApi.customerPort, 'resolveIssue');
     const user = userEvent.setup();
     render(<App />);
@@ -69,17 +68,21 @@ describe('Figma Customer 关键工作流', () => {
     await user.click(screen.getByRole('button', { name: '轨迹查询' }));
     expect(screen.getByRole('heading', { name: '轨迹长时间未更新' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: '创建工单' }));
+    await user.clear(screen.getByLabelText('问题描述'));
+    await user.type(screen.getByLabelText('问题描述'), '客户填写：请核实下一程装车和预计到达时间');
     await user.click(screen.getByRole('button', { name: '提交工单' }));
     expect(await screen.findByText('TKT-20260723-086')).toBeVisible();
     await user.click(screen.getByRole('button', { name: '准备关闭' }));
     await user.click(screen.getByRole('button', { name: '确认关闭' }));
     expect(screen.getByRole('heading', { name: '轨迹问题已解决' })).toBeVisible();
+    expect(createTicket).toHaveBeenCalledWith('客户填写：请核实下一程装车和预计到达时间');
     expect(resolveIssue).toHaveBeenCalledWith('01JISSUE00000000000000001', 1, '客户确认轨迹已恢复');
   });
 
   it('F06 支付后先部分核销，再处理并发刷新并完成全额核销', async () => {
     const createPayment = vi.spyOn(customerApi.customerPort, 'createPayment');
     const getPaymentOrder = vi.spyOn(customerApi.customerPort, 'getPaymentOrder');
+    const getReceiptAllocation = vi.spyOn(customerApi.customerPort, 'getReceiptAllocation');
     const allocateReceipt = vi.spyOn(customerApi.customerPort, 'allocateReceipt');
     const refreshReceiptAllocation = vi.spyOn(customerApi.customerPort, 'refreshReceiptAllocation');
     const user = userEvent.setup();
@@ -97,8 +100,11 @@ describe('Figma Customer 关键工作流', () => {
       amount: '68420.00',
     });
     await user.click(screen.getByRole('button', { name: '查询支付结果' }));
-    expect(await screen.findByText('PARTIAL · 已核销 99.12%')).toBeVisible();
+    expect(await screen.findByText('PARTIAL · 已核销 ¥67,820.00，待分配 ¥600.00')).toBeVisible();
     expect(getPaymentOrder).toHaveBeenCalledWith('01JPAYMENT0000000000000001');
+    expect(getReceiptAllocation).toHaveBeenCalledWith('01JRECEIPT0000000000000001');
+    expect(screen.getByText(/SHP-20260708-141/)).toBeVisible();
+    expect(screen.getByText('分配金额').closest('li')).toHaveAttribute('aria-current', 'step');
 
     await user.click(screen.getByRole('button', { name: '模拟并发更新' }));
     expect(screen.getByRole('heading', { name: '账单已被其他操作员更新' })).toBeVisible();
@@ -112,6 +118,32 @@ describe('Figma Customer 关键工作流', () => {
       '01JSTATEMENT00000000000001',
       '600.00'
     );
+  });
+
+  it('F06 识别真实状态码冲突并在页面切换后恢复 PENDING 支付', async () => {
+    const allocateReceipt = vi
+      .spyOn(customerApi.customerPort, 'allocateReceipt')
+      .mockRejectedValueOnce(
+        new customerApi.CustomerApiError(409, 'STALE_VERSION', '请求未完成，请刷新后重试')
+      );
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+    await user.click(screen.getByRole('button', { name: '查看账单 INV-202607-018' }));
+    await user.click(screen.getByRole('button', { name: '立即支付' }));
+    await user.click(screen.getByRole('button', { name: '确认付款' }));
+    expect(await screen.findByRole('heading', { name: '支付订单已创建' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '工作台' }));
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+    expect(screen.getByRole('heading', { name: '支付订单已创建' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '查询支付结果' }));
+    await user.click(await screen.findByRole('button', { name: '分配剩余金额' }));
+
+    expect(allocateReceipt).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('heading', { name: '账单已被其他操作员更新' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '刷新数据' })).toBeEnabled();
   });
 
   it('ACCOUNT 在地址簿、API 权限和安全设置之间形成真实入口', async () => {
