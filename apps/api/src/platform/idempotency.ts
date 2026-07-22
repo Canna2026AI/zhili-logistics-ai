@@ -49,6 +49,10 @@ export function IdempotentCommand(): CustomDecorator<string> {
   return SetMetadata(IDEMPOTENT_COMMAND_METADATA_KEY, true);
 }
 
+export function SkipIdempotency(): CustomDecorator<string> {
+  return SetMetadata(IDEMPOTENT_COMMAND_METADATA_KEY, false);
+}
+
 export type TenantTransactionRunner = <T>(
   context: TenantContext,
   work: TenantWork<T>
@@ -91,13 +95,17 @@ export class IdempotencyInterceptor implements NestInterceptor {
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const isIdempotentCommand =
-      this.reflector.getAllAndOverride<boolean>(IDEMPOTENT_COMMAND_METADATA_KEY, [
-        context.getHandler(),
-        context.getClass(),
-      ]) ?? false;
+    const idempotencyPolicy = this.reflector.getAllAndOverride<boolean>(
+      IDEMPOTENT_COMMAND_METADATA_KEY,
+      [context.getHandler(), context.getClass()]
+    );
     const method = request.method?.toUpperCase() ?? '';
-    if (!isIdempotentCommand && !DEFAULT_IDEMPOTENT_METHODS.has(method)) return next.handle();
+    if (
+      idempotencyPolicy === false ||
+      (idempotencyPolicy === undefined && !DEFAULT_IDEMPOTENT_METHODS.has(method))
+    ) {
+      return next.handle();
+    }
     return defer(() => this.handle(context, next));
   }
 
@@ -120,8 +128,9 @@ export class IdempotencyInterceptor implements NestInterceptor {
         if (existing.requestHash !== requestHash) {
           throw new ConflictException({
             code: 'IDEMPOTENCY_KEY_REUSED',
-            detail: 'Idempotency-Key was already used with a different request body.',
-            remediation: 'Reuse the key only for the identical command, or submit a new key.',
+            detail: 'Idempotency-Key was already used with a different request intent.',
+            remediation:
+              'Reuse the key only for the identical request intent, or submit a new key.',
           });
         }
         if (existing.responseStatus === null) {
@@ -272,7 +281,15 @@ function requestFingerprintHash(request: FastifyRequest, subjectId: string): str
     params: request.params ?? {},
     query: request.query ?? {},
     body: request.body,
+    businessHeaders: {
+      ifMatch: normalizeIfMatchHeader(request.headers['if-match']),
+    },
   });
+}
+
+function normalizeIfMatchHeader(value: string | readonly string[] | undefined): string | null {
+  if (value === undefined) return null;
+  return (Array.isArray(value) ? value : [value]).map((part) => part.trim()).join(',');
 }
 
 function isDeterministicHttpException(error: unknown): error is HttpException {

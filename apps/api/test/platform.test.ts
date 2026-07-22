@@ -6,6 +6,7 @@ import {
   UnauthorizedException,
   type CallHandler,
   type ExecutionContext,
+  type Type,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { createHash } from 'node:crypto';
@@ -20,7 +21,9 @@ import {
 } from '@zhili/auth';
 import { parseStrongEtag, PreconditionRequiredException } from '../src/platform/etag';
 import {
+  IdempotentCommand,
   IdempotencyInterceptor,
+  SkipIdempotency,
   canonicalBodyHash,
   validateIdempotencyKey,
 } from '../src/platform/idempotency';
@@ -63,10 +66,9 @@ class TestReply {
 function httpContext(
   request: Record<string, unknown>,
   reply = new TestReply(),
-  handler: (...args: never[]) => unknown = () => undefined
+  handler: (...args: never[]) => unknown = () => undefined,
+  controller: Type<unknown> = class TestController {}
 ): ExecutionContext {
-  class TestController {}
-
   return {
     getArgs: () => [request, reply],
     getArgByIndex: (index: number) => [request, reply][index],
@@ -81,7 +83,7 @@ function httpContext(
     switchToWs: () => {
       throw new Error('WebSocket context is unavailable in this HTTP test');
     },
-    getClass: () => TestController,
+    getClass: () => controller,
     getHandler: () => handler,
     getType: () => 'http',
   } as unknown as ExecutionContext;
@@ -308,6 +310,76 @@ describe('idempotency route metadata', () => {
         )
       )
     ).rejects.toBeInstanceOf(BadRequestException);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('lets @SkipIdempotency bypass a POST before reading its principal or key', async () => {
+    const routeHandler = () => undefined;
+    SkipIdempotency()(routeHandler);
+    const handler = vi.fn(() => of({ callbackAccepted: true }));
+
+    const result = await lastValueFrom(
+      new IdempotencyInterceptor().intercept(
+        httpContext(
+          {
+            method: 'POST',
+            headers: {},
+            body: { callback: true },
+          },
+          new TestReply(),
+          routeHandler
+        ),
+        { handle: handler }
+      )
+    );
+
+    expect(result).toEqual({ callbackAccepted: true });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it('lets method @SkipIdempotency override class @IdempotentCommand', async () => {
+    class ForcedController {}
+    IdempotentCommand()(ForcedController);
+    const routeHandler = () => undefined;
+    SkipIdempotency()(routeHandler);
+    const handler = vi.fn(() => of({ skipped: true }));
+
+    const result = await lastValueFrom(
+      new IdempotencyInterceptor().intercept(
+        httpContext(
+          { method: 'POST', headers: {} },
+          new TestReply(),
+          routeHandler,
+          ForcedController
+        ),
+        { handle: handler }
+      )
+    );
+
+    expect(result).toEqual({ skipped: true });
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it('lets method @IdempotentCommand override class @SkipIdempotency', async () => {
+    class SkippedController {}
+    SkipIdempotency()(SkippedController);
+    const routeHandler = () => undefined;
+    IdempotentCommand()(routeHandler);
+    const handler = vi.fn(() => of({ shouldNotRun: true }));
+
+    await expect(
+      lastValueFrom(
+        new IdempotencyInterceptor().intercept(
+          httpContext(
+            { method: 'GET', headers: {} },
+            new TestReply(),
+            routeHandler,
+            SkippedController
+          ),
+          { handle: handler }
+        )
+      )
+    ).rejects.toBeInstanceOf(UnauthorizedException);
     expect(handler).not.toHaveBeenCalled();
   });
 });

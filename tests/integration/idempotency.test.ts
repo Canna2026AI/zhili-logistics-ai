@@ -1,7 +1,12 @@
 import { resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
-import { ConflictException, type CallHandler, type ExecutionContext } from '@nestjs/common';
+import {
+  ConflictException,
+  HttpException,
+  type CallHandler,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
@@ -9,7 +14,11 @@ import postgres, { type Sql } from 'postgres';
 import { defer, lastValueFrom } from 'rxjs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createAuthenticatedPrincipal } from '@zhili/auth';
-import { IdempotencyInterceptor } from '../../apps/api/src/platform/idempotency';
+import {
+  IdempotentCommand,
+  IdempotencyInterceptor,
+  SkipIdempotency,
+} from '../../apps/api/src/platform/idempotency';
 import {
   buildRequestContext,
   type PrincipalRequest,
@@ -23,7 +32,6 @@ const tenantId = '01J0000000000000000000000A';
 const subjectId = '01J0000000000000000000001A';
 const tenantB = '01J0000000000000000000000B';
 const subjectB = '01J0000000000000000000001B';
-const idempotentHandlerMetadataKey = 'zhili:idempotent-command';
 
 let container: StartedPostgreSqlContainer;
 let admin: Sql;
@@ -64,11 +72,15 @@ function connectionUriFor(username: string, password: string): string {
 function executionContext(
   request: Record<string, unknown>,
   reply: TestReply,
-  idempotentCommand: boolean
+  handlerPolicy: boolean | undefined,
+  classPolicy: boolean | undefined
 ): ExecutionContext {
   class TestController {}
   const handler = () => undefined;
-  if (idempotentCommand) Reflect.defineMetadata(idempotentHandlerMetadataKey, true, handler);
+  if (classPolicy === true) IdempotentCommand()(TestController);
+  if (classPolicy === false) SkipIdempotency()(TestController);
+  if (handlerPolicy === true) IdempotentCommand()(handler);
+  if (handlerPolicy === false) SkipIdempotency()(handler);
 
   return {
     switchToHttp: () => ({
@@ -85,8 +97,11 @@ function executionContext(
 async function invoke(
   interceptor: IdempotencyInterceptor,
   options: {
+    authenticated?: boolean;
     body: unknown;
-    idempotentCommand?: boolean;
+    classIdempotencyPolicy?: boolean;
+    idempotencyPolicy?: boolean | 'unmarked';
+    ifMatch?: string | readonly string[];
     key?: string;
     method?: string;
     params?: Record<string, unknown>;
@@ -101,32 +116,43 @@ async function invoke(
 ): Promise<{ body: unknown; headers: Record<string, string | readonly string[]>; status: number }> {
   const invokingTenant = options.tenantId ?? tenantId;
   const invokingSubject = options.subjectId ?? subjectId;
-  const principal = createAuthenticatedPrincipal({
-    tenantId: invokingTenant,
-    subjectId: invokingSubject,
-    permissions: ['waybill:write'],
-  });
+  const principal =
+    options.authenticated === false
+      ? undefined
+      : createAuthenticatedPrincipal({
+          tenantId: invokingTenant,
+          subjectId: invokingSubject,
+          permissions: ['waybill:write'],
+        });
   const request: Record<string, unknown> = {
     body: options.body,
     headers: {
+      ...(options.ifMatch === undefined ? {} : { 'if-match': options.ifMatch }),
       ...(options.key ? { 'idempotency-key': options.key } : {}),
       'x-request-id': options.requestId,
     },
     method: options.method ?? 'POST',
     params: options.params ?? {},
-    principal,
+    ...(principal ? { principal } : {}),
     query: options.query ?? {},
     routeOptions: { url: options.routeTemplate ?? '/api/v1/test-commands/:commandId' },
     url: options.url ?? '/api/v1/test-commands/command-1',
   };
-  request.requestContext = buildRequestContext(request as unknown as PrincipalRequest);
+  if (principal) {
+    request.requestContext = buildRequestContext(request as unknown as PrincipalRequest);
+  }
   const reply = new TestReply();
   const next: CallHandler = {
     handle: () => defer(() => options.handler(reply)),
   };
 
+  const handlerPolicy =
+    options.idempotencyPolicy === 'unmarked' ? undefined : (options.idempotencyPolicy ?? true);
   const body = await lastValueFrom(
-    interceptor.intercept(executionContext(request, reply, options.idempotentCommand ?? true), next)
+    interceptor.intercept(
+      executionContext(request, reply, handlerPolicy, options.classIdempotencyPolicy),
+      next
+    )
   );
   return { body, headers: reply.getHeaders(), status: reply.statusCode };
 }
@@ -163,7 +189,7 @@ describe('PostgreSQL idempotency pipeline', () => {
     await expect(
       invoke(interceptor, {
         body: { command: 'create' },
-        idempotentCommand: false,
+        idempotencyPolicy: 'unmarked',
         method: 'POST',
         requestId: 'request-default-post',
         handler: async () => ({ execution: ++executions }),
@@ -183,7 +209,7 @@ describe('PostgreSQL idempotency pipeline', () => {
 
     const result = await invoke(interceptor, {
       body: undefined,
-      idempotentCommand: false,
+      idempotencyPolicy: 'unmarked',
       method: 'GET',
       requestId: 'request-default-get',
       handler: async () => ({ execution: ++executions }),
@@ -194,6 +220,55 @@ describe('PostgreSQL idempotency pipeline', () => {
     `;
     expect(result.body).toEqual({ execution: 1 });
     expect(recordCount?.count).toBe('0');
+  });
+
+  it('bypasses an explicitly skipped POST before principal and key lookup', async () => {
+    const interceptor = new IdempotencyInterceptor();
+    let executions = 0;
+
+    const result = await invoke(interceptor, {
+      authenticated: false,
+      body: { callback: 'payment-provider' },
+      idempotencyPolicy: false,
+      method: 'POST',
+      requestId: 'request-skipped-post',
+      handler: async () => ({ execution: ++executions }),
+    });
+
+    const [recordCount] = await admin<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM idempotency_records
+    `;
+    expect(result.body).toEqual({ execution: 1 });
+    expect(recordCount?.count).toBe('0');
+  });
+
+  it('applies method idempotency metadata before class metadata in both directions', async () => {
+    const interceptor = new IdempotencyInterceptor();
+    let executions = 0;
+
+    const skipped = await invoke(interceptor, {
+      authenticated: false,
+      body: { callback: true },
+      classIdempotencyPolicy: true,
+      idempotencyPolicy: false,
+      method: 'POST',
+      requestId: 'request-method-skip-override',
+      handler: async () => ({ execution: ++executions }),
+    });
+    await expect(
+      invoke(interceptor, {
+        authenticated: false,
+        body: undefined,
+        classIdempotencyPolicy: false,
+        idempotencyPolicy: true,
+        method: 'GET',
+        requestId: 'request-method-force-override',
+        handler: async () => ({ execution: ++executions }),
+      })
+    ).rejects.toBeInstanceOf(Error);
+
+    expect(skipped.body).toEqual({ execution: 1 });
+    expect(executions).toBe(1);
   });
 
   it('replays the exact status, headers and body for the same canonical body', async () => {
@@ -242,14 +317,100 @@ describe('PostgreSQL idempotency pipeline', () => {
       handler,
     });
 
-    await expect(
-      invoke(interceptor, {
+    let conflict: unknown;
+    try {
+      await invoke(interceptor, {
         key: 'conflicting-key-0001',
         body: { command: 'different' },
         requestId: 'request-conflict-second',
         handler,
+      });
+    } catch (error) {
+      conflict = error;
+    }
+
+    expect(conflict).toBeInstanceOf(ConflictException);
+    expect((conflict as ConflictException).getResponse()).toEqual({
+      code: 'IDEMPOTENCY_KEY_REUSED',
+      detail: 'Idempotency-Key was already used with a different request intent.',
+      remediation: 'Reuse the key only for the identical request intent, or submit a new key.',
+    });
+  });
+
+  it('normalizes If-Match shapes and rejects a changed precondition for the same key', async () => {
+    const interceptor = new IdempotencyInterceptor();
+    let executions = 0;
+    const handler = async () => ({ execution: ++executions });
+    const common = {
+      body: { command: 'update' },
+      key: 'if-match-fingerprint-0001',
+      handler,
+    };
+
+    const first = await invoke(interceptor, {
+      ...common,
+      ifMatch: '  "7"  ',
+      requestId: 'request-if-match-first',
+    });
+    const replay = await invoke(interceptor, {
+      ...common,
+      ifMatch: ['"7"'],
+      requestId: 'request-if-match-replay',
+    });
+    await expect(
+      invoke(interceptor, {
+        ...common,
+        ifMatch: '"8"',
+        requestId: 'request-if-match-conflict',
       })
     ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(first.body).toEqual({ execution: 1 });
+    expect(replay).toEqual(first);
+    expect(executions).toBe(1);
+  });
+
+  it('replays the same If-Match 412 but never replays it after the ETag is refreshed', async () => {
+    const interceptor = new IdempotencyInterceptor();
+    let executions = 0;
+    const handler = async () => {
+      executions += 1;
+      throw new HttpException(
+        {
+          code: 'PRECONDITION_FAILED',
+          detail: 'If-Match does not match the current resource version.',
+          remediation: 'Refresh the resource ETag and retry.',
+        },
+        412
+      );
+    };
+    const common = {
+      body: { command: 'update' },
+      key: 'if-match-stale-412-0001',
+      handler,
+    };
+
+    const stale = await invoke(interceptor, {
+      ...common,
+      ifMatch: '"7"',
+      requestId: 'request-if-match-stale',
+    });
+    const staleReplay = await invoke(interceptor, {
+      ...common,
+      ifMatch: ['"7"'],
+      requestId: 'request-if-match-stale-replay',
+    });
+    await expect(
+      invoke(interceptor, {
+        ...common,
+        ifMatch: '"8"',
+        requestId: 'request-if-match-refreshed',
+      })
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(stale.status).toBe(412);
+    expect(staleReplay).toEqual(stale);
+    expect(executions).toBe(1);
   });
 
   it('serializes concurrent duplicate keys with a PostgreSQL transaction advisory lock', async () => {
