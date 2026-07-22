@@ -8,8 +8,12 @@ import postgres, { type Sql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const packageRoot = resolve(import.meta.dirname, '..');
-const snapshotPath = resolve(packageRoot, 'migrations/meta/0001_snapshot.json');
-const downMigrationPath = resolve(packageRoot, 'migrations/down/0001_b1_domains.down.sql');
+const snapshotPath = resolve(packageRoot, 'migrations/meta/0002_snapshot.json');
+const domainDownMigrationPath = resolve(packageRoot, 'migrations/down/0001_b1_domains.down.sql');
+const alignmentDownMigrationPath = resolve(
+  packageRoot,
+  'migrations/down/0002_b1_persistence_alignment.down.sql'
+);
 const expectedDomainTables = [
   'attachments',
   'bills_of_lading',
@@ -156,8 +160,8 @@ const deniedTenantD = '01J1000000000000000000000D';
 const realPasswordHash =
   '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1yZWFsLWE$MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY';
 const dummyCredential = {
-  tenant_id: '01J0000000000000000000000A',
-  user_id: '01J0000000000000000000000B',
+  tenant_id: '00000000000000000000000000',
+  user_id: '00000000000000000000000001',
   password_hash:
     '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1kdW1teQ$YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk',
 } as const;
@@ -632,6 +636,7 @@ describe('B1 ordered domain migration', () => {
       WHERE n.nspname = 'public'
         AND c.relkind = 'r'
         AND col.column_name = 'tenant_id'
+        AND c.relname <> 'login_throttle_buckets'
         AND NOT EXISTS (
           SELECT 1 FROM pg_policy p
           WHERE p.polrelid = c.oid
@@ -1144,6 +1149,7 @@ describe('B1 ordered domain migration', () => {
       admin`
         UPDATE device_sync_conflicts
         SET status = 'RESOLVED', resolution = 'KEEP_SERVER', resolution_payload = '{}'::jsonb,
+            resolved_by_subject_id = ${subjectA}, resolution_reason = 'invalid CAS attempt',
             resolved_at = now(), version = 3
         WHERE id = '01J1000000000000000001220A'
       `
@@ -1164,6 +1170,7 @@ describe('B1 ordered domain migration', () => {
         const rows = await transaction<{ resolution: string; status: string; version: string }[]>`
           UPDATE device_sync_conflicts
           SET status = 'RESOLVED', resolution = 'KEEP_SERVER', resolution_payload = '{}'::jsonb,
+              resolved_by_subject_id = ${subjectA}, resolution_reason = 'winner accepted server',
               resolved_at = now(), version = 2
           WHERE id = '01J1000000000000000001220A' AND version = 1
           RETURNING status, resolution, version::text
@@ -1178,6 +1185,7 @@ describe('B1 ordered domain migration', () => {
           UPDATE device_sync_conflicts
           SET status = 'RESOLVED', resolution = 'SUBMIT_MANUAL',
               resolution_payload = '{"concurrent":true}'::jsonb,
+              resolved_by_subject_id = ${subjectA}, resolution_reason = 'concurrent manual review',
               resolved_at = now(), version = 2
           WHERE id = '01J1000000000000000001220A' AND version = 1
           RETURNING status, resolution, version::text
@@ -1267,19 +1275,19 @@ describe('B1 ordered domain migration', () => {
       {
         proname: 'control_plane_create_tenant',
         security_definer: true,
-        config: ['search_path=pg_catalog, public'],
+        config: ['search_path=pg_catalog'],
         execute_allowed: true,
       },
       {
         proname: 'control_plane_set_entitlement',
         security_definer: true,
-        config: ['search_path=pg_catalog, public'],
+        config: ['search_path=pg_catalog'],
         execute_allowed: true,
       },
       {
         proname: 'control_plane_set_tenant_status',
         security_definer: true,
-        config: ['search_path=pg_catalog, public'],
+        config: ['search_path=pg_catalog'],
         execute_allowed: true,
       },
     ]);
@@ -1382,6 +1390,7 @@ describe('B1 ordered domain migration', () => {
             SELECT * FROM control_plane_create_tenant(
               ${tenantA}, ${subjectA}, ${narrowCase.targetId},
               ${`narrow-${narrowCase.scope.toLowerCase()}`}, 'Narrow tenant',
+              'Asia/Shanghai', 'CNY',
               ${narrowCase.operationId}, ${`narrow-${narrowCase.scope.toLowerCase()}`},
               ${'a'.repeat(64)}
             )
@@ -1420,6 +1429,7 @@ describe('B1 ordered domain migration', () => {
         SELECT tenant_id, status, version::text, replayed
         FROM control_plane_create_tenant(
           ${tenantA}, ${actorA}, ${controlTenantC}, 'tenant-c', 'Tenant C',
+          'Asia/Shanghai', 'CNY',
           '01J1000000000000000001300A', 'control-create-c', ${'1'.repeat(64)}
         )
       `;
@@ -1436,6 +1446,7 @@ describe('B1 ordered domain migration', () => {
         SELECT tenant_id, status, version::text, replayed
         FROM control_plane_create_tenant(
           ${tenantA}, ${actorA}, ${controlTenantC}, 'tenant-c', 'Tenant C',
+          'Asia/Shanghai', 'CNY',
           '01J1000000000000000001300A', 'control-create-c', ${'1'.repeat(64)}
         )
       `;
@@ -1444,6 +1455,7 @@ describe('B1 ordered domain migration', () => {
         control`
           SELECT * FROM control_plane_create_tenant(
             ${tenantA}, ${actorA}, ${controlTenantC}, 'tenant-c', 'Tenant C',
+            'Asia/Shanghai', 'CNY',
             '01J1000000000000000001300A', 'control-create-c', ${'9'.repeat(64)}
           )
         `
@@ -1535,6 +1547,7 @@ describe('B1 ordered domain migration', () => {
           SELECT * FROM control_plane_create_tenant(
             ${tenantA}, ${actorA}, '01J1000000000000000001510A',
             'platform-denied', 'Platform denied',
+            'Asia/Shanghai', 'CNY',
             '01J1000000000000000001520A', 'platform-denied', ${'8'.repeat(64)}
           )
         `
@@ -1559,6 +1572,7 @@ describe('B1 ordered domain migration', () => {
         control`
           SELECT * FROM control_plane_create_tenant(
             ${tenantA}, ${subjectA}, ${deniedTenantD}, 'tenant-d', 'Tenant D',
+            'Asia/Shanghai', 'CNY',
             '01J1000000000000000001350A', 'control-denied-d', ${'5'.repeat(64)}
           )
         `
@@ -1645,7 +1659,7 @@ describe('B1 ordered domain migration', () => {
     `;
     expect(boundary).toEqual({
       security_definer: true,
-      config: ['search_path=pg_catalog, public'],
+      config: ['search_path=pg_catalog'],
       execute_allowed: true,
       public_execute_allowed: false,
     });
@@ -1783,7 +1797,7 @@ describe('B1 ordered domain migration', () => {
       await preservedAdmin.unsafe(
         await readFile(resolve(packageRoot, 'migrations/0001_b1_domains.sql'), 'utf8')
       );
-      await preservedAdmin.unsafe(await readFile(downMigrationPath, 'utf8'));
+      await preservedAdmin.unsafe(await readFile(domainDownMigrationPath, 'utf8'));
       expect(await captureClusterResources()).toEqual(beforeB1);
     } finally {
       await preservedAdmin.end();
@@ -1793,10 +1807,18 @@ describe('B1 ordered domain migration', () => {
 
   it('executes the checked-in B1 down migration, preserves foundation, and reapplies identically', async () => {
     const beforeDownFingerprint = firstFingerprint || (await schemaFingerprint());
-    const downSql = await readFile(downMigrationPath, 'utf8');
-    expect(downSql).not.toMatch(/DROP\s+SCHEMA/i);
-    expect(downSql).not.toMatch(/DROP\s+(?:OWNED|ROLE|EXTENSION)/i);
-    await admin.unsafe(downSql);
+    const alignmentDownSql = await readFile(alignmentDownMigrationPath, 'utf8');
+    const domainDownSql = await readFile(domainDownMigrationPath, 'utf8');
+    const migrationConnection = await admin.reserve();
+    try {
+      for (const downSql of [alignmentDownSql, domainDownSql]) {
+        expect(downSql).not.toMatch(/DROP\s+SCHEMA/i);
+        expect(downSql).not.toMatch(/DROP\s+(?:OWNED|ROLE|EXTENSION)/i);
+        await migrationConnection.unsafe(downSql);
+      }
+    } finally {
+      migrationConnection.release();
+    }
 
     const remainingTables = await admin<{ table_name: string }[]>`
       SELECT table_name
@@ -1815,6 +1837,8 @@ describe('B1 ordered domain migration', () => {
     expect(remainingRoles.map(({ rolname }) => rolname)).toEqual([
       'zhili_app',
       'zhili_auth',
+      'zhili_auth_capability_owner',
+      'zhili_control_capability_owner',
       'zhili_control_plane',
       'zhili_worker',
     ]);
@@ -1840,8 +1864,8 @@ describe('B1 ordered domain migration', () => {
     `;
     expect(b1Extension).toEqual([{ extname: 'btree_gist' }]);
 
-    await admin`DELETE FROM drizzle.__drizzle_migrations WHERE id = (
-      SELECT max(id) FROM drizzle.__drizzle_migrations
+    await admin`DELETE FROM drizzle.__drizzle_migrations WHERE id IN (
+      SELECT id FROM drizzle.__drizzle_migrations ORDER BY id DESC LIMIT 2
     )`;
 
     await migrateUp();

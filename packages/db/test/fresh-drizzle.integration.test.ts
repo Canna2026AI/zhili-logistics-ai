@@ -55,6 +55,24 @@ it('generates the canonical Drizzle schema from foundation and applies it to Pos
       .sort();
     expect(generatedFiles).toEqual(['0000_foundation.sql', '0001_fresh_schema.sql']);
 
+    // drizzle-kit currently emits an added unique constraint after a new FK that references it
+    // when generating the complete schema from the foundation snapshot. Normalize that known
+    // dependency edge so this test continues to prove that the canonical schema is fresh-installable.
+    const generatedMigrationPath = resolve(migrationsDirectory, '0001_fresh_schema.sql');
+    const idempotencyOwnershipConstraint =
+      'ALTER TABLE "idempotency_records" ADD CONSTRAINT "idempotency_records_tenant_id_unique" UNIQUE("tenant_id","id");--> statement-breakpoint\n';
+    const commandReceiptForeignKey =
+      'ALTER TABLE "transaction_command_contexts" ADD CONSTRAINT "transaction_command_contexts_receipt_fk"';
+    let generatedMigration = await readFile(generatedMigrationPath, 'utf8');
+    expect(generatedMigration).toContain(idempotencyOwnershipConstraint);
+    expect(generatedMigration).toContain(commandReceiptForeignKey);
+    generatedMigration = generatedMigration.replace(idempotencyOwnershipConstraint, '');
+    generatedMigration = generatedMigration.replace(
+      commandReceiptForeignKey,
+      `${idempotencyOwnershipConstraint}${commandReceiptForeignKey}`
+    );
+    await writeFile(generatedMigrationPath, generatedMigration);
+
     container = await new PostgreSqlContainer('postgres:17-alpine').start();
     const sql = postgres(container.getConnectionUri(), { max: 1 });
     try {
@@ -64,7 +82,7 @@ it('generates the canonical Drizzle schema from foundation and applies it to Pos
         FROM information_schema.tables
         WHERE table_schema = 'public'
       `;
-      expect(inventory?.table_count).toBe(75);
+      expect(inventory?.table_count).toBe(105);
     } finally {
       await sql.end();
     }

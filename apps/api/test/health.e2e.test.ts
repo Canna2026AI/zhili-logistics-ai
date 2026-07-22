@@ -218,7 +218,7 @@ beforeEach(async () => {
   probeClosers.postgresql = async () => undefined;
   probeClosers.redis = async () => undefined;
   probeClosers.objectStorage = async () => undefined;
-  await admin`TRUNCATE idempotency_records, outbox_events`;
+  await admin`TRUNCATE transaction_command_contexts, idempotency_records, outbox_events`;
 });
 
 afterAll(async () => {

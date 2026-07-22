@@ -12,10 +12,12 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
 
-import { customerAddresses, customers, devices, tenants, warehouses } from './identity';
+import { customerAddresses, customers, devices, tenants, users, warehouses } from './identity';
+import { partners } from './identity-contracts';
 import { waybillPackages, waybills } from './rates-waybills';
 
 function receiptActiveMeasurementForeignKey(table: {
@@ -120,6 +122,8 @@ export const warehouseReceipts = pgTable(
     tenantId: text('tenant_id').notNull(),
     receiptNo: text('receipt_no').notNull(),
     warehouseId: text('warehouse_id').notNull(),
+    customerId: text('customer_id'),
+    stationCode: text('station_code'),
     waybillId: text('waybill_id').notNull(),
     scanId: text('scan_id').notNull(),
     activeMeasurementId: text('active_measurement_id'),
@@ -147,6 +151,20 @@ export const warehouseReceipts = pgTable(
       table.createdAt.asc().nullsLast(),
       table.id.asc().nullsLast()
     ),
+    index('warehouse_receipts_immutable_list_idx').using(
+      'btree',
+      table.tenantId.asc().nullsLast(),
+      table.receivedAt.desc().nullsLast(),
+      table.id.desc().nullsLast()
+    ),
+    index('warehouse_receipts_filter_list_idx').using(
+      'btree',
+      table.tenantId.asc().nullsLast(),
+      table.status.asc().nullsLast(),
+      table.warehouseId.asc().nullsLast(),
+      table.receivedAt.desc().nullsLast(),
+      table.id.desc().nullsLast()
+    ),
     foreignKey({
       columns: [table.tenantId],
       foreignColumns: [tenants.id],
@@ -161,6 +179,11 @@ export const warehouseReceipts = pgTable(
       columns: [table.tenantId, table.waybillId],
       foreignColumns: [waybills.tenantId, waybills.id],
       name: 'warehouse_receipts_waybill_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.customerId],
+      foreignColumns: [customers.tenantId, customers.id],
+      name: 'warehouse_receipts_customer_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.scanId],
@@ -196,6 +219,8 @@ export const warehouseMeasurements = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id').notNull(),
     receiptId: text('receipt_id').notNull(),
+    deviceEventId: text('device_event_id'),
+    measuredAt: timestamp('measured_at', { withTimezone: true, mode: 'string' }),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     measurementVersion: bigint('measurement_version', { mode: 'number' }).notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
@@ -243,6 +268,11 @@ export const warehouseMeasurements = pgTable(
       table.receiptId,
       table.measurementVersion
     ),
+    unique('warehouse_measurements_device_event_unique').on(
+      table.tenantId,
+      table.receiptId,
+      table.deviceEventId
+    ),
     pgPolicy('warehouse_measurements_tenant_isolation', {
       as: 'permissive',
       for: 'all',
@@ -251,6 +281,10 @@ export const warehouseMeasurements = pgTable(
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
     check('warehouse_measurements_version_check', sql`measurement_version > 0`),
+    check(
+      'warehouse_measurements_event_time_check',
+      sql`(device_event_id IS NULL AND measured_at IS NULL) OR (length(btrim(device_event_id)) >= 1 AND measured_at IS NOT NULL)`
+    ),
     check('warehouse_measurements_weight_check', sql`actual_weight_grams > 0`),
     check('warehouse_measurements_length_check', sql`length_mm > 0`),
     check('warehouse_measurements_width_check', sql`width_mm > 0`),
@@ -521,8 +555,11 @@ export const loadUnits = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id').notNull(),
     loadUnitNo: text('load_unit_no').notNull(),
+    loadUnitType: text('load_unit_type'),
+    sealNo: text('seal_no'),
+    stationCode: text('station_code'),
     originWarehouseId: text('origin_warehouse_id').notNull(),
-    destinationWarehouseId: text('destination_warehouse_id').notNull(),
+    destinationWarehouseId: text('destination_warehouse_id'),
     status: text().default('OPEN').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
@@ -541,6 +578,12 @@ export const loadUnits = pgTable(
       table.tenantId.asc().nullsLast(),
       table.createdAt.asc().nullsLast(),
       table.id.asc().nullsLast()
+    ),
+    index('load_units_immutable_list_idx').using(
+      'btree',
+      table.tenantId.asc().nullsLast(),
+      table.updatedAt.desc().nullsLast(),
+      table.id.desc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -568,6 +611,10 @@ export const loadUnits = pgTable(
     }),
     check('load_units_version_check', sql`version >= 1`),
     check(
+      'load_units_type_check',
+      sql`load_unit_type IS NULL OR load_unit_type IN ('BAG', 'PALLET', 'CONTAINER')`
+    ),
+    check(
       'load_units_status_check',
       sql`status = ANY (ARRAY['OPEN'::text, 'SEALED'::text, 'DISPATCHED'::text])`
     ),
@@ -577,7 +624,7 @@ export const loadUnits = pgTable(
     ),
     check(
       'load_units_distinct_warehouses_check',
-      sql`origin_warehouse_id <> destination_warehouse_id`
+      sql`destination_warehouse_id IS NULL OR origin_warehouse_id <> destination_warehouse_id`
     ),
   ]
 ).enableRLS();
@@ -589,7 +636,7 @@ export const loadUnitItems = pgTable(
     tenantId: text('tenant_id').notNull(),
     loadUnitId: text('load_unit_id').notNull(),
     waybillId: text('waybill_id').notNull(),
-    packageId: text('package_id').notNull(),
+    packageId: text('package_id'),
     itemSequence: integer('item_sequence').notNull(),
     loadedAt: timestamp('loaded_at', { withTimezone: true, mode: 'string' }).defaultNow().notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
@@ -649,8 +696,16 @@ export const linehaulBookings = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id').notNull(),
     bookingNo: text('booking_no').notNull(),
-    loadUnitId: text('load_unit_id').notNull(),
+    loadUnitId: text('load_unit_id'),
+    carrierId: text('carrier_id'),
     carrierCode: text('carrier_code').notNull(),
+    originPort: text('origin_port'),
+    destinationPort: text('destination_port'),
+    plannedDepartureAt: timestamp('planned_departure_at', {
+      withTimezone: true,
+      mode: 'string',
+    }),
+    stationCode: text('station_code'),
     status: text().default('DRAFT').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
@@ -680,6 +735,11 @@ export const linehaulBookings = pgTable(
       foreignColumns: [loadUnits.tenantId, loadUnits.id],
       name: 'linehaul_bookings_load_unit_fk',
     }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.carrierId],
+      foreignColumns: [partners.tenantId, partners.id],
+      name: 'linehaul_bookings_carrier_fk',
+    }).onDelete('restrict'),
     unique('linehaul_bookings_identity_unique').on(table.tenantId, table.id),
     unique('linehaul_bookings_number_unique').on(table.tenantId, table.bookingNo),
     pgPolicy('linehaul_bookings_tenant_isolation', {
@@ -698,6 +758,10 @@ export const linehaulBookings = pgTable(
       'linehaul_bookings_schedule_check',
       sql`(arrival_at IS NULL) OR (departure_at IS NULL) OR (arrival_at > departure_at)`
     ),
+    check(
+      'linehaul_bookings_contract_fields_check',
+      sql`(origin_port IS NULL OR length(btrim(origin_port)) >= 1) AND (destination_port IS NULL OR length(btrim(destination_port)) >= 1)`
+    ),
   ]
 ).enableRLS();
 
@@ -708,6 +772,8 @@ export const billsOfLading = pgTable(
     tenantId: text('tenant_id').notNull(),
     bolNo: text('bol_no').notNull(),
     bookingId: text('booking_id').notNull(),
+    billType: text('bill_type'),
+    parentBillOfLadingId: text('parent_bill_of_lading_id'),
     documentMediaId: text('document_media_id'),
     status: text().default('DRAFT').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
@@ -738,6 +804,11 @@ export const billsOfLading = pgTable(
       name: 'bills_of_lading_booking_fk',
     }).onDelete('restrict'),
     foreignKey({
+      columns: [table.tenantId, table.parentBillOfLadingId],
+      foreignColumns: [table.tenantId, table.id],
+      name: 'bills_of_lading_parent_fk',
+    }).onDelete('restrict'),
+    foreignKey({
       columns: [table.tenantId, table.documentMediaId],
       foreignColumns: [warehouseMedia.tenantId, warehouseMedia.id],
       name: 'bills_of_lading_media_fk',
@@ -754,7 +825,15 @@ export const billsOfLading = pgTable(
     check('bills_of_lading_version_check', sql`version >= 1`),
     check(
       'bills_of_lading_status_check',
-      sql`status = ANY (ARRAY['DRAFT'::text, 'ISSUED'::text, 'VOID'::text])`
+      sql`status = ANY (ARRAY['DRAFT'::text, 'CONFIRMED'::text, 'DEPARTED'::text, 'CLOSED'::text, 'ISSUED'::text, 'VOID'::text])`
+    ),
+    check(
+      'bills_of_lading_type_check',
+      sql`bill_type IS NULL OR bill_type IN ('MASTER', 'HOUSE')`
+    ),
+    check(
+      'bills_of_lading_parent_check',
+      sql`parent_bill_of_lading_id IS NULL OR parent_bill_of_lading_id <> id`
     ),
   ]
 ).enableRLS();
@@ -825,16 +904,21 @@ export const deliveryTasks = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id').notNull(),
     taskNo: text('task_no').notNull(),
-    waybillId: text('waybill_id').notNull(),
+    waybillId: text('waybill_id'),
     fbaDeliveryId: text('fba_delivery_id'),
-    customerId: text('customer_id').notNull(),
-    destinationAddressId: text('destination_address_id').notNull(),
+    customerId: text('customer_id'),
+    destinationAddressId: text('destination_address_id'),
+    stationId: text('station_id'),
+    executorType: text('executor_type'),
+    executorId: text('executor_id'),
     assignedDeviceId: text('assigned_device_id'),
     partnerCode: text('partner_code'),
     status: text().default('PLANNED').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
     plannedAt: timestamp('planned_at', { withTimezone: true, mode: 'string' }),
+    plannedStartAt: timestamp('planned_start_at', { withTimezone: true, mode: 'string' }),
+    plannedEndAt: timestamp('planned_end_at', { withTimezone: true, mode: 'string' }),
     completedAt: timestamp('completed_at', { withTimezone: true, mode: 'string' }),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
@@ -848,6 +932,12 @@ export const deliveryTasks = pgTable(
       'btree',
       table.tenantId.asc().nullsLast(),
       table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
+    ),
+    index('delivery_tasks_immutable_list_idx').using(
+      'btree',
+      table.tenantId.asc().nullsLast(),
+      table.plannedStartAt.asc().nullsLast(),
       table.id.asc().nullsLast()
     ),
     foreignKey({
@@ -904,6 +994,14 @@ export const deliveryTasks = pgTable(
       'delivery_tasks_completion_check',
       sql`((status = 'COMPLETED'::text) AND (completed_at IS NOT NULL)) OR (status <> 'COMPLETED'::text)`
     ),
+    check(
+      'delivery_tasks_executor_check',
+      sql`(executor_type IS NULL AND executor_id IS NULL) OR (executor_type IN ('DRIVER', 'PARTNER') AND length(btrim(executor_id)) >= 1)`
+    ),
+    check(
+      'delivery_tasks_window_check',
+      sql`planned_end_at IS NULL OR planned_start_at IS NULL OR planned_end_at > planned_start_at`
+    ),
   ]
 ).enableRLS();
 
@@ -918,6 +1016,7 @@ export const deliveryTaskEvents = pgTable(
     eventType: text('event_type').notNull(),
     source: text().notNull(),
     sourceEventId: text('source_event_id').notNull(),
+    deviceEventId: text('device_event_id'),
     payload: jsonb().notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'string' }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
@@ -962,7 +1061,7 @@ export const deliveryTaskEvents = pgTable(
     check('delivery_task_events_sequence_check', sql`event_sequence > 0`),
     check(
       'delivery_task_events_type_check',
-      sql`event_type = ANY (ARRAY['INTAKE'::text, 'DISCREPANCY'::text, 'ASSIGNED'::text, 'ACCEPTED'::text, 'DEPARTED'::text, 'ARRIVED'::text, 'DELIVERED'::text, 'FAILED'::text, 'CANCELLED'::text, 'PARTNER_REPLAY'::text])`
+      sql`event_type = ANY (ARRAY['INTAKE'::text, 'DISCREPANCY'::text, 'ASSIGNED'::text, 'ACCEPTED'::text, 'DEPARTED'::text, 'ARRIVED'::text, 'DELIVERED'::text, 'FAILED'::text, 'CANCELLED'::text, 'PALLETIZED'::text, 'LOADED'::text, 'OUT_FOR_DELIVERY'::text, 'COMPLETED'::text, 'EXCEPTION'::text, 'PARTNER_REPLAY'::text])`
     ),
     check(
       'delivery_task_events_source_check',
@@ -1028,6 +1127,7 @@ export const podVersions = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id').notNull(),
     podRecordId: text('pod_record_id').notNull(),
+    deviceEventId: text('device_event_id'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     podVersion: bigint('pod_version', { mode: 'number' }).notNull(),
     recipientName: text('recipient_name').notNull(),
@@ -1092,6 +1192,7 @@ export const podVersions = pgTable(
       table.podVersion
     ),
     unique('pod_versions_number_unique').on(table.tenantId, table.podRecordId, table.podVersion),
+    unique('pod_versions_device_event_unique').on(table.tenantId, table.deviceEventId),
     pgPolicy('pod_versions_tenant_isolation', {
       as: 'permissive',
       for: 'all',
@@ -1123,6 +1224,7 @@ export const deviceSyncSessions = pgTable(
     tenantId: text('tenant_id').notNull(),
     deviceId: text('device_id').notNull(),
     warehouseId: text('warehouse_id').notNull(),
+    subjectId: text('subject_id'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     bindingVersion: bigint('binding_version', { mode: 'number' }).notNull(),
     status: text().default('OPEN').notNull(),
@@ -1156,6 +1258,11 @@ export const deviceSyncSessions = pgTable(
       foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'device_sync_sessions_warehouse_fk',
     }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.subjectId],
+      foreignColumns: [users.tenantId, users.id],
+      name: 'device_sync_sessions_subject_fk',
+    }).onDelete('restrict'),
     unique('device_sync_sessions_identity_unique').on(table.tenantId, table.id),
     unique('device_sync_sessions_scope_unique').on(
       table.tenantId,
@@ -1163,6 +1270,9 @@ export const deviceSyncSessions = pgTable(
       table.deviceId,
       table.warehouseId
     ),
+    uniqueIndex('device_sync_sessions_one_open_device_idx')
+      .on(table.tenantId, table.deviceId)
+      .where(sql`status = 'OPEN'`),
     pgPolicy('device_sync_sessions_tenant_isolation', {
       as: 'permissive',
       for: 'all',
@@ -1170,7 +1280,7 @@ export const deviceSyncSessions = pgTable(
       using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
-    check('device_sync_sessions_binding_check', sql`binding_version >= 0`),
+    check('device_sync_sessions_binding_check', sql`binding_version >= 1`),
     check('device_sync_sessions_sequence_check', sql`last_local_sequence >= 0`),
     check(
       'device_sync_sessions_status_check',
@@ -1192,6 +1302,7 @@ export const deviceEventReceipts = pgTable(
     sessionId: text('session_id').notNull(),
     deviceId: text('device_id').notNull(),
     warehouseId: text('warehouse_id').notNull(),
+    subjectId: text('subject_id'),
     eventId: text('event_id').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     localSequence: bigint('local_sequence', { mode: 'number' }).notNull(),
@@ -1206,6 +1317,7 @@ export const deviceEventReceipts = pgTable(
     duplicateOfId: text('duplicate_of_id'),
     conflictId: text('conflict_id'),
     errorEnvelope: jsonb('error_envelope'),
+    claimedMediaRefs: jsonb('claimed_media_refs'),
     payload: jsonb().notNull(),
     occurredAt: timestamp('occurred_at', { withTimezone: true, mode: 'string' }).notNull(),
     processedAt: timestamp('processed_at', { withTimezone: true, mode: 'string' })
@@ -1239,6 +1351,11 @@ export const deviceEventReceipts = pgTable(
       name: 'device_event_receipts_session_scope_fk',
     }).onDelete('restrict'),
     foreignKey({
+      columns: [table.tenantId, table.subjectId],
+      foreignColumns: [users.tenantId, users.id],
+      name: 'device_event_receipts_subject_fk',
+    }).onDelete('restrict'),
+    foreignKey({
       columns: [table.tenantId, table.duplicateOfId],
       foreignColumns: [table.tenantId, table.id],
       name: 'device_event_receipts_duplicate_fk',
@@ -1264,16 +1381,113 @@ export const deviceEventReceipts = pgTable(
     ),
     check(
       'device_event_receipts_server_version_check',
-      sql`(server_version IS NULL) OR (server_version >= 0)`
+      sql`(server_version IS NULL) OR (server_version >= 1)`
     ),
     check(
       'device_event_receipts_disposition_check',
       sql`disposition = ANY (ARRAY['APPLIED'::text, 'DUPLICATE'::text, 'CONFLICT'::text, 'REJECTED'::text])`
     ),
     check(
+      'device_event_receipts_claims_check',
+      sql`claimed_media_refs IS NULL OR jsonb_typeof(claimed_media_refs) = 'array'`
+    ),
+    check(
       'device_event_receipts_result_shape_check',
       sql`((disposition = 'APPLIED'::text) AND (server_version IS NOT NULL) AND (duplicate_of_id IS NULL) AND (conflict_id IS NULL) AND (error_envelope IS NULL)) OR ((disposition = 'DUPLICATE'::text) AND (server_version IS NOT NULL) AND (duplicate_of_id IS NOT NULL) AND (conflict_id IS NULL) AND (error_envelope IS NULL)) OR ((disposition = 'CONFLICT'::text) AND (server_version IS NOT NULL) AND (duplicate_of_id IS NULL) AND (conflict_id IS NOT NULL) AND (error_envelope IS NULL)) OR ((disposition = 'REJECTED'::text) AND (server_version IS NULL) AND (duplicate_of_id IS NULL) AND (conflict_id IS NULL) AND (error_envelope IS NOT NULL))`
     ),
+  ]
+).enableRLS();
+
+export const deviceMediaReservations = pgTable(
+  'device_media_reservations',
+  {
+    id: text().primaryKey().notNull(),
+    tenantId: text('tenant_id').notNull(),
+    clientMediaId: text('client_media_id').notNull(),
+    deviceId: text('device_id').notNull(),
+    warehouseId: text('warehouse_id').notNull(),
+    subjectId: text('subject_id').notNull(),
+    eventId: text('event_id').notNull(),
+    contentHash: text('content_hash').notNull(),
+    objectKey: text('object_key').notNull(),
+    contentType: text('content_type').notNull(),
+    sizeBytes: bigint('size_bytes', { mode: 'number' }).notNull(),
+    status: text().default('UPLOADED').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
+    claimedAt: timestamp('claimed_at', { withTimezone: true, mode: 'string' }),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'string' })
+      .defaultNow()
+      .notNull(),
+  },
+  (table) => [
+    index('device_media_reservations_expiry_idx').on(
+      table.tenantId,
+      table.status,
+      table.expiresAt
+    ),
+    foreignKey({
+      columns: [table.tenantId],
+      foreignColumns: [tenants.id],
+      name: 'device_media_reservations_tenant_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.deviceId],
+      foreignColumns: [devices.tenantId, devices.id],
+      name: 'device_media_reservations_device_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.warehouseId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
+      name: 'device_media_reservations_warehouse_fk',
+    }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.subjectId],
+      foreignColumns: [users.tenantId, users.id],
+      name: 'device_media_reservations_subject_fk',
+    }).onDelete('restrict'),
+    unique('device_media_reservations_identity_unique').on(table.tenantId, table.id),
+    unique('device_media_reservations_client_unique').on(
+      table.tenantId,
+      table.deviceId,
+      table.clientMediaId
+    ),
+    unique('device_media_reservations_event_identity_unique').on(
+      table.tenantId,
+      table.id,
+      table.eventId
+    ),
+    pgPolicy('device_media_reservations_tenant_isolation', {
+      as: 'permissive',
+      for: 'all',
+      to: ['zhili_app'],
+      using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
+      withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
+    }),
+    check('device_media_reservations_hash_check', sql`content_hash ~ '^[0-9a-f]{64}$'`),
+    check(
+      'device_media_reservations_id_ulid_check',
+      sql`id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`
+    ),
+    check(
+      'device_media_reservations_tenant_id_ulid_check',
+      sql`tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`
+    ),
+    check('device_media_reservations_size_check', sql`size_bytes > 0`),
+    check(
+      'device_media_reservations_status_check',
+      sql`status IN ('UPLOADED', 'SCANNING', 'READY', 'REJECTED')`
+    ),
+    check(
+      'device_media_reservations_claim_check',
+      sql`(status IN ('UPLOADED', 'SCANNING') AND claimed_at IS NULL) OR (status IN ('READY', 'REJECTED'))`
+    ),
+    check('device_media_reservations_expiry_check', sql`expires_at > created_at`),
+    check('device_media_reservations_version_check', sql`version >= 1`),
+    check('device_media_reservations_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
 
@@ -1283,7 +1497,8 @@ export const deviceEventMediaClaims = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id').notNull(),
     deviceEventReceiptId: text('device_event_receipt_id').notNull(),
-    mediaId: text('media_id').notNull(),
+    mediaId: text('media_id'),
+    mediaReservationId: text('media_reservation_id'),
     claimKey: text('claim_key').notNull(),
     claimStatus: text('claim_status').default('CLAIMED').notNull(),
     claimedAt: timestamp('claimed_at', { withTimezone: true, mode: 'string' })
@@ -1315,6 +1530,11 @@ export const deviceEventMediaClaims = pgTable(
       foreignColumns: [warehouseMedia.tenantId, warehouseMedia.id],
       name: 'device_event_media_claims_media_fk',
     }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.mediaReservationId],
+      foreignColumns: [deviceMediaReservations.tenantId, deviceMediaReservations.id],
+      name: 'device_event_media_claims_reservation_fk',
+    }).onDelete('restrict'),
     unique('device_event_media_claims_identity_unique').on(table.tenantId, table.id),
     unique('device_event_media_claims_key_unique').on(
       table.tenantId,
@@ -1322,6 +1542,10 @@ export const deviceEventMediaClaims = pgTable(
       table.claimKey
     ),
     unique('device_event_media_claims_media_unique').on(table.tenantId, table.mediaId),
+    unique('device_event_media_claims_reservation_unique').on(
+      table.tenantId,
+      table.mediaReservationId
+    ),
     pgPolicy('device_event_media_claims_tenant_isolation', {
       as: 'permissive',
       for: 'all',
@@ -1332,6 +1556,10 @@ export const deviceEventMediaClaims = pgTable(
     check(
       'device_event_media_claims_status_check',
       sql`claim_status = ANY (ARRAY['CLAIMED'::text, 'ATTACHED'::text, 'REJECTED'::text])`
+    ),
+    check(
+      'device_event_media_claims_owner_check',
+      sql`num_nonnulls(media_id, media_reservation_id) = 1`
     ),
   ]
 ).enableRLS();
@@ -1353,6 +1581,8 @@ export const deviceSyncConflicts = pgTable(
     status: text().default('OPEN').notNull(),
     resolution: text(),
     resolutionPayload: jsonb('resolution_payload'),
+    resolvedBySubjectId: text('resolved_by_subject_id'),
+    resolutionReason: text('resolution_reason'),
     resolvedAt: timestamp('resolved_at', { withTimezone: true, mode: 'string' }),
     version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
@@ -1376,6 +1606,11 @@ export const deviceSyncConflicts = pgTable(
       foreignColumns: [deviceEventReceipts.tenantId, deviceEventReceipts.id],
       name: 'device_sync_conflicts_event_fk',
     }).onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.resolvedBySubjectId],
+      foreignColumns: [users.tenantId, users.id],
+      name: 'device_sync_conflicts_resolver_fk',
+    }).onDelete('restrict'),
     unique('device_sync_conflicts_identity_unique').on(table.tenantId, table.id),
     unique('device_sync_conflicts_event_unique').on(table.tenantId, table.deviceEventReceiptId),
     pgPolicy('device_sync_conflicts_tenant_isolation', {
@@ -1387,7 +1622,7 @@ export const deviceSyncConflicts = pgTable(
     }),
     check(
       'device_sync_conflicts_resolution_shape_check',
-      sql`((status = 'OPEN'::text) AND (resolution IS NULL) AND (resolution_payload IS NULL) AND (resolved_at IS NULL)) OR ((status = 'RESOLVED'::text) AND (resolution IS NOT NULL) AND (resolved_at IS NOT NULL))`
+      sql`((status = 'OPEN'::text) AND (resolution IS NULL) AND (resolution_payload IS NULL) AND (resolved_by_subject_id IS NULL) AND (resolution_reason IS NULL) AND (resolved_at IS NULL)) OR ((status = 'RESOLVED'::text) AND (resolution IS NOT NULL) AND (resolved_by_subject_id IS NOT NULL) AND (length(btrim(resolution_reason)) >= 3) AND (resolved_at IS NOT NULL))`
     ),
     check(
       'device_sync_conflicts_resource_versions_check',

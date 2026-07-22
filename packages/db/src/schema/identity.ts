@@ -1,5 +1,6 @@
 import {
   bigint,
+  boolean,
   check,
   customType,
   foreignKey,
@@ -26,6 +27,8 @@ export const tenants = pgTable(
     slug: text().notNull(),
     displayName: text('display_name').notNull(),
     status: text().default('ACTIVE').notNull(),
+    defaultTimezone: text('default_timezone'),
+    defaultCurrency: text('default_currency'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
@@ -55,6 +58,9 @@ export const tenants = pgTable(
       sql`status = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text, 'EXPIRED'::text])`
     ),
     check('tenants_version_check', sql`version >= 1`),
+    check('tenants_timezone_check', sql`default_timezone IS NULL OR length(btrim(default_timezone)) BETWEEN 1 AND 64`),
+    check('tenants_currency_check', sql`default_currency IS NULL OR default_currency ~ '^[A-Z]{3}$'::text`),
+    check('tenants_reserved_sentinel_check', sql`id <> '00000000000000000000000000'::text`),
     check('tenants_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -148,7 +154,7 @@ export const organizations = pgTable(
     ),
     check(
       'organizations_type_check',
-      sql`organization_type = ANY (ARRAY['TENANT_ROOT'::text, 'BUSINESS_UNIT'::text, 'BRANCH'::text, 'PARTNER'::text])`
+      sql`organization_type = ANY (ARRAY['TENANT_ROOT'::text, 'BUSINESS_UNIT'::text, 'BRANCH'::text, 'PARTNER'::text, 'COMPANY'::text, 'DEPARTMENT'::text, 'SITE'::text, 'WAREHOUSE'::text, 'LOCATION'::text])`
     ),
     check(
       'organizations_status_check',
@@ -236,6 +242,7 @@ export const users = pgTable(
     loginNameNormalized: text('login_name_normalized').notNull(),
     emailNormalized: text('email_normalized'),
     displayName: text('display_name').notNull(),
+    mobile: text(),
     passwordHash: text('password_hash'),
     status: text().default('INVITED').notNull(),
     passwordChangedAt: timestamp('password_changed_at', { withTimezone: true, mode: 'string' }),
@@ -288,6 +295,10 @@ export const users = pgTable(
       sql`(length(btrim(display_name)) >= 1) AND (length(btrim(display_name)) <= 160)`
     ),
     check(
+      'users_mobile_check',
+      sql`mobile IS NULL OR length(btrim(mobile)) BETWEEN 3 AND 32`
+    ),
+    check(
       'users_password_hash_check',
       sql`(password_hash IS NULL) OR (password_hash ~~ '$argon2id$%'::text)`
     ),
@@ -308,6 +319,7 @@ export const customers = pgTable(
     organizationId: text('organization_id'),
     customerNumber: text('customer_number').notNull(),
     displayName: text('display_name').notNull(),
+    settlementCurrency: text('settlement_currency'),
     status: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
     version: bigint({ mode: 'number' }).default(1).notNull(),
@@ -357,6 +369,7 @@ export const customers = pgTable(
       sql`status = ANY (ARRAY['ACTIVE'::text, 'ON_HOLD'::text, 'INACTIVE'::text])`
     ),
     check('customers_version_check', sql`version >= 1`),
+    check('customers_settlement_currency_check', sql`settlement_currency IS NULL OR settlement_currency ~ '^[A-Z]{3}$'::text`),
     check('customers_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -367,9 +380,11 @@ export const customerAddresses = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id').notNull(),
     customerId: text('customer_id').notNull(),
-    addressCode: text('address_code').notNull(),
-    addressType: text('address_type').notNull(),
-    contactName: text('contact_name').notNull(),
+    addressCode: text('address_code'),
+    addressType: text('address_type'),
+    addressLabel: text('address_label'),
+    isDefault: boolean('is_default').default(false).notNull(),
+    contactName: text('contact_name'),
     contactPhone: text('contact_phone'),
     countryCode: text('country_code').notNull(),
     region: text(),
@@ -419,6 +434,9 @@ export const customerAddresses = pgTable(
       table.customerId,
       table.addressCode
     ),
+    uniqueIndex('customer_addresses_one_default_idx')
+      .on(table.tenantId, table.customerId)
+      .where(sql`is_default`),
     pgPolicy('customer_addresses_tenant_isolation', {
       as: 'permissive',
       for: 'all',
@@ -433,15 +451,19 @@ export const customerAddresses = pgTable(
     ),
     check(
       'customer_addresses_code_check',
-      sql`(length(btrim(address_code)) >= 1) AND (length(btrim(address_code)) <= 64)`
+      sql`address_code IS NULL OR length(btrim(address_code)) BETWEEN 1 AND 64`
     ),
     check(
       'customer_addresses_type_check',
-      sql`address_type = ANY (ARRAY['BILLING'::text, 'PICKUP'::text, 'DELIVERY'::text, 'RETURN'::text])`
+      sql`address_type IS NULL OR address_type = ANY (ARRAY['BILLING'::text, 'PICKUP'::text, 'DELIVERY'::text, 'RETURN'::text])`
     ),
     check(
       'customer_addresses_contact_check',
-      sql`(length(btrim(contact_name)) >= 1) AND (length(btrim(contact_name)) <= 160)`
+      sql`contact_name IS NULL OR length(btrim(contact_name)) BETWEEN 1 AND 160`
+    ),
+    check(
+      'customer_addresses_label_check',
+      sql`address_label IS NULL OR length(btrim(address_label)) BETWEEN 1 AND 160`
     ),
     check('customer_addresses_country_check', sql`country_code ~ '^[A-Z]{2}$'::text`),
     check(

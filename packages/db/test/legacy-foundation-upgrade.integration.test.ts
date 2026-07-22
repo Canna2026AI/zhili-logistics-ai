@@ -147,8 +147,14 @@ it('upgrades a recorded R2 foundation by creating only missing persistent prereq
       const [migrationCount] = await sql<{ migration_count: number }[]>`
         SELECT count(*)::int AS migration_count FROM drizzle.__drizzle_migrations
       `;
-      expect(migrationCount?.migration_count).toBe(2);
+      expect(migrationCount?.migration_count).toBe(3);
 
+      await sql.unsafe(
+        await readFile(
+          resolve(currentMigrations, 'down/0002_b1_persistence_alignment.down.sql'),
+          'utf8'
+        )
+      );
       await sql.unsafe(
         await readFile(resolve(currentMigrations, 'down/0001_b1_domains.down.sql'), 'utf8')
       );
@@ -200,6 +206,12 @@ it('does not alter pre-existing prerequisite roles, owners, or extension depende
       const beforeUpgrade = await capturePreservedResources(sql);
 
       await migrate(drizzle(sql), { migrationsFolder: currentMigrations });
+      await sql.unsafe(
+        await readFile(
+          resolve(currentMigrations, 'down/0002_b1_persistence_alignment.down.sql'),
+          'utf8'
+        )
+      );
       await sql.unsafe(
         await readFile(resolve(currentMigrations, 'down/0001_b1_domains.down.sql'), 'utf8')
       );

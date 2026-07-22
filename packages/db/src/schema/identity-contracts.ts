@@ -2,10 +2,12 @@ import {
   type AnyPgColumn,
   type ForeignKeyBuilder,
   bigint,
+  boolean,
   check,
   foreignKey,
   integer,
   jsonb,
+  numeric,
   pgPolicy,
   pgTable,
   text,
@@ -53,10 +55,16 @@ export const tenantEntitlements = pgTable(
     entitlementVersion: integer('entitlement_version').notNull(),
     state: text().default('ACTIVE').notNull(),
     quotaLimit: bigint('quota_limit', { mode: 'number' }),
+    quotaMap: jsonb('quota_map').default({}).notNull(),
+    isEnabled: boolean('is_enabled').default(true).notNull(),
+    replacementVersion: bigint('replacement_version', { mode: 'number' }).default(1).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     usageValue: bigint('usage_value', { mode: 'number' }).default(0).notNull(),
     validFrom: timestamp('valid_from', { withTimezone: true, mode: 'string' }).notNull(),
     validUntil: timestamp('valid_until', { withTimezone: true, mode: 'string' }),
-    createdByUserId: text('created_by_user_id').notNull(),
+    createdByUserId: text('created_by_user_id'),
+    createdByActorTenantId: text('created_by_actor_tenant_id'),
+    createdByActorSubjectId: text('created_by_actor_subject_id'),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -76,16 +84,42 @@ export const tenantEntitlements = pgTable(
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
+    foreignKey({
+      columns: [table.createdByActorTenantId, table.createdByActorSubjectId],
+      foreignColumns: [users.tenantId, users.id],
+      name: 'tenant_entitlements_actor_creator_fk',
+    })
+      .onUpdate('restrict')
+      .onDelete('restrict'),
     unique('tenant_entitlements_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('tenant_entitlements_module_version_unique').on(
       table.tenantId,
       table.moduleCode,
       table.entitlementVersion
     ),
+    unique('tenant_entitlements_replacement_module_unique').on(
+      table.tenantId,
+      table.replacementVersion,
+      table.moduleCode
+    ),
     tenantPolicy('tenant_entitlements_tenant_isolation'),
     check('tenant_entitlements_id_ulid_check', sql`id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
-    check('tenant_entitlements_module_check', sql`module_code ~ '^[A-Z][A-Z0-9_]{1,63}$'`),
+    check(
+      'tenant_entitlements_module_check',
+      sql`module_code ~ '^([A-Z][A-Z0-9_]{1,63}|[a-z0-9][a-z0-9.-]{1,79})$'`
+    ),
     check('tenant_entitlements_version_check', sql`entitlement_version >= 1`),
+    check('tenant_entitlements_aggregate_version_check', sql`version >= 1`),
+    check('tenant_entitlements_replacement_version_check', sql`replacement_version >= 1`),
+    check('tenant_entitlements_quota_map_check', sql`jsonb_typeof(quota_map) = 'object'`),
+    check(
+      'tenant_entitlements_creator_shape_check',
+      sql`(created_by_user_id IS NOT NULL AND created_by_actor_tenant_id IS NULL AND created_by_actor_subject_id IS NULL) OR (created_by_user_id IS NULL AND created_by_actor_tenant_id IS NOT NULL AND created_by_actor_subject_id IS NOT NULL)`
+    ),
+    check(
+      'tenant_entitlements_actor_tenant_id_ulid_check',
+      sql`created_by_actor_tenant_id IS NULL OR created_by_actor_tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`
+    ),
     check('tenant_entitlements_state_check', sql`state IN ('ACTIVE', 'RETIRED')`),
     check(
       'tenant_entitlements_usage_check',
@@ -209,6 +243,8 @@ export const partners = pgTable(
     tenantId: text('tenant_id').notNull(),
     partnerCode: text('partner_code').notNull(),
     displayName: text('display_name').notNull(),
+    contactName: text('contact_name'),
+    contactPhone: text('contact_phone'),
     partnerType: text('partner_type').notNull(),
     status: text().default('ACTIVE').notNull(),
     version: bigint({ mode: 'number' }).default(1).notNull(),
@@ -233,6 +269,10 @@ export const partners = pgTable(
     check('partners_id_ulid_check', sql`id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
     check('partners_code_check', sql`length(btrim(partner_code)) BETWEEN 1 AND 64`),
     check('partners_name_check', sql`length(btrim(display_name)) BETWEEN 1 AND 200`),
+    check(
+      'partners_contact_check',
+      sql`contact_name IS NULL OR length(btrim(contact_name)) BETWEEN 1 AND 160`
+    ),
     check(
       'partners_type_check',
       sql`partner_type IN ('CARRIER', 'AGENT', 'SUPPLIER', 'LAST_MILE', 'CUSTOMS_BROKER')`
@@ -289,6 +329,8 @@ export const referenceDataVersions = pgTable(
     referenceDataSetId: text('reference_data_set_id').notNull(),
     versionNumber: integer('version_number').notNull(),
     state: text().default('DRAFT').notNull(),
+    versionLabel: text('version_label'),
+    publishReason: text('publish_reason'),
     publishedAt: timestamp('published_at', { withTimezone: true, mode: 'string' }),
     createdByUserId: text('created_by_user_id').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
@@ -334,6 +376,10 @@ export const referenceDataVersions = pgTable(
     tenantPolicy('reference_data_versions_tenant_isolation'),
     check('reference_data_versions_id_ulid_check', sql`id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
     check('reference_data_versions_number_check', sql`version_number >= 1`),
+    check(
+      'reference_data_versions_publication_metadata_check',
+      sql`(state = 'DRAFT' AND version_label IS NULL AND publish_reason IS NULL) OR (state IN ('PUBLISHED', 'RETIRED') AND length(btrim(version_label)) >= 1 AND length(btrim(publish_reason)) >= 2)`
+    ),
     check('reference_data_versions_state_check', sql`state IN ('DRAFT', 'PUBLISHED', 'RETIRED')`),
     check(
       'reference_data_versions_publish_check',
@@ -395,11 +441,20 @@ export const customerCreditPolicies = pgTable(
     customerId: text('customer_id').notNull(),
     policyVersion: integer('policy_version').notNull(),
     currency: text().notNull(),
-    creditLimitMinor: bigint('credit_limit_minor', { mode: 'number' }).notNull(),
-    paymentCycle: text('payment_cycle').notNull(),
-    holdPolicy: text('hold_policy').notNull(),
+    creditLimitMinor: bigint('credit_limit_minor', { mode: 'number' }),
+    creditLimitAmount: numeric('credit_limit_amount', { precision: 20, scale: 6 }),
+    creditTier: text('credit_tier'),
+    paymentCycle: text('payment_cycle'),
+    paymentCycleDays: integer('payment_cycle_days'),
+    holdPolicy: text('hold_policy'),
+    holdOnExceed: boolean('hold_on_exceed'),
+    changeReason: text('change_reason'),
     createdByUserId: text('created_by_user_id').notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
   },
@@ -436,16 +491,22 @@ export const customerCreditPolicies = pgTable(
     check('customer_credit_policies_version_check', sql`policy_version >= 1`),
     check(
       'customer_credit_policies_money_check',
-      sql`currency ~ '^[A-Z]{3}$' AND credit_limit_minor >= 0`
+      sql`currency ~ '^[A-Z]{3}$' AND (credit_limit_minor IS NULL OR credit_limit_minor >= 0) AND (credit_limit_amount IS NULL OR credit_limit_amount >= 0) AND num_nonnulls(credit_limit_minor, credit_limit_amount) >= 1`
     ),
     check(
       'customer_credit_policies_cycle_check',
-      sql`payment_cycle IN ('PREPAID', 'WEEKLY', 'SEMIMONTHLY', 'MONTHLY', 'NET_30', 'NET_60')`
+      sql`payment_cycle IS NULL OR payment_cycle IN ('PREPAID', 'WEEKLY', 'SEMIMONTHLY', 'MONTHLY', 'NET_30', 'NET_60')`
     ),
     check(
       'customer_credit_policies_hold_check',
-      sql`hold_policy IN ('AUTO_HOLD', 'REVIEW', 'ALLOW')`
+      sql`hold_policy IS NULL OR hold_policy IN ('AUTO_HOLD', 'REVIEW', 'ALLOW')`
     ),
+    check(
+      'customer_credit_policies_contract_shape_check',
+      sql`(payment_cycle_days IS NULL OR payment_cycle_days BETWEEN 0 AND 365) AND (credit_tier IS NULL OR credit_tier IN ('STANDARD', 'SILVER', 'GOLD', 'STRATEGIC')) AND (change_reason IS NULL OR length(btrim(change_reason)) BETWEEN 5 AND 500)`
+    ),
+    check('customer_credit_policies_aggregate_version_check', sql`version >= 1`),
+    check('customer_credit_policies_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
 
@@ -497,7 +558,7 @@ export const permissionSimulations = pgTable(
     check('permission_simulations_status_check', sql`status IN ('ACTIVE', 'ENDED', 'EXPIRED')`),
     check(
       'permission_simulations_expiry_check',
-      sql`expires_at >= created_at + interval '5 minutes' AND expires_at <= created_at + interval '60 minutes'`
+      sql`expires_at >= created_at + interval '1 minute' AND expires_at <= created_at + interval '30 minutes'`
     ),
     check(
       'permission_simulations_end_check',
