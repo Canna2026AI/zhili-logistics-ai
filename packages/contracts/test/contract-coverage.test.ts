@@ -970,6 +970,29 @@ describe("OpenAPI UI-foundation gate", () => {
     }
   });
 
+  it("includes every stable HTTP problem-filter fallback in ErrorCode", () => {
+    const errorCodeSchema = openapi.components.schemas.ErrorCode as {
+      enum?: unknown[];
+    };
+    const errorCodes = new Set(errorCodeSchema.enum ?? []);
+
+    for (const code of [
+      "BAD_REQUEST",
+      "UNAUTHORIZED",
+      "FORBIDDEN",
+      "NOT_FOUND",
+      "CONFLICT",
+      "SESSION_EXPIRED",
+      "PRECONDITION_FAILED",
+      "PAYLOAD_TOO_LARGE",
+      "UNPROCESSABLE_ENTITY",
+      "RATE_LIMITED",
+      "INTERNAL_ERROR",
+    ]) {
+      expect(errorCodes, `missing public problem code ${code}`).toContain(code);
+    }
+  });
+
   it("closes every P0 traceability reference against OpenAPI", () => {
     const schemaSection = contract.slice(contract.indexOf("\n  schemas:\n"));
     const operationContracts = parseOperationContracts(contract);
