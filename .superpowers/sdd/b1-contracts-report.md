@@ -2,9 +2,9 @@
 
 ## Status
 
-DONE for the contract-hardening scope, including the first independent review remediation and the
-R2 I1 / I2 / M1 remediation. Database migrations, repositories, services, controllers and visual
-form work were intentionally not modified by this branch.
+DONE for the contract-hardening scope, including the first independent review remediation, the R2
+I1 / I2 / M1 remediation and the R3 I1 / I2 remediation. Database migrations, repositories,
+services, controllers and visual form work were intentionally not modified by this branch.
 
 ## Commits
 
@@ -14,7 +14,9 @@ form work were intentionally not modified by this branch.
 - Review remediation commit: `578782160e64db524341188429206d2cca26223a`
 - Review remediation report commit: `a38e5be4fc766532bf38f4a5c2db68e9ba0065c3`
 - R2 remediation implementation commit: `598d7d9d818d4e2fb8a8a52f54b1d7ecdb4ce68d`
-- This report is committed separately so it can name both immutable implementation commits.
+- R2 remediation report commit: `fb0a248eb81a126defbf95ac137c947b196a4ef5`
+- R3 remediation implementation commit: `e5c846ea2cecea5ddc39960433e5295c32375fe9`
+- This report is committed separately so it can name every immutable implementation commit.
 
 ## Independent review remediation
 
@@ -31,10 +33,12 @@ form work were intentionally not modified by this branch.
   documents the order ETag, and declares scoped 404 and 410 outcomes.
 - Nine workbench list families now publish real filters, signed filter-bound cursors, immutable order
   tuples, snapshot metadata and `CURSOR_FILTER_MISMATCH` behavior.
-- Waybill PII is transported as four closed secured projection objects. READ contains raw and
+- Waybill PII is transported as six required closed secured projection objects, including customer
+  and contact names as well as customer code, sender phone, recipient phone and consignee address.
+  READ contains raw and
   display values, MASK contains only a server-masked display value, and DENY contains no value and
-  fixes copy/export capabilities to false. The adapter consumes display values only and never
-  retains or reconstructs raw PII.
+  fixes copy/export capabilities to false. The adapter consumes display values and server decisions
+  only; it never hard-codes READ, retains raw values or reconstructs PII.
 - Rate, order, waybill and platform adapters no longer invent IDs, statuses, timestamps, currencies
   or committed versions. They collect required caller inputs, propagate current ETags and fail closed
   on incomplete responses. Order submission now has an authoritative `submitOrder` contract.
@@ -42,6 +46,10 @@ form work were intentionally not modified by this branch.
   authoritative resource version returned in the response body, including non-default input
   versions. Stateless shipment and load validation operations no longer advertise stale-version
   responses that callers cannot remediate.
+- Every customer mock success path that declares ETag in the actual OpenAPI now emits a matching
+  strong header. Quote acceptance and address UPDATE derive the next version from a validated strong
+  If-Match; missing, weak, malformed, zero or non-numeric preconditions fail closed with 412. Payment
+  and import creation omit ETag because their OpenAPI success responses do not declare one.
 
 ## Delivered contract surface
 
@@ -90,6 +98,15 @@ R2 tests were likewise written and observed failing before the implementation:
 - Customer portal: 1 failed / 34 total; platform: 1 failed / 19 total; mocks: 2 failed / 6 total,
   covering non-default authoritative ETags and canonical secured projection payloads.
 
+R3 tests were written before the implementation and produced the intended failures:
+
+- Contracts: 2 failed / 31 total because customerName/contactName were neither required nor secured.
+- Waybills: 2 failed / 47 total because the adapter rejected secured name projections and still
+  manufactured READ decisions.
+- Customer portal: 13 failed / 50 total across a table derived from actual OpenAPI success responses,
+  including quote version 7 to 8, all declared ETags, five required strong-If-Match routes and the
+  CREATE upsert prohibition. Mocks: 2 failed / 6 total for the two missing name projections.
+
 ### GREEN
 
 The following fresh gates passed after implementation:
@@ -124,7 +141,7 @@ passed
 ```
 
 Focused affected-module verification also passed: identity/master data 11/11, rates/routing 21/21,
-waybills 47/47, customer portal 34/34, PDA 137/137, platform 19/19, website 11/11 and mocks 6/6.
+waybills 47/47, customer portal 50/50, PDA 137/137, platform 19/19, website 11/11 and mocks 6/6.
 The repository-wide gates passed with 24/24 lint tasks, 24/24 typecheck tasks, 35/35 test tasks and
 20/20 build tasks. Platform tests still print pre-existing React `act(...)` warnings while passing;
 Storybook also prints its pre-existing large-chunk advisory while building successfully.
