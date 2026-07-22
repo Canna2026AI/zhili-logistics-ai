@@ -4,6 +4,7 @@ import { IndexedDbQueueStore, WebCryptoQueueCodec } from './queue-store';
 import { OfflineQueue } from './offline-queue';
 import { MediaQueue } from './media-queue';
 import type { DeviceContext } from '../domain/types';
+import type { DeviceTakeoverExportReceipt } from '../domain/types';
 
 const context: DeviceContext = {
   deviceId: '01JDEVICE00000000000000003',
@@ -12,6 +13,26 @@ const context: DeviceContext = {
   subjectId: '01JSUBJECT0000000000000001',
   timezone: 'Asia/Shanghai',
   appVersion: '0.2.0',
+};
+
+const takeoverReceipt: DeviceTakeoverExportReceipt = {
+  exportId: '01JTAKEOVEREXPORT0000000001',
+  authorizationId: '01JTAKEOVERAUTH00000000001',
+  deviceId: context.deviceId,
+  scope: {
+    deviceId: context.deviceId,
+    tenantId: context.tenantId,
+    warehouseId: context.warehouseId,
+    subjectId: context.subjectId,
+  },
+  manifestHash: 'a'.repeat(64),
+  ciphertextHash: 'b'.repeat(64),
+  eventCount: 1,
+  mediaCount: 1,
+  checksumAlgorithm: 'SHA-256',
+  status: 'VERIFIED',
+  receivedAt: '2026-07-23T01:00:00.000Z',
+  verifiedAt: '2026-07-23T01:00:01.000Z',
 };
 
 afterEach(() => indexedDB.deleteDatabase('zhili-pda-test'));
@@ -204,6 +225,87 @@ describe('IndexedDbQueueStore', () => {
     const raw = await store.inspectEncryptedRecordsForTest();
     expect(raw.events).toHaveLength(1);
     expect(raw.media).toHaveLength(1);
+    store.close();
+  });
+
+  it('atomically writes the VERIFIED receipt and removes only its takeover package', async () => {
+    const store = new IndexedDbQueueStore('zhili-pda-test');
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const eventId = '01JFINALIZEEVENT00000000001';
+    const laterEventId = '01JFINALIZELATER0000000001';
+    const evidence = await media.prepare(
+      context,
+      eventId,
+      new Blob(['verified-evidence']),
+      'image/jpeg',
+      'media-finalize'
+    );
+    await queue.enqueue(context, {
+      eventId,
+      action: 'CAPTURE_POD',
+      entityRef: 'TAKEOVER-FINALIZE',
+      payload: {},
+      mediaRefs: [evidence.mediaId],
+      mediaItems: [evidence],
+      baseVersion: 1,
+    });
+    await queue.enqueue(context, {
+      eventId: laterEventId,
+      action: 'WAREHOUSE_RECEIVE',
+      entityRef: 'LATER-WORK',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    await store.setMeta('pending-takeover-finalize', {
+      receipt: takeoverReceipt,
+      eventIds: [eventId],
+      mediaIds: [evidence.mediaId],
+    });
+
+    await store.finalizeTakeoverPackage(takeoverReceipt, [eventId], [evidence.mediaId]);
+
+    expect(await store.getMeta('last-takeover-export-receipt')).toEqual(takeoverReceipt);
+    expect(await store.getMeta('pending-takeover-finalize')).toBeUndefined();
+    expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([
+      laterEventId,
+    ]);
+    expect(await store.getMedia()).toEqual([]);
+    store.close();
+  });
+
+  it('leaves receipt, events and media unchanged when finalize validation fails', async () => {
+    const store = new IndexedDbQueueStore('zhili-pda-test');
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const eventId = '01JFINALIZEFAIL000000000001';
+    const evidence = await media.prepare(
+      context,
+      eventId,
+      new Blob(['must-remain']),
+      'image/jpeg',
+      'media-finalize-fail'
+    );
+    await queue.enqueue(context, {
+      eventId,
+      action: 'CAPTURE_POD',
+      entityRef: 'FINALIZE-FAIL',
+      payload: {},
+      mediaRefs: [evidence.mediaId],
+      mediaItems: [evidence],
+      baseVersion: 1,
+    });
+
+    await expect(
+      store.finalizeTakeoverPackage(takeoverReceipt, [eventId, 'missing-event'], [evidence.mediaId])
+    ).rejects.toThrow('接管清理清单');
+
+    expect(await store.getMeta('last-takeover-export-receipt')).toBeUndefined();
+    expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([eventId]);
+    expect((await store.getMedia()).map((item) => item.mediaId)).toEqual([evidence.mediaId]);
     store.close();
   });
 

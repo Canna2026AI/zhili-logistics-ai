@@ -70,8 +70,16 @@ export type TakeoverProgressStage =
   | 'AUTHORIZED'
   | 'ENCRYPTING'
   | 'UPLOADING'
+  | 'SERVER_VERIFIED_CLEANUP_PENDING'
   | 'VERIFIED'
-  | 'EXPIRED';
+  | 'EXPIRED'
+  | 'FAILED';
+
+export interface PendingTakeoverFinalize {
+  receipt: DeviceTakeoverExportReceipt;
+  eventIds: string[];
+  mediaIds: string[];
+}
 
 export class DeviceTakeoverService {
   constructor(
@@ -82,26 +90,51 @@ export class DeviceTakeoverService {
     private readonly onProgress?: (stage: TakeoverProgressStage) => void
   ) {}
 
+  async retryPendingFinalize(session: LocalDeviceSession) {
+    const pending = await this.queue.getMeta<PendingTakeoverFinalize>(
+      'pending-takeover-finalize'
+    );
+    if (!pending) return undefined;
+    if (
+      pending.receipt.status !== 'VERIFIED' ||
+      pending.receipt.eventCount !== pending.eventIds.length ||
+      pending.receipt.mediaCount !== pending.mediaIds.length
+    ) {
+      this.onProgress?.('FAILED');
+      throw new Error('待恢复的接管回执与本地清理清单不一致，已保留全部数据。');
+    }
+    assertExactScope(pending.receipt.scope, session);
+    this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
+    await this.queue.finalizeTakeoverPackage(
+      pending.receipt,
+      pending.eventIds,
+      pending.mediaIds
+    );
+    await this.media.restore();
+    this.onProgress?.('VERIFIED');
+    return pending.receipt;
+  }
+
   async exportAndClear(session: LocalDeviceSession, reason: string) {
     if (!session.permissions.includes('pda.takeover.export')) {
       throw new Error('缺少 pda.takeover.export 权限，禁止管理员接管导出。');
     }
     if (Array.from(reason.trim()).length < 5) throw new Error('管理员接管原因至少 5 个字符。');
 
-    this.queue.assertContext(session);
-    this.media.assertContext(session);
-    const events = this.queue.snapshot().events;
-    const media = this.media.snapshot(session);
-    if (events.length === 0) throw new Error('当前没有需要管理员接管的本地事件。');
-
-    const manifest = this.createManifest(session, events, media);
-    const encoder = new TextEncoder();
-    const manifestBytes = encoder.encode(canonical(manifest));
-    const manifestHash = await sha256(manifestBytes);
-    this.onProgress?.('AUTHORIZING');
-    let authorization;
+    let serverVerified = false;
     try {
-      authorization = await this.port.authorizeDeviceTakeoverExport(
+      this.queue.assertContext(session);
+      this.media.assertContext(session);
+      const events = this.queue.snapshot().events;
+      const media = this.media.snapshot(session);
+      if (events.length === 0) throw new Error('当前没有需要管理员接管的本地事件。');
+
+      const manifest = this.createManifest(session, events, media);
+      const encoder = new TextEncoder();
+      const manifestBytes = encoder.encode(canonical(manifest));
+      const manifestHash = await sha256(manifestBytes);
+      this.onProgress?.('AUTHORIZING');
+      const authorization = await this.port.authorizeDeviceTakeoverExport(
         session.deviceId,
         `pda:takeover:authorize:${session.deviceId}:${manifestHash}`,
         {
@@ -111,61 +144,54 @@ export class DeviceTakeoverService {
           mediaCount: media.length,
         }
       );
-    } catch (error) {
-      if (isExpiredError(error)) this.onProgress?.('EXPIRED');
-      throw error;
-    }
 
-    assertExactScope(authorization.scope, session);
-    const authorizationExpired =
-      new Date(authorization.expiresAt).getTime() <= this.now().getTime();
-    if (
-      authorization.deviceId !== session.deviceId ||
-      authorization.manifestHash !== manifestHash ||
-      authorization.eventCount !== events.length ||
-      authorization.mediaCount !== media.length ||
-      authorization.status !== 'AUTHORIZED' ||
-      authorization.keyEncryptionAlgorithm !== 'RSA-OAEP-256' ||
-      authorization.contentEncryptionAlgorithm !== 'A256GCM' ||
-      authorizationExpired
-    ) {
-      if (authorizationExpired) this.onProgress?.('EXPIRED');
-      throw new Error('管理员接管授权与声明清单不一致或已过期，已保留全部数据。');
-    }
-    this.onProgress?.('AUTHORIZED');
+      assertExactScope(authorization.scope, session);
+      const authorizationExpired =
+        new Date(authorization.expiresAt).getTime() <= this.now().getTime();
+      if (
+        authorization.deviceId !== session.deviceId ||
+        authorization.manifestHash !== manifestHash ||
+        authorization.eventCount !== events.length ||
+        authorization.mediaCount !== media.length ||
+        authorization.status !== 'AUTHORIZED' ||
+        authorization.keyEncryptionAlgorithm !== 'RSA-OAEP-256' ||
+        authorization.contentEncryptionAlgorithm !== 'A256GCM' ||
+        authorizationExpired
+      ) {
+        throw new Error('管理员接管授权与声明清单不一致或已过期，已保留全部数据。');
+      }
+      this.onProgress?.('AUTHORIZED');
 
-    this.onProgress?.('ENCRYPTING');
-    const exportableMedia: ExportableMedia[] = await Promise.all(
-      media.map(async ({ blob, ...item }) => ({
-        ...item,
-        bytesBase64: base64(new Uint8Array(await readBlobBytes(blob))),
-      }))
-    );
-    const plaintext = encoder.encode(canonical({ manifest, events, media: exportableMedia }));
-    const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
-      'encrypt',
-      'decrypt',
-    ]);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext);
-    if (ciphertext.byteLength > authorization.maxCiphertextBytes) {
-      throw new Error('管理员接管密文超过服务器授权上限，已保留全部数据。');
-    }
-    const publicKey = await crypto.subtle.importKey(
+      this.onProgress?.('ENCRYPTING');
+      const exportableMedia: ExportableMedia[] = await Promise.all(
+        media.map(async ({ blob, ...item }) => ({
+          ...item,
+          bytesBase64: base64(new Uint8Array(await readBlobBytes(blob))),
+        }))
+      );
+      const plaintext = encoder.encode(canonical({ manifest, events, media: exportableMedia }));
+      const aesKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
+        'encrypt',
+        'decrypt',
+      ]);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, plaintext);
+      if (ciphertext.byteLength > authorization.maxCiphertextBytes) {
+        throw new Error('管理员接管密文超过服务器授权上限，已保留全部数据。');
+      }
+      const publicKey = await crypto.subtle.importKey(
       'jwk',
       authorization.publicKeyJwk as JsonWebKey,
       { name: 'RSA-OAEP', hash: 'SHA-256' },
       false,
       ['wrapKey']
-    );
-    const wrappedKey = await crypto.subtle.wrapKey('raw', aesKey, publicKey, {
-      name: 'RSA-OAEP',
-    });
-    const ciphertextHash = await sha256(new Uint8Array(ciphertext));
-    this.onProgress?.('UPLOADING');
-    let receipt: DeviceTakeoverExportReceipt;
-    try {
-      receipt = await this.port.uploadEncryptedDeviceTakeoverExport(
+      );
+      const wrappedKey = await crypto.subtle.wrapKey('raw', aesKey, publicKey, {
+        name: 'RSA-OAEP',
+      });
+      const ciphertextHash = await sha256(new Uint8Array(ciphertext));
+      this.onProgress?.('UPLOADING');
+      const receipt = await this.port.uploadEncryptedDeviceTakeoverExport(
         session.deviceId,
         authorization.authorizationId,
         `pda:takeover:upload:${authorization.authorizationId}:${ciphertextHash}`,
@@ -177,31 +203,37 @@ export class DeviceTakeoverService {
           wrappedKey: new Blob([wrappedKey], { type: 'application/octet-stream' }),
         }
       );
+
+      assertExactScope(receipt.scope, session);
+      if (
+        receipt.status !== 'VERIFIED' ||
+        receipt.authorizationId !== authorization.authorizationId ||
+        receipt.deviceId !== session.deviceId ||
+        receipt.manifestHash !== manifestHash ||
+        receipt.ciphertextHash !== ciphertextHash ||
+        receipt.eventCount !== events.length ||
+        receipt.mediaCount !== media.length
+      ) {
+        throw new Error('管理员接管回执未通过完整性验证，已保留全部数据。');
+      }
+      const pending: PendingTakeoverFinalize = {
+        receipt,
+        eventIds: events.map((event) => event.envelope.eventId),
+        mediaIds: media.map((item) => item.mediaId),
+      };
+      await this.queue.setMeta('pending-takeover-finalize', pending);
+      serverVerified = true;
+      this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
+      await this.queue.finalizeTakeoverPackage(receipt, pending.eventIds, pending.mediaIds);
+      await this.media.restore();
+      this.onProgress?.('VERIFIED');
+      return receipt;
     } catch (error) {
-      if (isExpiredError(error)) this.onProgress?.('EXPIRED');
+      if (serverVerified) this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
+      else if (isExpiredError(error)) this.onProgress?.('EXPIRED');
+      else this.onProgress?.('FAILED');
       throw error;
     }
-
-    assertExactScope(receipt.scope, session);
-    if (
-      receipt.status !== 'VERIFIED' ||
-      receipt.authorizationId !== authorization.authorizationId ||
-      receipt.deviceId !== session.deviceId ||
-      receipt.manifestHash !== manifestHash ||
-      receipt.ciphertextHash !== ciphertextHash ||
-      receipt.eventCount !== events.length ||
-      receipt.mediaCount !== media.length
-    ) {
-      throw new Error('管理员接管回执未通过完整性验证，已保留全部数据。');
-    }
-    await this.queue.setMeta('last-takeover-export-receipt', receipt);
-    await this.queue.clearTakeoverPackage(
-      events.map((event) => event.envelope.eventId),
-      media.map((item) => item.mediaId)
-    );
-    await this.media.restore();
-    this.onProgress?.('VERIFIED');
-    return receipt;
   }
 
   private createManifest(

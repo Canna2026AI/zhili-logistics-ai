@@ -21,6 +21,7 @@ export function OfflinePanel({
   onRetryMedia,
   onDeleteWork,
   takeoverStage,
+  restoredFromStorage = false,
 }: {
   events: QueuedEvent[];
   media: MediaQueueItem[];
@@ -37,6 +38,7 @@ export function OfflinePanel({
   onRetryMedia: (mediaId: string) => Promise<void>;
   onDeleteWork: (eventId: string) => Promise<void>;
   takeoverStage?: TakeoverProgressStage;
+  restoredFromStorage?: boolean;
 }) {
   const [takeoverReason, setTakeoverReason] = useState('');
   const reserved = media.filter((item) =>
@@ -64,7 +66,7 @@ export function OfflinePanel({
           </span>
         </div>
       )}
-      {events.length > 0 && (
+      {restoredFromStorage && events.length > 0 && (
         <div className="pda-flow-alert pda-restart-recovery" role="status">
           <strong>本地队列已恢复</strong>
           <span>

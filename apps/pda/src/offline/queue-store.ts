@@ -1,5 +1,5 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { MediaQueueItem, QueuedEvent } from '../domain/types';
+import type { DeviceTakeoverExportReceipt, MediaQueueItem, QueuedEvent } from '../domain/types';
 import { readBlobBytes } from './blob-bytes';
 
 export interface QueueStore {
@@ -18,6 +18,11 @@ export interface QueueStore {
   setMeta<T>(key: string, value: T): Promise<void>;
   deleteWork(eventId: string, mediaIds: string[]): Promise<void>;
   deleteWorkPackage(eventIds: string[], mediaIds: string[]): Promise<void>;
+  finalizeTakeoverPackage(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[]
+  ): Promise<void>;
   appendEvent(
     create: (sequence: number) => QueuedEvent,
     dedupeKey: string,
@@ -107,6 +112,31 @@ export class MemoryQueueStore implements QueueStore {
   }
 
   async deleteWorkPackage(eventIds: string[], mediaIds: string[]) {
+    for (const eventId of eventIds) {
+      this.events.delete(eventId);
+      this.eventDedupe.delete(eventId);
+    }
+    for (const mediaId of mediaIds) this.media.delete(mediaId);
+  }
+
+  async finalizeTakeoverPackage(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[]
+  ) {
+    if (
+      receipt.status !== 'VERIFIED' ||
+      receipt.eventCount !== eventIds.length ||
+      receipt.mediaCount !== mediaIds.length ||
+      new Set(eventIds).size !== eventIds.length ||
+      new Set(mediaIds).size !== mediaIds.length ||
+      eventIds.some((eventId) => !this.events.has(eventId)) ||
+      mediaIds.some((mediaId) => !this.media.has(mediaId))
+    ) {
+      throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
+    }
+    this.meta.set('last-takeover-export-receipt', receipt);
+    this.meta.delete('pending-takeover-finalize');
     for (const eventId of eventIds) {
       this.events.delete(eventId);
       this.eventDedupe.delete(eventId);
@@ -394,6 +424,50 @@ export class IndexedDbQueueStore implements QueueStore {
     await Promise.all([
       ...eventIds.map((eventId) => transaction.objectStore('events').delete(eventId)),
       ...mediaIds.map((mediaId) => transaction.objectStore('media').delete(mediaId)),
+    ]);
+    await transaction.done;
+  }
+
+  async finalizeTakeoverPackage(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[]
+  ) {
+    if (
+      receipt.status !== 'VERIFIED' ||
+      receipt.eventCount !== eventIds.length ||
+      receipt.mediaCount !== mediaIds.length ||
+      new Set(eventIds).size !== eventIds.length ||
+      new Set(mediaIds).size !== mediaIds.length
+    ) {
+      throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
+    }
+    const [database, codec] = await Promise.all([this.database, this.codec()]);
+    const encryptedReceipt = await codec.encode(receipt);
+    const transaction = database.transaction(['meta', 'events', 'media'], 'readwrite');
+    const eventStore = transaction.objectStore('events');
+    const mediaStore = transaction.objectStore('media');
+    const [events, media] = await Promise.all([
+      Promise.all(eventIds.map((eventId) => eventStore.get(eventId))),
+      Promise.all(mediaIds.map((mediaId) => mediaStore.get(mediaId))),
+    ]);
+    if (events.some((event) => !event) || media.some((item) => !item)) {
+      transaction.abort();
+      try {
+        await transaction.done;
+      } catch {
+        /* expected abort: no receipt or work-package change is committed */
+      }
+      throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
+    }
+    await Promise.all([
+      transaction.objectStore('meta').put({
+        id: 'last-takeover-export-receipt',
+        value: encryptedReceipt,
+      }),
+      transaction.objectStore('meta').delete('pending-takeover-finalize'),
+      ...eventIds.map((eventId) => eventStore.delete(eventId)),
+      ...mediaIds.map((mediaId) => mediaStore.delete(mediaId)),
     ]);
     await transaction.done;
   }

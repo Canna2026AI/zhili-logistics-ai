@@ -4,7 +4,21 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceTask } from '../domain/types';
+import { DEVICE_TASK_ACTIONS } from '../domain/task-actions';
+import { MemoryPdaPort } from '../ports/memory-pda-port';
+import type { LocalDeviceSession } from '../session/session-guard';
 import { TaskHome } from './task-home';
+
+const session: LocalDeviceSession = {
+  deviceId: '01JHOMEDEVICE0000000000001',
+  tenantId: '01JHOMETENANT0000000000001',
+  warehouseId: '01JHOMEWAREHOUSE0000000001',
+  subjectId: '01JHOMEUSER000000000000001',
+  timezone: 'Asia/Shanghai',
+  appVersion: '0.2.0',
+  expiresAt: '2099-12-31T23:59:59.000Z',
+  permissions: ['pda.use'],
+};
 
 describe('TaskHome', () => {
   afterEach(cleanup);
@@ -19,7 +33,7 @@ describe('TaskHome', () => {
       version: 7,
     };
     const onScan = vi.fn();
-    render(<TaskHome tasks={[selected]} onScan={onScan} />);
+    render(<TaskHome session={session} tasks={[selected]} onScan={onScan} />);
 
     expect(screen.getByRole('heading', { name: '今日任务' })).toBeVisible();
     expect(screen.getByText(/待收货 1/)).toBeVisible();
@@ -40,7 +54,7 @@ describe('TaskHome', () => {
       version: 9,
     };
     const onScan = vi.fn();
-    render(<TaskHome tasks={[selected]} onScan={onScan} />);
+    render(<TaskHome session={session} tasks={[selected]} onScan={onScan} />);
 
     await userEvent.click(screen.getByRole('button', { name: /LM-SECOND/ }));
 
@@ -50,6 +64,7 @@ describe('TaskHome', () => {
   it('renders the live network and queue state instead of a fixed demo status', () => {
     render(
       <TaskHome
+        session={session}
         tasks={[]}
         onScan={vi.fn()}
         online={false}
@@ -57,6 +72,52 @@ describe('TaskHome', () => {
       />
     );
 
-    expect(screen.getByText('离线 · 上次同步 09:40 · 队列 17/200')).toBeVisible();
+    expect(screen.getByText('离线 · 队列 17/200')).toBeVisible();
+    expect(screen.queryByText(/上次同步/)).not.toBeInTheDocument();
+  });
+
+  it('derives device, warehouse, user and last sync from real session metadata', () => {
+    render(
+      <TaskHome
+        session={session}
+        tasks={[]}
+        onScan={vi.fn()}
+        lastSyncedAt="2026-07-23T01:40:00.000Z"
+      />
+    );
+
+    expect(screen.getByText(new RegExp(session.deviceId))).toBeVisible();
+    expect(screen.getByText(new RegExp(session.warehouseId))).toBeVisible();
+    expect(screen.getByText(new RegExp(session.subjectId))).toBeVisible();
+    expect(screen.getByText(/上次同步/)).toBeVisible();
+    expect(screen.queryByText(/PDA-SZX-03|深圳一号仓|张伟/)).not.toBeInTheDocument();
+  });
+
+  it('omits an invalid persisted sync timestamp instead of crashing the task home', () => {
+    render(
+      <TaskHome
+        session={session}
+        tasks={[]}
+        onScan={vi.fn()}
+        lastSyncedAt="corrupt-local-meta"
+      />
+    );
+
+    expect(screen.getByRole('heading', { name: '任务首页' })).toBeVisible();
+    expect(screen.queryByText(/上次同步/)).not.toBeInTheDocument();
+  });
+
+  it('shows task-derived workflow titles and distinct copy for all 19 actions', async () => {
+    const tasks = await new MemoryPdaPort().getDeviceTasks(session.deviceId);
+    const { container } = render(
+      <TaskHome session={session} tasks={tasks} onScan={vi.fn()} />
+    );
+
+    for (const action of DEVICE_TASK_ACTIONS) {
+      expect(container).toHaveTextContent(action.label);
+    }
+    expect(container).not.toHaveTextContent('客户：ZHILI-DEMO');
+    expect(container).not.toHaveTextContent('SLA 剩余');
+    expect(container).toHaveTextContent('下一步：');
   });
 });

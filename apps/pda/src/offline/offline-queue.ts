@@ -1,5 +1,6 @@
 import type {
   DeviceContext,
+  DeviceTakeoverExportReceipt,
   QueueSnapshot,
   QueuedEvent,
   SyncResult,
@@ -272,6 +273,18 @@ export class OfflineQueue {
       throw new Error('接管清理清单包含重复 ID，已保留全部本地数据。');
     }
     await this.store.deleteWorkPackage(eventIds, mediaIds);
+    this.events = await this.store.getEvents();
+  }
+
+  async finalizeTakeoverPackage(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[]
+  ) {
+    if (new Set(eventIds).size !== eventIds.length || new Set(mediaIds).size !== mediaIds.length) {
+      throw new Error('接管清理清单包含重复 ID，已保留全部本地数据。');
+    }
+    await this.store.finalizeTakeoverPackage(receipt, eventIds, mediaIds);
     this.events = await this.store.getEvents();
   }
 

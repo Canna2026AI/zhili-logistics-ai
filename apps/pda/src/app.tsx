@@ -86,6 +86,8 @@ export function App({
   const [syncMessage, setSyncMessage] = useState<string>();
   const [selectedConflictId, setSelectedConflictId] = useState<string>();
   const [bindingMismatchLocked, setBindingMismatchLocked] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string>();
+  const [restoredFromStorage, setRestoredFromStorage] = useState(false);
 
   const changed = () => setRevision((value) => value + 1);
   const snapshot = queue.snapshot();
@@ -105,7 +107,13 @@ export function App({
     let cancelled = false;
     void (async () => {
       try {
-        await Promise.all([queue.restore(), media.restore()]);
+        const [restoredQueue, restoredMedia, restoredSyncAt] = await Promise.all([
+          queue.restore(),
+          media.restore(),
+          queue.getMeta<string>('last-successful-sync-at'),
+        ]);
+        setRestoredFromStorage(restoredQueue.events.length > 0 || restoredMedia.length > 0);
+        setLastSyncedAt(restoredSyncAt);
         const restored = await guard.restoreSession();
         if (cancelled) return;
         if (!restored) {
@@ -145,6 +153,16 @@ export function App({
           return;
         }
         setSession(restored);
+        try {
+          const finalized = await takeoverService.retryPendingFinalize(restored);
+          if (finalized) {
+            setSyncMessage(
+              `已恢复接管本地提交：${finalized.exportId}。未重复上传密文。`
+            );
+          }
+        } catch (caught) {
+          setSyncMessage(explain(caught));
+        }
         const cachedTasks = await queue.getMeta<DeviceTask[]>('device-tasks');
         if (!navigator.onLine && cachedTasks) setTasks(cachedTasks);
         else {
@@ -164,7 +182,7 @@ export function App({
     return () => {
       cancelled = true;
     };
-  }, [guard, media, port, queue]);
+  }, [guard, media, port, queue, takeoverService]);
 
   useEffect(() => {
     const onlineHandler = () => setOnline(true);
@@ -247,6 +265,9 @@ export function App({
       setSyncMessage(
         `同步完成：应用 ${result.applied}，已处理 ${result.duplicate}，冲突 ${result.conflict}，拒绝 ${result.rejected}，媒体已预留 ${result.mediaReserved}。`
       );
+      const syncedAt = new Date().toISOString();
+      await queue.setMeta('last-successful-sync-at', syncedAt);
+      setLastSyncedAt(syncedAt);
       changed();
     } catch (caught) {
       if (apiStatus(caught) === 401) {
@@ -410,9 +431,11 @@ export function App({
       <div className="pda-content">
         {tab === 'tasks' && (
           <TaskHome
+            session={session}
             tasks={tasks}
             online={online}
             pendingCount={snapshot.events.length}
+            lastSyncedAt={lastSyncedAt}
             onSwitchWarehouse={() => {
               setPhase('login');
               setError(undefined);
@@ -495,6 +518,7 @@ export function App({
               changed();
             }}
             takeoverStage={takeoverStage}
+            restoredFromStorage={restoredFromStorage}
           />
         )}
         {tab === 'conflict' && selectedConflict && (

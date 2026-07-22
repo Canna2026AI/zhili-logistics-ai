@@ -1,6 +1,12 @@
 import type { components } from '@zhili/contracts';
 import type { PdaPort } from './pda-port';
 import type { UploadEncryptedTakeoverInput } from './pda-port';
+import {
+  canonicalize,
+  decodeBase64,
+  sha256HexBlob,
+  sha256HexBytes,
+} from '../takeover/package-codec';
 import { readBlobBytes } from '../offline/blob-bytes';
 import type {
   DeliveryEvent,
@@ -16,11 +22,33 @@ import type {
 
 const future = '2099-12-31T23:59:59.000Z';
 
-async function sha256Hex(blob: Blob) {
-  const digest = await crypto.subtle.digest('SHA-256', await readBlobBytes(blob));
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
+type TakeoverScope = {
+  deviceId: string;
+  tenantId: string;
+  warehouseId: string;
+  subjectId: string;
+};
+
+function sameScope(left: TakeoverScope, right: TakeoverScope) {
+  return (
+    left.deviceId === right.deviceId &&
+    left.tenantId === right.tenantId &&
+    left.warehouseId === right.warehouseId &&
+    left.subjectId === right.subjectId
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readScope(value: unknown): TakeoverScope | undefined {
+  if (!isRecord(value)) return undefined;
+  const { deviceId, tenantId, warehouseId, subjectId } = value;
+  if ([deviceId, tenantId, warehouseId, subjectId].some((item) => typeof item !== 'string')) {
+    return undefined;
+  }
+  return { deviceId, tenantId, warehouseId, subjectId } as TakeoverScope;
 }
 
 export class MemoryPdaPort implements PdaPort {
@@ -30,6 +58,17 @@ export class MemoryPdaPort implements PdaPort {
   readonly uploadedMedia = new Set<string>();
   syncCallCount = 0;
   uploadFailures = new Set<string>();
+  private readonly deviceBindings = new Map<string, TakeoverScope>([
+    [
+      '01JDEVICE00000000000000003',
+      {
+        deviceId: '01JDEVICE00000000000000003',
+        tenantId: '01JTENANT0000000000000001',
+        warehouseId: '01JWAREHOUSE00000000000001',
+        subjectId: '01JSUBJECT0000000000000001',
+      },
+    ],
+  ]);
   private readonly takeoverAuthorizations = new Map<
     string,
     {
@@ -38,6 +77,8 @@ export class MemoryPdaPort implements PdaPort {
       eventCount: number;
       mediaCount: number;
       expiresAt: string;
+      privateKey: CryptoKey;
+      scope: TakeoverScope;
     }
   >();
 
@@ -47,7 +88,7 @@ export class MemoryPdaPort implements PdaPort {
     _idempotencyKey: string
   ): Promise<DeviceSession> {
     void _idempotencyKey;
-    return {
+    const session: DeviceSession = {
       deviceId,
       tenantId: '01JTENANT0000000000000001',
       warehouseId: body.warehouseId,
@@ -62,6 +103,13 @@ export class MemoryPdaPort implements PdaPort {
       ],
       expiresAt: future,
     };
+    this.deviceBindings.set(deviceId, {
+      deviceId,
+      tenantId: session.tenantId,
+      warehouseId: session.warehouseId,
+      subjectId: session.subjectId,
+    });
+    return session;
   }
 
   async getDeviceTasks(_deviceId: string) {
@@ -320,6 +368,8 @@ export class MemoryPdaPort implements PdaPort {
     body: AuthorizeDeviceTakeoverExportRequest
   ): Promise<DeviceTakeoverExportAuthorization> {
     void _idempotencyKey;
+    const scope = this.deviceBindings.get(deviceId);
+    if (!scope) throw new Error('模拟设备尚未成功绑定，禁止签发接管授权。');
     const keyPair = await crypto.subtle.generateKey(
       {
         name: 'RSA-OAEP',
@@ -342,16 +392,13 @@ export class MemoryPdaPort implements PdaPort {
       eventCount: body.eventCount,
       mediaCount: body.mediaCount,
       expiresAt,
+      privateKey: keyPair.privateKey,
+      scope,
     });
     return {
       authorizationId,
       deviceId,
-      scope: {
-        tenantId: '01JTENANT0000000000000001',
-        warehouseId: '01JWAREHOUSE00000000000001',
-        subjectId: '01JSUBJECT0000000000000001',
-        deviceId,
-      },
+      scope,
       manifestHash: body.manifestHash,
       eventCount: body.eventCount,
       mediaCount: body.mediaCount,
@@ -387,8 +434,82 @@ export class MemoryPdaPort implements PdaPort {
       new Date(authorization.expiresAt).getTime() <= Date.now()
     )
       throw new Error('模拟接管授权不存在、作用域不匹配或已过期。');
-    if ((await sha256Hex(input.ciphertext)) !== input.ciphertextHash)
+    if ((await sha256HexBlob(input.ciphertext)) !== input.ciphertextHash)
       throw new Error('模拟接管密文哈希校验失败，未返回 VERIFIED。');
+    const iv = decodeBase64(input.iv);
+    if (iv.byteLength !== 12) throw new Error('模拟接管 IV 必须恰好为 12 字节。');
+    let aesKey: CryptoKey;
+    try {
+      aesKey = await crypto.subtle.unwrapKey(
+        'raw',
+        await readBlobBytes(input.wrappedKey),
+        authorization.privateKey,
+        { name: 'RSA-OAEP' },
+        'AES-GCM',
+        false,
+        ['decrypt']
+      );
+    } catch {
+      throw new Error('模拟接管 RSA 密钥解封失败，未返回 VERIFIED。');
+    }
+    let plaintext: ArrayBuffer;
+    try {
+      plaintext = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv },
+        aesKey,
+        await readBlobBytes(input.ciphertext)
+      );
+    } catch {
+      throw new Error('模拟接管 AES-GCM 解密或认证失败，未返回 VERIFIED。');
+    }
+    let archive: Record<string, unknown>;
+    const plaintextText = new TextDecoder('utf-8', { fatal: true }).decode(plaintext);
+    try {
+      const parsed: unknown = JSON.parse(plaintextText);
+      if (!isRecord(parsed) || canonicalize(parsed) !== plaintextText) throw new Error();
+      archive = parsed;
+    } catch {
+      throw new Error('模拟接管明文不是规范化档案 JSON，未返回 VERIFIED。');
+    }
+    const manifest = archive.manifest;
+    const events = archive.events;
+    const media = archive.media;
+    if (!isRecord(manifest) || !Array.isArray(events) || !Array.isArray(media)) {
+      throw new Error('模拟接管清单结构无效，未返回 VERIFIED。');
+    }
+    const actualManifestHash = await sha256HexBytes(
+      new TextEncoder().encode(canonicalize(manifest))
+    );
+    const manifestScope = readScope(manifest.scope);
+    const countsMatch =
+      manifest.eventCount === authorization.eventCount &&
+      manifest.mediaCount === authorization.mediaCount &&
+      events.length === authorization.eventCount &&
+      media.length === authorization.mediaCount &&
+      Array.isArray(manifest.events) &&
+      manifest.events.length === authorization.eventCount &&
+      Array.isArray(manifest.media) &&
+      manifest.media.length === authorization.mediaCount;
+    const eventScopesMatch = events.every((event) => {
+      const envelope = isRecord(event) && isRecord(event.envelope) ? event.envelope : undefined;
+      return envelope ? sameScope(readScope(envelope) ?? ({} as TakeoverScope), authorization.scope) : false;
+    });
+    const mediaScopesMatch = media.every((item) => {
+      if (!isRecord(item)) return false;
+      const context = item.context === undefined ? authorization.scope : readScope(item.context);
+      return context ? sameScope(context, authorization.scope) : false;
+    });
+    if (
+      actualManifestHash !== input.manifestHash ||
+      input.manifestHash !== authorization.manifestHash ||
+      !manifestScope ||
+      !sameScope(manifestScope, authorization.scope) ||
+      !countsMatch ||
+      !eventScopesMatch ||
+      !mediaScopesMatch
+    ) {
+      throw new Error('模拟接管 manifest 哈希、作用域或事件/媒体计数校验失败。');
+    }
     this.takeoverAuthorizations.delete(authorizationId);
     return {
       exportId: `01JMOCKEXPORT${crypto.randomUUID().replaceAll('-', '').slice(0, 13).toUpperCase()}`.slice(
@@ -397,12 +518,7 @@ export class MemoryPdaPort implements PdaPort {
       ),
       authorizationId,
       deviceId,
-      scope: {
-        tenantId: '01JTENANT0000000000000001',
-        warehouseId: '01JWAREHOUSE00000000000001',
-        subjectId: '01JSUBJECT0000000000000001',
-        deviceId,
-      },
+      scope: authorization.scope,
       manifestHash: input.manifestHash,
       ciphertextHash: input.ciphertextHash,
       eventCount: authorization.eventCount,

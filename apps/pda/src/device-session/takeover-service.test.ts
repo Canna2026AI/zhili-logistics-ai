@@ -126,6 +126,7 @@ describe('DeviceTakeoverService', () => {
       'AUTHORIZED',
       'ENCRYPTING',
       'UPLOADING',
+      'SERVER_VERIFIED_CLEANUP_PENDING',
       'VERIFIED',
     ]);
   });
@@ -144,10 +145,53 @@ describe('DeviceTakeoverService', () => {
     expect(media.snapshot()).toHaveLength(0);
   });
 
-  it('does not present VERIFIED as complete when the authorized local clear fails', async () => {
-    const { queue, media } = await setup();
+  it('uses the latest bound non-default warehouse and subject scope end to end', async () => {
+    const port = new MemoryPdaPort();
+    const deviceId = '01JNONDEFAULTDEVICE00000001';
+    const bound = await port.bindDevice(
+      deviceId,
+      {
+        warehouseId: '01JNONDEFAULTWAREHOUSE0001',
+        subjectId: '01JNONDEFAULTSUBJECT0000001',
+        deviceCode: 'PDA-CUSTOM-09',
+      },
+      'bind-custom-device'
+    );
+    const customSession: LocalDeviceSession = {
+      ...bound,
+      timezone: 'Asia/Shanghai',
+      appVersion: '0.2.0',
+    };
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    await queue.enqueue(customSession, {
+      eventId: '01JNONDEFAULTEVENT00000001',
+      action: 'WAREHOUSE_RECEIVE',
+      entityRef: 'CUSTOM-SCOPE',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+
+    const receipt = await new DeviceTakeoverService(queue, media, port).exportAndClear(
+      customSession,
+      '设备损坏，由主管接管'
+    );
+
+    expect(receipt.scope).toEqual({
+      deviceId,
+      tenantId: customSession.tenantId,
+      warehouseId: customSession.warehouseId,
+      subjectId: customSession.subjectId,
+    });
+  });
+
+  it('preserves a recoverable VERIFIED receipt when atomic local finalization fails', async () => {
+    const { store, queue, media } = await setup();
     const progress = vi.fn();
-    vi.spyOn(queue, 'clearTakeoverPackage').mockRejectedValueOnce(
+    vi.spyOn(store, 'finalizeTakeoverPackage').mockRejectedValueOnce(
       new Error('local transaction failed')
     );
 
@@ -162,6 +206,52 @@ describe('DeviceTakeoverService', () => {
     ).rejects.toThrow('local transaction failed');
 
     expect(progress).not.toHaveBeenCalledWith('VERIFIED');
+    expect(progress.mock.calls.at(-1)?.[0]).toBe('SERVER_VERIFIED_CLEANUP_PENDING');
+    expect(await queue.getMeta('last-takeover-export-receipt')).toBeUndefined();
+    expect(await queue.getMeta('pending-takeover-finalize')).toEqual(
+      expect.objectContaining({ eventIds: [eventId], mediaIds: ['media-takeover'] })
+    );
+    expect(await store.getEvents()).toHaveLength(1);
+    expect(await store.getMedia()).toHaveLength(1);
+  });
+
+  it('retries only the pending local finalization after restart without re-uploading', async () => {
+    const { store, queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const upload = vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport');
+    vi.spyOn(store, 'finalizeTakeoverPackage').mockRejectedValueOnce(
+      new Error('browser closed during local commit')
+    );
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port).exportAndClear(
+        session,
+        '设备损坏，由主管接管'
+      )
+    ).rejects.toThrow('browser closed');
+
+    const restartedQueue = new OfflineQueue(store);
+    const restartedMedia = new MediaQueue(store);
+    await Promise.all([restartedQueue.restore(), restartedMedia.restore()]);
+    const progress = vi.fn();
+    const receipt = await new DeviceTakeoverService(
+      restartedQueue,
+      restartedMedia,
+      port,
+      undefined,
+      progress
+    ).retryPendingFinalize(session);
+
+    expect(receipt?.status).toBe('VERIFIED');
+    expect(upload).toHaveBeenCalledTimes(1);
+    expect(restartedQueue.snapshot().events).toHaveLength(0);
+    expect(restartedMedia.snapshot()).toHaveLength(0);
+    expect(await restartedQueue.getMeta('pending-takeover-finalize')).toBeUndefined();
+    expect(await restartedQueue.getMeta('last-takeover-export-receipt')).toEqual(receipt);
+    expect(progress.mock.calls.map(([stage]) => stage)).toEqual([
+      'SERVER_VERIFIED_CLEANUP_PENDING',
+      'VERIFIED',
+    ]);
   });
 
   it('encrypts the complete package and clears only after a matching VERIFIED receipt', async () => {
@@ -350,6 +440,40 @@ describe('DeviceTakeoverService', () => {
     expect(progress.mock.calls.at(-1)?.[0]).toBe('EXPIRED');
     expect(await store.getEvents()).toHaveLength(1);
     expect(await store.getMedia()).toHaveLength(1);
+  });
+
+  it('moves to FAILED when encryption fails instead of remaining ENCRYPTING', async () => {
+    const { queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const progress = vi.fn();
+    vi.spyOn(crypto.subtle, 'encrypt').mockRejectedValueOnce(new Error('crypto unavailable'));
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port, undefined, progress).exportAndClear(
+        session,
+        '设备损坏，由主管接管'
+      )
+    ).rejects.toThrow('crypto unavailable');
+
+    expect(progress.mock.calls.at(-1)?.[0]).toBe('FAILED');
+  });
+
+  it('moves to FAILED when a non-expiry upload error occurs', async () => {
+    const { queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const progress = vi.fn();
+    vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport').mockRejectedValueOnce(
+      new Error('gateway unavailable')
+    );
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port, undefined, progress).exportAndClear(
+        session,
+        '设备损坏，由主管接管'
+      )
+    ).rejects.toThrow('gateway unavailable');
+
+    expect(progress.mock.calls.at(-1)?.[0]).toBe('FAILED');
   });
 
   it('requires the dedicated permission before requesting authorization', async () => {

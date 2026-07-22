@@ -10,6 +10,7 @@ import { OfflineQueue } from './offline/offline-queue';
 import { MediaQueue } from './offline/media-queue';
 import { SessionGuard, type LocalDeviceSession } from './session/session-guard';
 import type { DeviceTask } from './domain/types';
+import type { DeviceTakeoverExportReceipt } from './domain/types';
 
 const bind = async () => {
   await userEvent.click(await screen.findByRole('button', { name: '绑定设备并登录' }));
@@ -44,6 +45,101 @@ describe('PDA application', () => {
     expect(screen.getByTestId('pending-count')).toHaveTextContent('1');
     await userEvent.click(screen.getByRole('button', { name: '离线' }));
     expect(screen.getByText(/#1/)).toHaveTextContent('S2505120004');
+    expect(screen.getByText('本地队列已恢复')).toBeVisible();
+  });
+
+  it('does not call current-run newly queued work a startup recovery', async () => {
+    render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
+    await bind();
+    await userEvent.click(screen.getByRole('button', { name: '扫描' }));
+    await userEvent.type(screen.getByLabelText('扫描码 / 运单号'), 'S2505120004{Enter}');
+    await screen.findByText(/已本地排队/);
+    await userEvent.click(screen.getByRole('button', { name: '离线' }));
+
+    expect(screen.queryByText('本地队列已恢复')).not.toBeInTheDocument();
+  });
+
+  it('restores the last successful sync timestamp into the task home', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    await queue.restore();
+    const session: LocalDeviceSession = {
+      deviceId: '01JDEVICE00000000000000003',
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: '01JWAREHOUSE00000000000001',
+      subjectId: '01JSUBJECT0000000000000001',
+      timezone: 'Asia/Shanghai',
+      appVersion: '0.2.0',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+      permissions: ['pda.use', 'pda.sync'],
+    };
+    await new SessionGuard(queue).persistSession(session);
+    await queue.setMeta('last-successful-sync-at', '2026-07-23T01:40:00.000Z');
+
+    render(<App store={store} port={new MemoryPdaPort()} />);
+
+    await screen.findByRole('heading', { name: '任务首页' });
+    expect(screen.getByText(/上次同步/)).toBeVisible();
+  });
+
+  it('finalizes a persisted VERIFIED receipt on startup without authorizing or uploading again', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store, { createId: () => '01JSTARTUPFINALIZEEVENT001' });
+    await queue.restore();
+    const session: LocalDeviceSession = {
+      deviceId: '01JDEVICE00000000000000003',
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: '01JWAREHOUSE00000000000001',
+      subjectId: '01JSUBJECT0000000000000001',
+      timezone: 'Asia/Shanghai',
+      appVersion: '0.2.0',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+      permissions: ['pda.use', 'pda.sync', 'pda.takeover.export'],
+    };
+    await new SessionGuard(queue).persistSession(session);
+    const event = await queue.enqueue(session, {
+      action: 'WAREHOUSE_RECEIVE',
+      entityRef: 'STARTUP-FINALIZE',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const receipt: DeviceTakeoverExportReceipt = {
+      exportId: '01JSTARTUPEXPORT00000000001',
+      authorizationId: '01JSTARTUPAUTH000000000001',
+      deviceId: session.deviceId,
+      scope: {
+        deviceId: session.deviceId,
+        tenantId: session.tenantId,
+        warehouseId: session.warehouseId,
+        subjectId: session.subjectId,
+      },
+      manifestHash: 'a'.repeat(64),
+      ciphertextHash: 'b'.repeat(64),
+      eventCount: 1,
+      mediaCount: 0,
+      checksumAlgorithm: 'SHA-256',
+      status: 'VERIFIED',
+      receivedAt: '2026-07-23T01:00:00.000Z',
+      verifiedAt: '2026-07-23T01:00:01.000Z',
+    };
+    await queue.setMeta('pending-takeover-finalize', {
+      receipt,
+      eventIds: [event.envelope.eventId],
+      mediaIds: [],
+    });
+    const port = new MemoryPdaPort();
+    const authorize = vi.spyOn(port, 'authorizeDeviceTakeoverExport');
+    const upload = vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport');
+
+    render(<App store={store} port={port} />);
+
+    await screen.findByRole('heading', { name: '任务首页' });
+    await waitFor(() => expect(screen.getByTestId('pending-count')).toHaveTextContent('0'));
+    expect(authorize).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    expect(await queue.getMeta('last-takeover-export-receipt')).toEqual(receipt);
+    expect(await queue.getMeta('pending-takeover-finalize')).toBeUndefined();
   });
 
   it('uses the approved product name in the F09 application header', async () => {
