@@ -21,6 +21,30 @@ BEGIN
 END
 $$;
 
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_worker') THEN
+    CREATE ROLE zhili_worker
+      NOLOGIN
+      NOSUPERUSER
+      NOCREATEDB
+      NOCREATEROLE
+      NOINHERIT
+      NOREPLICATION
+      NOBYPASSRLS;
+  ELSE
+    ALTER ROLE zhili_worker
+      NOLOGIN
+      NOSUPERUSER
+      NOCREATEDB
+      NOCREATEROLE
+      NOINHERIT
+      NOREPLICATION
+      NOBYPASSRLS;
+  END IF;
+END
+$$;
+
 CREATE TABLE idempotency_records (
   id text PRIMARY KEY,
   tenant_id text NOT NULL,
@@ -63,6 +87,7 @@ CREATE TABLE outbox_events (
   lease_expires_at timestamptz,
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
   dead_lettered_at timestamptz,
+  dead_letter_attempts integer NOT NULL DEFAULT 0,
   CONSTRAINT outbox_events_id_ulid_check
     CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
   CONSTRAINT outbox_events_tenant_ulid_check
@@ -71,6 +96,8 @@ CREATE TABLE outbox_events (
     CHECK (aggregate_version >= 0),
   CONSTRAINT outbox_events_attempts_check
     CHECK (attempts >= 0),
+  CONSTRAINT outbox_events_dead_letter_attempts_check
+    CHECK (dead_letter_attempts >= 0),
   CONSTRAINT outbox_events_tenant_dedupe_unique
     UNIQUE (tenant_id, dedupe_key)
 );
@@ -121,6 +148,19 @@ CREATE POLICY outbox_events_tenant_isolation ON outbox_events
   USING (tenant_id = nullif(current_setting('app.tenant_id', true), ''))
   WITH CHECK (tenant_id = nullif(current_setting('app.tenant_id', true), ''));
 
+CREATE POLICY outbox_events_worker_select ON outbox_events
+  AS PERMISSIVE
+  FOR SELECT
+  TO zhili_worker
+  USING (true);
+
+CREATE POLICY outbox_events_worker_update ON outbox_events
+  AS PERMISSIVE
+  FOR UPDATE
+  TO zhili_worker
+  USING (true)
+  WITH CHECK (true);
+
 CREATE POLICY audit_events_tenant_isolation ON audit_events
   AS PERMISSIVE
   FOR ALL
@@ -149,3 +189,34 @@ GRANT USAGE ON SCHEMA public TO zhili_app;
 GRANT SELECT, INSERT, UPDATE, DELETE
   ON idempotency_records, outbox_events, audit_events
   TO zhili_app;
+
+GRANT USAGE ON SCHEMA public TO zhili_worker;
+GRANT SELECT (
+  id,
+  tenant_id,
+  aggregate_type,
+  aggregate_id,
+  aggregate_version,
+  event_type,
+  payload,
+  occurred_at,
+  trace_id,
+  published_at,
+  attempts,
+  last_error,
+  lease_owner,
+  lease_expires_at,
+  next_attempt_at,
+  dead_lettered_at,
+  dead_letter_attempts
+) ON outbox_events TO zhili_worker;
+GRANT UPDATE (
+  published_at,
+  attempts,
+  last_error,
+  lease_owner,
+  lease_expires_at,
+  next_attempt_at,
+  dead_lettered_at,
+  dead_letter_attempts
+) ON outbox_events TO zhili_worker;

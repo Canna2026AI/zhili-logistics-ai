@@ -5,12 +5,13 @@ import {
   index,
   integer,
   jsonb,
+  pgPolicy,
   pgTable,
   text,
   timestamp,
   unique,
 } from 'drizzle-orm/pg-core';
-import { tenantIsolationPolicy } from '../rls';
+import { tenantIsolationPolicy, workerRole } from '../rls';
 
 export const outboxEvents = pgTable(
   'outbox_events',
@@ -36,6 +37,7 @@ export const outboxEvents = pgTable(
       .notNull()
       .defaultNow(),
     deadLetteredAt: timestamp('dead_lettered_at', { mode: 'date', withTimezone: true }),
+    deadLetterAttempts: integer('dead_letter_attempts').notNull().default(0),
   },
   (table) => [
     unique('outbox_events_tenant_dedupe_unique').on(table.tenantId, table.dedupeKey),
@@ -55,6 +57,20 @@ export const outboxEvents = pgTable(
     ),
     check('outbox_events_aggregate_version_check', sql`${table.aggregateVersion} >= 0`),
     check('outbox_events_attempts_check', sql`${table.attempts} >= 0`),
+    check('outbox_events_dead_letter_attempts_check', sql`${table.deadLetterAttempts} >= 0`),
     tenantIsolationPolicy('outbox_events_tenant_isolation', table.tenantId),
+    pgPolicy('outbox_events_worker_select', {
+      as: 'permissive',
+      for: 'select',
+      to: workerRole,
+      using: sql`true`,
+    }),
+    pgPolicy('outbox_events_worker_update', {
+      as: 'permissive',
+      for: 'update',
+      to: workerRole,
+      using: sql`true`,
+      withCheck: sql`true`,
+    }),
   ]
 ).enableRLS();

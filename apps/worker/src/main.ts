@@ -2,12 +2,12 @@ import 'reflect-metadata';
 import type { INestApplicationContext } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { pathToFileURL } from 'node:url';
-import { loadEnv } from '@zhili/config';
+import { loadWorkerEnv } from '@zhili/config';
 import { createLogger } from '@zhili/observability';
 import { WorkerModule } from './worker.module';
 
 export async function createWorkerApplication(): Promise<INestApplicationContext> {
-  loadEnv();
+  loadWorkerEnv();
   const application = await NestFactory.createApplicationContext(WorkerModule, {
     logger: false,
   });

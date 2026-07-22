@@ -183,6 +183,12 @@
           "notNull": true,
           "default": "now()"
         },
+        "trace_id": {
+          "name": "trace_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "published_at": {
           "name": "published_at",
           "type": "timestamp with time zone",
@@ -201,14 +207,46 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
+        },
+        "lease_owner": {
+          "name": "lease_owner",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lease_expires_at": {
+          "name": "lease_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "next_attempt_at": {
+          "name": "next_attempt_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "dead_lettered_at": {
+          "name": "dead_lettered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "dead_letter_attempts": {
+          "name": "dead_letter_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
         }
       },
       "indexes": {
-        "outbox_events_pending_idx": {
-          "name": "outbox_events_pending_idx",
+        "outbox_events_pending_claim_idx": {
+          "name": "outbox_events_pending_claim_idx",
           "columns": [
             {
-              "expression": "published_at",
+              "expression": "next_attempt_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -221,6 +259,7 @@
             }
           ],
           "isUnique": false,
+          "where": "\"outbox_events\".\"published_at\" IS NULL AND \"outbox_events\".\"dead_lettered_at\" IS NULL",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -276,6 +315,21 @@
           "to": ["zhili_app"],
           "using": "\"outbox_events\".\"tenant_id\" = nullif(current_setting('app.tenant_id', true), '')",
           "withCheck": "\"outbox_events\".\"tenant_id\" = nullif(current_setting('app.tenant_id', true), '')"
+        },
+        "outbox_events_worker_select": {
+          "name": "outbox_events_worker_select",
+          "as": "PERMISSIVE",
+          "for": "SELECT",
+          "to": ["zhili_worker"],
+          "using": "true"
+        },
+        "outbox_events_worker_update": {
+          "name": "outbox_events_worker_update",
+          "as": "PERMISSIVE",
+          "for": "UPDATE",
+          "to": ["zhili_worker"],
+          "using": "true",
+          "withCheck": "true"
         }
       },
       "checkConstraints": {
@@ -294,6 +348,10 @@
         "outbox_events_attempts_check": {
           "name": "outbox_events_attempts_check",
           "value": "\"outbox_events\".\"attempts\" >= 0"
+        },
+        "outbox_events_dead_letter_attempts_check": {
+          "name": "outbox_events_dead_letter_attempts_check",
+          "value": "\"outbox_events\".\"dead_letter_attempts\" >= 0"
         }
       },
       "isRLSEnabled": true

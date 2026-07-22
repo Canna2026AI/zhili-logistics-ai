@@ -38,7 +38,7 @@ let postgresContainer: StartedPostgreSqlContainer;
 let redisContainer: Awaited<ReturnType<typeof startRedisContainer>>;
 let admin: Sql;
 let redisInspector: IORedis;
-let databaseUrl: string;
+let workerDatabaseUrl: string;
 let redisUrl: string;
 let redisConnection: { host: string; port: number };
 let sequence = 0;
@@ -49,15 +49,21 @@ beforeAll(async () => {
     new PostgreSqlContainer('postgres:17-alpine').start(),
     startRedisContainer(),
   ]);
-  databaseUrl = postgresContainer.getConnectionUri();
+  const adminDatabaseUrl = postgresContainer.getConnectionUri();
   redisUrl = `redis://${redisContainer.getHost()}:${redisContainer.getMappedPort(6379)}`;
   redisConnection = {
     host: redisContainer.getHost(),
     port: redisContainer.getMappedPort(6379),
   };
-  admin = postgres(databaseUrl, { max: 4 });
+  admin = postgres(adminDatabaseUrl, { max: 4 });
   redisInspector = new IORedis(redisUrl, { maxRetriesPerRequest: 1 });
   await migrate(drizzle(admin), { migrationsFolder: migrationFolder });
+  await admin.unsafe(
+    `CREATE ROLE zhili_worker_integration LOGIN PASSWORD 'worker-integration-password'
+     NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`
+  );
+  await admin`GRANT zhili_worker TO zhili_worker_integration`;
+  workerDatabaseUrl = connectionUriFor('zhili_worker_integration', 'worker-integration-password');
 });
 
 beforeEach(async () => {
@@ -96,6 +102,10 @@ describe('Outbox durable lease schema', () => {
       column_default: expect.stringContaining('now()'),
     });
     expect(byName.get('dead_lettered_at')).toMatchObject({ is_nullable: 'YES' });
+    expect(byName.get('dead_letter_attempts')).toMatchObject({
+      is_nullable: 'NO',
+      column_default: '0',
+    });
 
     const indexes = await admin<{ indexdef: string }[]>`
       SELECT indexdef
@@ -105,6 +115,56 @@ describe('Outbox durable lease schema', () => {
     expect(indexes.map(({ indexdef }) => indexdef).join('\n')).toMatch(
       /\(next_attempt_at, occurred_at\).*WHERE.*published_at IS NULL.*dead_lettered_at IS NULL/i
     );
+  });
+});
+
+describe('least-privilege worker database role', () => {
+  it('is NOBYPASSRLS, consumes Outbox rows, and cannot access or mutate unrelated data', async () => {
+    const roles = await admin<
+      {
+        rolname: string;
+        rolsuper: boolean;
+        rolbypassrls: boolean;
+        rolcreaterole: boolean;
+        rolcreatedb: boolean;
+      }[]
+    >`
+      SELECT rolname, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
+      FROM pg_roles
+      WHERE rolname = 'zhili_worker'
+    `;
+    expect(roles).toEqual([
+      {
+        rolname: 'zhili_worker',
+        rolsuper: false,
+        rolbypassrls: false,
+        rolcreaterole: false,
+        rolcreatedb: false,
+      },
+    ]);
+
+    const worker = postgres(workerDatabaseUrl, { max: 1 });
+    try {
+      const event = await insertEvent({ eventType: 'imports.worker-role-tested' });
+      const store = new PostgresOutboxStore(workerDatabaseUrl);
+      try {
+        await expect(
+          store.claim('least-privilege-worker', new Date('2026-07-22T00:00:00.000Z'), 1)
+        ).resolves.toMatchObject([{ id: event.id, tenantId, attempt: 1 }]);
+      } finally {
+        await store.close();
+      }
+
+      await expect(worker`SELECT * FROM audit_events`).rejects.toThrow(/permission denied/i);
+      await expect(
+        worker`UPDATE outbox_events SET tenant_id = ${ulid(29)} WHERE id = ${event.id}`
+      ).rejects.toThrow(/permission denied/i);
+      await expect(
+        worker`UPDATE outbox_events SET payload = '{}'::jsonb WHERE id = ${event.id}`
+      ).rejects.toThrow(/permission denied/i);
+    } finally {
+      await worker.end();
+    }
   });
 });
 
@@ -151,7 +211,7 @@ describe('real PostgreSQL lease claims and real BullMQ delivery', () => {
     const event = await insertEvent({ eventType: 'print.label-requested' });
     const blockedQueues = new BlockingQueues('success');
     const stale = publisherWithDependencies(
-      new PostgresOutboxStore(databaseUrl, { applicationName: 'stale-ack-store' }),
+      new PostgresOutboxStore(workerDatabaseUrl, { applicationName: 'stale-ack-store' }),
       blockedQueues,
       { ownerId: 'stale-ack', clock: clock.read }
     );
@@ -174,7 +234,7 @@ describe('real PostgreSQL lease claims and real BullMQ delivery', () => {
     const event = await insertEvent({ eventType: 'connectors.erp-requested' });
     const blockedQueues = new BlockingQueues('failure');
     const stale = publisherWithDependencies(
-      new PostgresOutboxStore(databaseUrl, { applicationName: 'stale-fail-store' }),
+      new PostgresOutboxStore(workerDatabaseUrl, { applicationName: 'stale-fail-store' }),
       blockedQueues,
       { ownerId: 'stale-fail', clock: clock.read }
     );
@@ -197,7 +257,7 @@ describe('real PostgreSQL lease claims and real BullMQ delivery', () => {
     const event = await insertEvent({ eventType: 'ai.summary-requested' });
     const queues = new FailingQueues();
     const publisher = publisherWithDependencies(
-      new PostgresOutboxStore(databaseUrl, { applicationName: 'backoff-store' }),
+      new PostgresOutboxStore(workerDatabaseUrl, { applicationName: 'backoff-store' }),
       queues,
       { ownerId: 'backoff', clock: clock.read }
     );
@@ -278,6 +338,12 @@ describe('real PostgreSQL lease claims and real BullMQ delivery', () => {
     });
     expect(deadJob?.data).not.toHaveProperty('payload');
     expect(await jobCount('reports.dead')).toBe(1);
+    expect(deadJob?.opts).toMatchObject({
+      attempts: 5,
+      backoff: { type: 'exponential', delay: 1_000 },
+      removeOnComplete: { age: 86_400, count: 10_000 },
+      removeOnFail: { age: 604_800, count: 50_000 },
+    });
 
     clock.set('2026-07-22T05:00:00.000Z');
     await expect(publisher.tick()).resolves.toMatchObject({ claimed: 0 });
@@ -300,6 +366,90 @@ describe('real PostgreSQL lease claims and real BullMQ delivery', () => {
     ]) {
       expect(nonSecretText).not.toContain(forbidden);
     }
+  });
+
+  it('retries durable dead-job delivery after a temporary failure without rerunning normal work', async () => {
+    const clock = manualClock('2026-07-22T05:30:00.000Z');
+    const event = await insertEvent({
+      eventType: 'notifications.dead-delivery-tested',
+      attempts: 4,
+    });
+    await redisInspector.call(
+      'ACL',
+      'SETUSER',
+      'dead_recovery_worker',
+      'on',
+      '>dead-recovery-password',
+      '~*',
+      '+@all'
+    );
+    const queues = new RecoveringDeadQueues(
+      new BullMqOutboxQueues(redisUriFor('dead_recovery_worker', 'dead-recovery-password'), {
+        connectionName: 'dead-recovery-redis',
+      })
+    );
+    const publisher = publisherWithDependencies(
+      new PostgresOutboxStore(workerDatabaseUrl, { applicationName: 'dead-recovery-store' }),
+      queues,
+      { ownerId: 'dead-recovery', clock: clock.read }
+    );
+
+    await redisInspector.call(
+      'ACL',
+      'SETUSER',
+      'dead_recovery_worker',
+      '-@all',
+      '+info',
+      '+client'
+    );
+    await expect(publisher.tick()).resolves.toMatchObject({
+      claimed: 2,
+      failed: 1,
+      deadLettered: 0,
+    });
+    let [row] = await outboxRow(event.id);
+    expect(row).toMatchObject({ attempts: 5, dead_letter_attempts: 1 });
+    expect(row?.dead_lettered_at).toBeNull();
+    expect(queues.publishCalls).toBe(1);
+    expect(queues.deadPublishCalls).toBe(1);
+    expect(await jobCount('notifications.dead')).toBe(0);
+
+    await redisInspector.call('ACL', 'SETUSER', 'dead_recovery_worker', '+@all');
+    await publisher.close();
+    const recoveredQueues = new RecoveringDeadQueues(
+      new BullMqOutboxQueues(redisUriFor('dead_recovery_worker', 'dead-recovery-password'), {
+        connectionName: 'dead-recovery-restored-redis',
+      })
+    );
+    const recovered = publisherWithDependencies(
+      new PostgresOutboxStore(workerDatabaseUrl, {
+        applicationName: 'dead-recovery-restored-store',
+      }),
+      recoveredQueues,
+      { ownerId: 'dead-recovery-restored', clock: clock.read }
+    );
+    clock.set('2026-07-22T05:30:01.000Z');
+    await expect(recovered.tick()).resolves.toMatchObject({
+      claimed: 1,
+      published: 0,
+      failed: 0,
+      deadLettered: 1,
+    });
+    [row] = await outboxRow(event.id);
+    expect(row).toMatchObject({ attempts: 5, dead_letter_attempts: 2 });
+    expect(row?.dead_lettered_at).toEqual(new Date('2026-07-22T05:30:01.000Z'));
+    expect(queues.publishCalls).toBe(1);
+    expect(queues.deadPublishCalls).toBe(1);
+    expect(recoveredQueues.publishCalls).toBe(0);
+    expect(recoveredQueues.deadPublishCalls).toBe(1);
+
+    const deadJob = await getJob<DeadLetterJob>('notifications.dead', event.id);
+    expect(deadJob?.data).toMatchObject({
+      outboxId: event.id,
+      tenantId,
+      attempt: 5,
+      reason: 'QUEUE_PUBLISH_FAILED',
+    });
   });
 
   it('routes all seven prefixes and propagates trace metadata with ULID job IDs', async () => {
@@ -329,6 +479,12 @@ describe('real PostgreSQL lease claims and real BullMQ delivery', () => {
         },
         payload: { accepted: true },
       });
+      expect(job?.opts).toMatchObject({
+        attempts: 5,
+        backoff: { type: 'exponential', delay: 1_000 },
+        removeOnComplete: { age: 86_400, count: 10_000 },
+        removeOnFail: { age: 604_800, count: 50_000 },
+      });
       expect(await jobCount(queue)).toBe(1);
     }
   });
@@ -336,7 +492,7 @@ describe('real PostgreSQL lease claims and real BullMQ delivery', () => {
   it('uses deterministic job IDs so recovery after a lost acknowledgement cannot duplicate jobs', async () => {
     const clock = manualClock('2026-07-22T06:00:00.000Z');
     const event = await insertEvent({ eventType: 'notifications.sms-requested' });
-    const underlyingStore = new PostgresOutboxStore(databaseUrl, {
+    const underlyingStore = new PostgresOutboxStore(workerDatabaseUrl, {
       applicationName: 'lost-ack-store',
     });
     const first = publisherWithDependencies(
@@ -363,7 +519,7 @@ describe('real PostgreSQL lease claims and real BullMQ delivery', () => {
     const secondEvent = await insertEvent({ eventType: 'imports.received' });
     const applicationName = `shutdown-pg-${Date.now()}`;
     const connectionName = `shutdown-redis-${Date.now()}`;
-    const store = new PostgresOutboxStore(databaseUrl, { applicationName });
+    const store = new PostgresOutboxStore(workerDatabaseUrl, { applicationName });
     const queues = new BlockingDelegatingQueues(
       new BullMqOutboxQueues(redisUrl, { connectionName })
     );
@@ -407,7 +563,7 @@ function ownedPublisher(
   options: Partial<ConstructorParameters<typeof OutboxPublisher>[0]> & { ownerId: string }
 ): OutboxPublisher {
   const publisher = new OutboxPublisher({
-    databaseUrl,
+    databaseUrl: workerDatabaseUrl,
     redisUrl,
     logger: createLogger({ level: 'silent' }),
     ...options,
@@ -437,6 +593,7 @@ async function insertEvent(options: {
   payload?: Record<string, unknown>;
   leaseOwner?: string;
   leaseExpiresAt?: Date;
+  attempts?: number;
 }): Promise<{ id: string; aggregateId: string }> {
   sequence += 1;
   const id = ulid(sequence);
@@ -445,12 +602,13 @@ async function insertEvent(options: {
     INSERT INTO outbox_events (
       id, tenant_id, aggregate_type, aggregate_id, aggregate_version,
       event_type, payload, dedupe_key, trace_id, lease_owner, lease_expires_at,
-      next_attempt_at
+      next_attempt_at, attempts
     ) VALUES (
       ${id}, ${tenantId}, 'integration-event', ${aggregateId}, 1,
       ${options.eventType}, ${JSON.stringify(options.payload ?? { accepted: true })}::jsonb,
       ${`dedupe-${sequence}`}, ${options.traceId ?? null}, ${options.leaseOwner ?? null},
-      ${options.leaseExpiresAt?.toISOString() ?? null}, '2026-01-01T00:00:00.000Z'
+      ${options.leaseExpiresAt?.toISOString() ?? null}, '2026-01-01T00:00:00.000Z',
+      ${options.attempts ?? 0}
     )
   `;
   return { id, aggregateId };
@@ -464,6 +622,7 @@ async function outboxRow(id: string): Promise<
     lease_expires_at: Date | null;
     next_attempt_at: Date;
     dead_lettered_at: Date | null;
+    dead_letter_attempts: number;
     last_error: string | null;
   }[]
 > {
@@ -475,11 +634,12 @@ async function outboxRow(id: string): Promise<
       lease_expires_at: string | null;
       next_attempt_at: string;
       dead_lettered_at: string | null;
+      dead_letter_attempts: number;
       last_error: string | null;
     }[]
   >`
     SELECT attempts, published_at, lease_owner, lease_expires_at,
-           next_attempt_at, dead_lettered_at, last_error
+           next_attempt_at, dead_lettered_at, dead_letter_attempts, last_error
     FROM outbox_events
     WHERE id = ${id}
   `;
@@ -555,11 +715,40 @@ class FailingQueues implements OutboxQueues {
   async close(): Promise<void> {}
 }
 
+class RecoveringDeadQueues implements OutboxQueues {
+  publishCalls = 0;
+  deadPublishCalls = 0;
+
+  constructor(private readonly delegate: OutboxQueues) {}
+
+  async publish(): Promise<void> {
+    this.publishCalls += 1;
+    throw new Error('temporary normal queue failure');
+  }
+
+  async publishDead(queue: QueueName, data: DeadLetterJob): Promise<void> {
+    this.deadPublishCalls += 1;
+    await this.delegate.publishDead(queue, data);
+  }
+
+  close(): Promise<void> {
+    return this.delegate.close();
+  }
+}
+
 class IgnoreAcknowledgementStore implements OutboxStore {
   constructor(private readonly delegate: OutboxStore) {}
 
   claim(owner: string, now: Date, limit: number): Promise<readonly ClaimedOutboxEvent[]> {
     return this.delegate.claim(owner, now, limit);
+  }
+
+  claimDeadLetters(
+    owner: string,
+    now: Date,
+    limit: number
+  ): Promise<readonly ClaimedOutboxEvent[]> {
+    return this.delegate.claimDeadLetters(owner, now, limit);
   }
 
   async confirmPublished(): Promise<boolean> {
@@ -573,6 +762,14 @@ class IgnoreAcknowledgementStore implements OutboxStore {
     reason: string
   ): Promise<'retry' | 'dead' | 'stale'> {
     return this.delegate.recordFailure(event, owner, now, reason);
+  }
+
+  confirmDeadLetter(event: ClaimedOutboxEvent, owner: string, now: Date): Promise<boolean> {
+    return this.delegate.confirmDeadLetter(event, owner, now);
+  }
+
+  recordDeadLetterFailure(event: ClaimedOutboxEvent, owner: string, now: Date): Promise<boolean> {
+    return this.delegate.recordDeadLetterFailure(event, owner, now);
   }
 
   close(): Promise<void> {
@@ -619,4 +816,18 @@ function deferred<T>(): {
     resolve: resolvePromise as (value?: T | PromiseLike<T>) => void,
     reject: rejectPromise,
   };
+}
+
+function connectionUriFor(username: string, password: string): string {
+  const url = new URL(postgresContainer.getConnectionUri());
+  url.username = username;
+  url.password = password;
+  return url.toString();
+}
+
+function redisUriFor(username: string, password: string): string {
+  const url = new URL(redisUrl);
+  url.username = username;
+  url.password = password;
+  return url.toString();
 }

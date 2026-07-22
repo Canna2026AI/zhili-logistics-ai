@@ -15,8 +15,17 @@ export const appEnvSchema = z.object({
   LOG_LEVEL: z.enum(logLevels).default('info'),
 });
 
+export const workerEnvSchema = appEnvSchema.omit({ DATABASE_URL: true }).extend({
+  WORKER_DATABASE_URL: z.url(),
+});
+
 export type AppEnv = z.infer<typeof appEnvSchema>;
+export type WorkerEnv = z.infer<typeof workerEnvSchema>;
 
 export function loadEnv(source: Record<string, string | undefined> = process.env): AppEnv {
   return appEnvSchema.parse(source);
+}
+
+export function loadWorkerEnv(source: Record<string, string | undefined> = process.env): WorkerEnv {
+  return workerEnvSchema.parse(source);
 }

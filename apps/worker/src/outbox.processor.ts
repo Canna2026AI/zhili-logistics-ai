@@ -26,6 +26,8 @@ export interface ClaimedOutboxEvent {
   readonly payload: unknown;
   readonly traceId?: string;
   readonly attempt: number;
+  readonly deadLetterAttempt: number;
+  readonly failureReason?: FailureReason;
 }
 
 export interface NormalOutboxJob {
@@ -53,6 +55,7 @@ export interface DeadLetterJob {
 
 export interface OutboxStore {
   claim(owner: string, now: Date, limit: number): Promise<readonly ClaimedOutboxEvent[]>;
+  claimDeadLetters(owner: string, now: Date, limit: number): Promise<readonly ClaimedOutboxEvent[]>;
   confirmPublished(event: ClaimedOutboxEvent, owner: string, now: Date): Promise<boolean>;
   recordFailure(
     event: ClaimedOutboxEvent,
@@ -60,6 +63,8 @@ export interface OutboxStore {
     now: Date,
     reason: string
   ): Promise<'retry' | 'dead' | 'stale'>;
+  confirmDeadLetter(event: ClaimedOutboxEvent, owner: string, now: Date): Promise<boolean>;
+  recordDeadLetterFailure(event: ClaimedOutboxEvent, owner: string, now: Date): Promise<boolean>;
   close(): Promise<void>;
 }
 
@@ -99,6 +104,8 @@ interface DatabaseOutboxEvent {
   payload: unknown;
   trace_id: string | null;
   attempts: number;
+  last_error: string | null;
+  dead_letter_attempts: number;
 }
 
 const DEFAULT_BATCH_SIZE = 100;
@@ -172,21 +179,49 @@ export class PostgresOutboxStore implements OutboxStore {
         WHERE event.id = claimable.id
         RETURNING event.id, event.tenant_id, event.aggregate_type, event.aggregate_id,
                   event.aggregate_version, event.event_type, event.payload,
-                  event.trace_id, event.attempts
+                  event.trace_id, event.attempts, event.last_error,
+                  event.dead_letter_attempts
       `;
     });
 
-    return rows.map((row) => ({
-      id: row.id,
-      tenantId: row.tenant_id,
-      aggregateType: row.aggregate_type,
-      aggregateId: row.aggregate_id,
-      aggregateVersion: String(row.aggregate_version),
-      eventType: row.event_type,
-      payload: row.payload,
-      ...(row.trace_id === null ? {} : { traceId: row.trace_id }),
-      attempt: row.attempts,
-    }));
+    return rows.map(mapDatabaseEvent);
+  }
+
+  async claimDeadLetters(
+    owner: string,
+    now: Date,
+    limit: number
+  ): Promise<readonly ClaimedOutboxEvent[]> {
+    const nowIso = now.toISOString();
+    const leaseExpiresAt = new Date(now.getTime() + LEASE_DURATION_MS).toISOString();
+    const rows = await this.sql.begin(async (tx) => {
+      return tx<DatabaseOutboxEvent[]>`
+        WITH claimable AS (
+          SELECT id
+          FROM outbox_events
+          WHERE published_at IS NULL
+            AND dead_lettered_at IS NULL
+            AND attempts = ${MAX_ATTEMPTS}
+            AND (dead_letter_attempts = 0 OR next_attempt_at <= ${nowIso})
+            AND (lease_owner IS NULL OR lease_expires_at <= ${nowIso})
+          ORDER BY next_attempt_at, occurred_at, id
+          FOR UPDATE SKIP LOCKED
+          LIMIT ${limit}
+        )
+        UPDATE outbox_events AS event
+        SET lease_owner = ${owner},
+            lease_expires_at = ${leaseExpiresAt},
+            dead_letter_attempts = event.dead_letter_attempts + 1
+        FROM claimable
+        WHERE event.id = claimable.id
+        RETURNING event.id, event.tenant_id, event.aggregate_type, event.aggregate_id,
+                  event.aggregate_version, event.event_type, event.payload,
+                  event.trace_id, event.attempts, event.last_error,
+                  event.dead_letter_attempts
+      `;
+    });
+
+    return rows.map(mapDatabaseEvent);
   }
 
   async confirmPublished(event: ClaimedOutboxEvent, owner: string, now: Date): Promise<boolean> {
@@ -217,26 +252,70 @@ export class PostgresOutboxStore implements OutboxStore {
   ): Promise<'retry' | 'dead' | 'stale'> {
     const safeReason = normalizeFailureReason(reason);
     const terminal = event.attempt >= MAX_ATTEMPTS;
-    const nowIso = now.toISOString();
     const nextAttemptAt = new Date(now.getTime() + backoffDelayMs(event.attempt)).toISOString();
     const rows = await this.sql.begin(async (tx) => {
-      return tx<{ dead_lettered_at: Date | null }[]>`
+      return tx<{ id: string }[]>`
         UPDATE outbox_events
         SET lease_owner = NULL,
             lease_expires_at = NULL,
             last_error = ${safeReason},
             next_attempt_at = ${nextAttemptAt},
-            dead_lettered_at = ${terminal ? nowIso : null}
+            dead_lettered_at = NULL
         WHERE id = ${event.id}
           AND lease_owner = ${owner}
           AND attempts = ${event.attempt}
           AND published_at IS NULL
           AND dead_lettered_at IS NULL
-        RETURNING dead_lettered_at
+        RETURNING id
       `;
     });
     if (rows.length === 0) return 'stale';
-    return rows[0]!.dead_lettered_at === null ? 'retry' : 'dead';
+    return terminal ? 'dead' : 'retry';
+  }
+
+  async confirmDeadLetter(event: ClaimedOutboxEvent, owner: string, now: Date): Promise<boolean> {
+    const rows = await this.sql.begin(async (tx) => {
+      return tx<{ id: string }[]>`
+        UPDATE outbox_events
+        SET dead_lettered_at = ${now.toISOString()},
+            lease_owner = NULL,
+            lease_expires_at = NULL
+        WHERE id = ${event.id}
+          AND lease_owner = ${owner}
+          AND attempts = ${MAX_ATTEMPTS}
+          AND dead_letter_attempts = ${event.deadLetterAttempt}
+          AND published_at IS NULL
+          AND dead_lettered_at IS NULL
+        RETURNING id
+      `;
+    });
+    return rows.length === 1;
+  }
+
+  async recordDeadLetterFailure(
+    event: ClaimedOutboxEvent,
+    owner: string,
+    now: Date
+  ): Promise<boolean> {
+    const nextAttemptAt = new Date(
+      now.getTime() + backoffDelayMs(event.deadLetterAttempt)
+    ).toISOString();
+    const rows = await this.sql.begin(async (tx) => {
+      return tx<{ id: string }[]>`
+        UPDATE outbox_events
+        SET lease_owner = NULL,
+            lease_expires_at = NULL,
+            next_attempt_at = ${nextAttemptAt}
+        WHERE id = ${event.id}
+          AND lease_owner = ${owner}
+          AND attempts = ${MAX_ATTEMPTS}
+          AND dead_letter_attempts = ${event.deadLetterAttempt}
+          AND published_at IS NULL
+          AND dead_lettered_at IS NULL
+        RETURNING id
+      `;
+    });
+    return rows.length === 1;
   }
 
   close(): Promise<void> {
@@ -374,14 +453,45 @@ export class OutboxPublisher {
 
   private async runTick(limit: number): Promise<TickResult> {
     const leaseOwner = `${this.ownerId}:${randomUUID()}`;
-    const claimed = await this.store.claim(leaseOwner, currentTime(this.clock), limit);
-    const result = { claimed: claimed.length, published: 0, failed: 0, deadLettered: 0 };
+    const result = { claimed: 0, published: 0, failed: 0, deadLettered: 0 };
+    let remaining = limit;
+
+    const pendingDead = await this.store.claimDeadLetters(
+      leaseOwner,
+      currentTime(this.clock),
+      remaining
+    );
+    result.claimed += pendingDead.length;
+    remaining -= pendingDead.length;
+    for (const event of pendingDead) {
+      const outcome = await this.publishDeadLetter(event, leaseOwner);
+      result.deadLettered += outcome.deadLettered;
+    }
+
+    if (remaining === 0) return result;
+
+    const claimed = await this.store.claim(leaseOwner, currentTime(this.clock), remaining);
+    result.claimed += claimed.length;
+    remaining -= claimed.length;
 
     for (const event of claimed) {
       const outcome = await this.publishEvent(event, leaseOwner);
       result.published += outcome.published;
       result.failed += outcome.failed;
       result.deadLettered += outcome.deadLettered;
+    }
+
+    if (remaining > 0) {
+      const newlyPendingDead = await this.store.claimDeadLetters(
+        leaseOwner,
+        currentTime(this.clock),
+        remaining
+      );
+      result.claimed += newlyPendingDead.length;
+      for (const event of newlyPendingDead) {
+        const outcome = await this.publishDeadLetter(event, leaseOwner);
+        result.deadLettered += outcome.deadLettered;
+      }
     }
     return result;
   }
@@ -392,13 +502,13 @@ export class OutboxPublisher {
   ): Promise<Omit<TickResult, 'claimed'>> {
     const queue = queueForEventType(event.eventType);
     if (!queue) {
-      return this.persistFailure(event, leaseOwner, 'UNSUPPORTED_EVENT_TYPE', undefined);
+      return this.persistFailure(event, leaseOwner, 'UNSUPPORTED_EVENT_TYPE');
     }
 
     try {
       await this.queues.publish(queue, normalJob(event));
     } catch {
-      return this.persistFailure(event, leaseOwner, 'QUEUE_PUBLISH_FAILED', queue);
+      return this.persistFailure(event, leaseOwner, 'QUEUE_PUBLISH_FAILED');
     }
 
     const acknowledged = await this.store.confirmPublished(
@@ -418,8 +528,7 @@ export class OutboxPublisher {
   private async persistFailure(
     event: ClaimedOutboxEvent,
     leaseOwner: string,
-    reason: FailureReason,
-    queue: QueueName | undefined
+    reason: FailureReason
   ): Promise<Omit<TickResult, 'claimed'>> {
     const persistence = await this.store.recordFailure(
       event,
@@ -443,16 +552,44 @@ export class OutboxPublisher {
       return { published: 0, failed: 1, deadLettered: 0 };
     }
 
+    return { published: 0, failed: 1, deadLettered: 0 };
+  }
+
+  private async publishDeadLetter(
+    event: ClaimedOutboxEvent,
+    leaseOwner: string
+  ): Promise<Pick<TickResult, 'deadLettered'>> {
+    const queue = queueForEventType(event.eventType);
+    const reason = event.failureReason ?? 'QUEUE_PUBLISH_FAILED';
     const deadQueue = queue ?? 'reports';
     try {
       await this.queues.publishDead(deadQueue, deadLetterJob(event, reason, queue !== undefined));
     } catch {
+      const recorded = await this.store.recordDeadLetterFailure(
+        event,
+        leaseOwner,
+        currentTime(this.clock)
+      );
       this.logger.error(
         { outboxId: event.id, attempt: event.attempt, reason: 'DEAD_QUEUE_PUBLISH_FAILED' },
-        'Dead-letter queue publication failed'
+        recorded
+          ? 'Dead-letter queue publication scheduled for retry'
+          : 'Stale dead-letter queue failure ignored'
+      );
+      return { deadLettered: 0 };
+    }
+    const confirmed = await this.store.confirmDeadLetter(
+      event,
+      leaseOwner,
+      currentTime(this.clock)
+    );
+    if (!confirmed) {
+      this.logger.warn(
+        { outboxId: event.id, attempt: event.attempt, reason: 'STALE_LEASE' },
+        'Dead-letter acknowledgement ignored'
       );
     }
-    return { published: 0, failed: 1, deadLettered: 1 };
+    return { deadLettered: confirmed ? 1 : 0 };
   }
 
   private schedulePoll(delayMs: number, intervalMs: number): void {
@@ -469,6 +606,24 @@ export class OutboxPublisher {
       );
     }, delayMs);
   }
+}
+
+function mapDatabaseEvent(row: DatabaseOutboxEvent): ClaimedOutboxEvent {
+  const failureReason =
+    row.last_error === null ? undefined : normalizeFailureReason(row.last_error);
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    aggregateType: row.aggregate_type,
+    aggregateId: row.aggregate_id,
+    aggregateVersion: String(row.aggregate_version),
+    eventType: row.event_type,
+    payload: row.payload,
+    ...(row.trace_id === null ? {} : { traceId: row.trace_id }),
+    attempt: row.attempts,
+    deadLetterAttempt: row.dead_letter_attempts,
+    ...(failureReason === undefined ? {} : { failureReason }),
+  };
 }
 
 function normalJob(event: ClaimedOutboxEvent): NormalOutboxJob {

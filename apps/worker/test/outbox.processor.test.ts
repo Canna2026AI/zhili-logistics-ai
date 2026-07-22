@@ -133,6 +133,12 @@ describe('OutboxPublisher validation and lifecycle', () => {
       postgres: expect.any(String),
     });
   });
+
+  it('uses the production Redis 8 integration image', async () => {
+    const source = await readFile(resolve(import.meta.dirname, 'redis-container.ts'), 'utf8');
+
+    expect(source).toContain('redis:8-alpine');
+  });
 });
 
 describe('WorkerModule lifecycle', () => {
@@ -183,12 +189,24 @@ class FakeStore implements OutboxStore {
     return this.claimResult;
   }
 
+  async claimDeadLetters(): Promise<readonly ClaimedOutboxEvent[]> {
+    return [];
+  }
+
   async confirmPublished(): Promise<boolean> {
     return true;
   }
 
   async recordFailure(): Promise<'retry' | 'dead' | 'stale'> {
     return 'retry';
+  }
+
+  async confirmDeadLetter(): Promise<boolean> {
+    return true;
+  }
+
+  async recordDeadLetterFailure(): Promise<boolean> {
+    return true;
   }
 
   async close(): Promise<void> {

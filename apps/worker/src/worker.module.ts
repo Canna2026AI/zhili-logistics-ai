@@ -5,7 +5,7 @@ import {
   type OnApplicationBootstrap,
   type OnApplicationShutdown,
 } from '@nestjs/common';
-import { loadEnv } from '@zhili/config';
+import { loadWorkerEnv } from '@zhili/config';
 import { createLogger } from '@zhili/observability';
 import { OutboxPublisher } from './outbox.processor';
 
@@ -31,9 +31,9 @@ class WorkerLifecycle implements OnApplicationBootstrap, OnApplicationShutdown {
     {
       provide: OUTBOX_PUBLISHER,
       useFactory: (): OutboxPublisher => {
-        const env = loadEnv();
+        const env = loadWorkerEnv();
         return new OutboxPublisher({
-          databaseUrl: env.DATABASE_URL,
+          databaseUrl: env.WORKER_DATABASE_URL,
           redisUrl: env.REDIS_URL,
           logger: createLogger({ name: 'zhili-outbox-worker', level: env.LOG_LEVEL }),
         });

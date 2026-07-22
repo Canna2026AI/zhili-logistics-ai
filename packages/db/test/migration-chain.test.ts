@@ -33,11 +33,11 @@ describe('Drizzle migration chain', () => {
         '--schema',
         resolve(packageRoot, 'src/schema/index.ts'),
         '--out',
-        migrationOutput,
+        'migrations',
         '--name',
         'chain_probe',
       ],
-      { cwd: packageRoot }
+      { cwd: temporaryDirectory }
     );
 
     const migrationFiles = (await readdir(migrationOutput)).filter((file) => file.endsWith('.sql'));

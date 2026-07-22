@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadEnv } from '../src';
+import { loadEnv, loadWorkerEnv } from '../src';
 
 const validEnv = {
   DATABASE_URL: 'postgresql://localhost/zhili',
@@ -9,6 +9,11 @@ const validEnv = {
   S3_SECRET_KEY: 'secret-key',
   SESSION_KEY: 'session-key',
   ENVELOPE_MASTER_KEY: 'envelope-key',
+};
+
+const validWorkerEnv = {
+  ...validEnv,
+  WORKER_DATABASE_URL: 'postgresql://zhili_worker_login@localhost/zhili',
 };
 
 describe('loadEnv', () => {
@@ -25,5 +30,17 @@ describe('loadEnv', () => {
       PORT: 3000,
       LOG_LEVEL: 'info',
     });
+  });
+});
+
+describe('loadWorkerEnv', () => {
+  it('requires only the independent worker database URL, not the API URL', () => {
+    const workerOnlyEnv: Record<string, string> = { ...validWorkerEnv };
+    delete workerOnlyEnv.DATABASE_URL;
+
+    expect(() => loadWorkerEnv(validEnv)).toThrow('WORKER_DATABASE_URL');
+    expect(loadWorkerEnv(workerOnlyEnv).WORKER_DATABASE_URL).toBe(
+      validWorkerEnv.WORKER_DATABASE_URL
+    );
   });
 });
