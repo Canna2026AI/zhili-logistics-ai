@@ -45,42 +45,6 @@ BEGIN
 END
 $$;
 
--- Cluster prerequisites are provisioned by foundation and intentionally survive every B1 down.
--- Existing roles are never altered because they can own unrelated objects outside this database.
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_auth') THEN
-    CREATE ROLE zhili_auth
-      NOLOGIN
-      NOSUPERUSER
-      NOCREATEDB
-      NOCREATEROLE
-      NOINHERIT
-      NOREPLICATION
-      NOBYPASSRLS;
-  END IF;
-END
-$$;
-
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_control_plane') THEN
-    CREATE ROLE zhili_control_plane
-      NOLOGIN
-      NOSUPERUSER
-      NOCREATEDB
-      NOCREATEROLE
-      NOINHERIT
-      NOREPLICATION
-      NOBYPASSRLS;
-  END IF;
-END
-$$;
-
-CREATE EXTENSION IF NOT EXISTS btree_gist;
-
-GRANT USAGE ON SCHEMA public TO zhili_auth, zhili_control_plane;
-
 CREATE TABLE idempotency_records (
   id text PRIMARY KEY,
   tenant_id text NOT NULL,

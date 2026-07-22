@@ -1,5 +1,5 @@
 export { closeDatabaseClient, getDatabaseClient } from './client';
-export { auditEvents, idempotencyRecords, outboxEvents } from './schema';
+export * from './schema';
 export {
   currentTenantTransaction,
   withTenantTransaction,
