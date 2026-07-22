@@ -168,12 +168,9 @@ services:
       - /app/infra/scripts/migrate.mjs
     environment:
       NODE_ENV: production
-      ADMIN_DATABASE_URL: postgresql://postgres:${POSTGRES_ADMIN_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
+      ADMIN_DATABASE_URL: postgresql://postgres:${POSTGRES_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB}
       DATABASE_URL: postgresql://zhili_api_login:${POSTGRES_API_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
       WORKER_DATABASE_URL: postgresql://zhili_worker_login:${POSTGRES_WORKER_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
-      POSTGRES_ADMIN_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
-      POSTGRES_API_PASSWORD: ${POSTGRES_API_PASSWORD}
-      POSTGRES_WORKER_PASSWORD: ${POSTGRES_WORKER_PASSWORD}
       MIGRATIONS_FOLDER: /app/packages/db/migrations
     depends_on:
       postgres:

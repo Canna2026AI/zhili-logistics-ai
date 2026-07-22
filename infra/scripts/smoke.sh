@@ -56,6 +56,13 @@ cleanup() {
   rm -rf "$EVIDENCE_DIR"
 }
 
+handle_signal() {
+  status=$1
+  trap - EXIT HUP INT TERM
+  cleanup
+  exit "$status"
+}
+
 if [ -n "$(project_resources)" ]; then
   echo "Task 6 preflight failed: generated project identity already has labeled resources." >&2
   exit 1
@@ -66,7 +73,10 @@ if docker image inspect "$API_IMAGE" >/dev/null 2>&1 \
   exit 1
 fi
 
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'handle_signal 129' HUP
+trap 'handle_signal 130' INT
+trap 'handle_signal 143' TERM
 mkdir -p "$EVIDENCE_DIR"
 echo "preflight: collision-safe project and Docker-managed ephemeral ports allocated"
 

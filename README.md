@@ -77,11 +77,11 @@ docker compose --env-file infra/.env -f infra/compose.yaml down --volumes --remo
 PostgreSQL、已认证 Redis 与 MinIO。
 
 示例环境文件中的凭据仅适用于一次性本地开发，绝不能用于生产、共享或提交真实
-`infra/.env`。数据库与 Redis 的 `*_PASSWORD` 是原始密码，相应
-`*_PASSWORD_URL_ENCODED` 必须是同一密码的 URL 编码；启动验收会使用包含保留字符的
-示例值并验证两者一致。API 与 Worker 使用相互独立的 Redis ACL 用户及 MinIO 桶级用户，
-不会收到 Redis 默认用户或 MinIO root 凭据。`down --volumes` 会不可逆地删除这套本地栈
-的全部一次性数据库、队列和对象数据。
+`infra/.env`。API/Worker 数据库登录密码以单一 `*_PASSWORD_URL_ENCODED` 值提供，迁移器
+只从冻结的数据库 URL 接口解码并设置角色密码；Redis 的原始密码与 URL 编码值必须匹配。
+启动验收会使用包含保留字符的登录密码验证这些边界。API 与 Worker 使用相互独立的
+Redis ACL 用户及 MinIO 桶级用户，不会收到 Redis 默认用户或 MinIO root 凭据。
+`down --volumes` 会不可逆地删除这套本地栈的全部一次性数据库、队列和对象数据。
 
 ## 许可证
 

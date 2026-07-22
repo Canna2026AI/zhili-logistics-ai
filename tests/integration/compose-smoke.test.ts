@@ -58,7 +58,6 @@ interface CommandResult {
 interface ComposeEnvironment {
   readonly POSTGRES_DB: string;
   readonly POSTGRES_ADMIN_PASSWORD: string;
-  readonly POSTGRES_ADMIN_PASSWORD_URL_ENCODED: string;
   readonly POSTGRES_API_PASSWORD: string;
   readonly POSTGRES_API_PASSWORD_URL_ENCODED: string;
   readonly POSTGRES_WORKER_PASSWORD: string;
@@ -153,12 +152,14 @@ afterAll(async () => {
 });
 
 it('pins external images and isolates every destructive/runtime identity', async () => {
-  const [composeSource, apiDockerfile, workerDockerfile, smokeSource] = await Promise.all([
-    readFile(resolve(repositoryRoot, composeFile), 'utf8'),
-    readFile(resolve(repositoryRoot, 'infra/docker/api.Dockerfile'), 'utf8'),
-    readFile(resolve(repositoryRoot, 'infra/docker/worker.Dockerfile'), 'utf8'),
-    readFile(resolve(repositoryRoot, 'infra/scripts/smoke.sh'), 'utf8'),
-  ]);
+  const [composeSource, apiDockerfile, workerDockerfile, migrateSource, smokeSource] =
+    await Promise.all([
+      readFile(resolve(repositoryRoot, composeFile), 'utf8'),
+      readFile(resolve(repositoryRoot, 'infra/docker/api.Dockerfile'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'infra/docker/worker.Dockerfile'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'infra/scripts/migrate.mjs'), 'utf8'),
+      readFile(resolve(repositoryRoot, 'infra/scripts/smoke.sh'), 'utf8'),
+    ]);
   const requiredFragments = [
     ...Object.values(imageReferences),
     'S3_ACCESS_KEY: ${MINIO_API_ACCESS_KEY}',
@@ -168,8 +169,10 @@ it('pins external images and isolates every destructive/runtime identity', async
     'API_IMAGE=zhili-task6-api:$COMPOSE_PROJECT_NAME',
     'WORKER_IMAGE=zhili-task6-worker:$COMPOSE_PROJECT_NAME',
     'randomBytes',
+    'normalizeLogin(LOGIN_ROLES[0], databasePassword(apiUrl))',
+    "trap 'handle_signal 143' TERM",
   ];
-  const allSources = `${composeSource}\n${apiDockerfile}\n${workerDockerfile}\n${smokeSource}`;
+  const allSources = `${composeSource}\n${apiDockerfile}\n${workerDockerfile}\n${migrateSource}\n${smokeSource}`;
   for (const fragment of requiredFragments) {
     if (!allSources.includes(fragment)) throw new Error('HARDENING_CONTRACT_MISSING');
   }
@@ -178,6 +181,9 @@ it('pins external images and isolates every destructive/runtime identity', async
     'S3_ACCESS_KEY: ${MINIO_ROOT_USER}',
     'S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}',
     'REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379',
+    'POSTGRES_API_PASSWORD: ${POSTGRES_API_PASSWORD}',
+    "requiredEnvironment('POSTGRES_API_PASSWORD')",
+    'trap cleanup EXIT HUP INT TERM',
   ];
   for (const fragment of forbiddenFragments) {
     if (allSources.includes(fragment)) throw new Error('HARDENING_CONTRACT_FORBIDDEN');
@@ -697,14 +703,15 @@ async function loadComposeEnvironment(): Promise<ComposeEnvironment> {
     if (!value) throw new Error(`COMPOSE_ENV_MISSING:${name}`);
     return value;
   };
-  const environment = {
+  const apiDatabasePassword = required('POSTGRES_API_PASSWORD_URL_ENCODED');
+  const workerDatabasePassword = required('POSTGRES_WORKER_PASSWORD_URL_ENCODED');
+  const environment: ComposeEnvironment = {
     POSTGRES_DB: required('POSTGRES_DB'),
     POSTGRES_ADMIN_PASSWORD: required('POSTGRES_ADMIN_PASSWORD'),
-    POSTGRES_ADMIN_PASSWORD_URL_ENCODED: required('POSTGRES_ADMIN_PASSWORD_URL_ENCODED'),
-    POSTGRES_API_PASSWORD: required('POSTGRES_API_PASSWORD'),
-    POSTGRES_API_PASSWORD_URL_ENCODED: required('POSTGRES_API_PASSWORD_URL_ENCODED'),
-    POSTGRES_WORKER_PASSWORD: required('POSTGRES_WORKER_PASSWORD'),
-    POSTGRES_WORKER_PASSWORD_URL_ENCODED: required('POSTGRES_WORKER_PASSWORD_URL_ENCODED'),
+    POSTGRES_API_PASSWORD: decodePassword(apiDatabasePassword),
+    POSTGRES_API_PASSWORD_URL_ENCODED: apiDatabasePassword,
+    POSTGRES_WORKER_PASSWORD: decodePassword(workerDatabasePassword),
+    POSTGRES_WORKER_PASSWORD_URL_ENCODED: workerDatabasePassword,
     REDIS_ADMIN_PASSWORD: required('REDIS_ADMIN_PASSWORD'),
     REDIS_API_PASSWORD: required('REDIS_API_PASSWORD'),
     REDIS_API_PASSWORD_URL_ENCODED: required('REDIS_API_PASSWORD_URL_ENCODED'),
@@ -722,18 +729,6 @@ async function loadComposeEnvironment(): Promise<ComposeEnvironment> {
     REDIS_PORT: process.env.TEST_REDIS_PORT?.trim() || required('REDIS_PORT'),
     API_PORT: process.env.TEST_API_PORT?.trim() || required('API_PORT'),
   };
-  assertEncodedPassword(
-    environment.POSTGRES_ADMIN_PASSWORD_URL_ENCODED,
-    environment.POSTGRES_ADMIN_PASSWORD
-  );
-  assertEncodedPassword(
-    environment.POSTGRES_API_PASSWORD_URL_ENCODED,
-    environment.POSTGRES_API_PASSWORD
-  );
-  assertEncodedPassword(
-    environment.POSTGRES_WORKER_PASSWORD_URL_ENCODED,
-    environment.POSTGRES_WORKER_PASSWORD
-  );
   assertEncodedPassword(environment.REDIS_API_PASSWORD_URL_ENCODED, environment.REDIS_API_PASSWORD);
   assertEncodedPassword(
     environment.REDIS_WORKER_PASSWORD_URL_ENCODED,
@@ -743,13 +738,17 @@ async function loadComposeEnvironment(): Promise<ComposeEnvironment> {
 }
 
 function assertEncodedPassword(encoded: string, raw: string): void {
+  if (decodePassword(encoded) !== raw) throw new Error('COMPOSE_PASSWORD_ENCODING_MISMATCH');
+}
+
+function decodePassword(encoded: string): string {
   let decoded: string;
   try {
     decoded = decodeURIComponent(encoded);
   } catch {
     throw new Error('COMPOSE_PASSWORD_ENCODING_INVALID');
   }
-  if (decoded !== raw) throw new Error('COMPOSE_PASSWORD_ENCODING_MISMATCH');
+  return decoded;
 }
 
 function databaseUrl(username: string, password: string, env: ComposeEnvironment): string {
@@ -784,7 +783,6 @@ async function expectRedisAdministrationDenied(client: IORedis): Promise<void> {
 function assertNoKnownSecrets(value: string, env: ComposeEnvironment, sourceLabel: string): void {
   const secrets = {
     POSTGRES_ADMIN_PASSWORD: env.POSTGRES_ADMIN_PASSWORD,
-    POSTGRES_ADMIN_PASSWORD_URL_ENCODED: env.POSTGRES_ADMIN_PASSWORD_URL_ENCODED,
     POSTGRES_API_PASSWORD: env.POSTGRES_API_PASSWORD,
     POSTGRES_API_PASSWORD_URL_ENCODED: env.POSTGRES_API_PASSWORD_URL_ENCODED,
     POSTGRES_WORKER_PASSWORD: env.POSTGRES_WORKER_PASSWORD,
