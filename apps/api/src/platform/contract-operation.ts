@@ -1,6 +1,8 @@
 import { RequestMethod, SetMetadata, type CustomDecorator, type Type } from '@nestjs/common';
 import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants.js';
 import { DiscoveryService, MetadataScanner } from '@nestjs/core';
+import { PERMISSIONS_METADATA_KEY } from '@zhili/auth';
+import { INTERNAL_ACTION_ROUTE_SEGMENT } from './action-route';
 import { IDEMPOTENT_COMMAND_METADATA_KEY } from './idempotency';
 
 export const CONTRACT_OPERATION_METADATA_KEY = 'zhili:contract-operation';
@@ -10,6 +12,7 @@ export interface ImplementedOperation {
   readonly path: string;
   readonly operationId: string | undefined;
   readonly idempotency: boolean | undefined;
+  readonly permissions: readonly string[] | undefined;
 }
 
 export interface ContractOperationMapping {
@@ -61,6 +64,10 @@ export function collectControllerOperations(
         boolean | undefined;
       const classPolicy = Reflect.getMetadata(IDEMPOTENT_COMMAND_METADATA_KEY, controller) as
         boolean | undefined;
+      const methodPermissions = Reflect.getMetadata(PERMISSIONS_METADATA_KEY, handler) as
+        readonly string[] | undefined;
+      const classPermissions = Reflect.getMetadata(PERMISSIONS_METADATA_KEY, controller) as
+        readonly string[] | undefined;
 
       for (const mapping of operationMappings(
         contractMetadata,
@@ -72,6 +79,7 @@ export function collectControllerOperations(
           path: implementedPath(globalPrefix, controllerPath, mapping.contractPath),
           operationId: mapping.operationId,
           idempotency: methodPolicy ?? classPolicy,
+          permissions: methodPermissions ?? classPermissions,
         });
       }
     }
@@ -131,6 +139,20 @@ export function assertOpenApiCoverage(
     if (implemented.idempotency === false && hasIdempotencyKey) {
       throw new Error(`${label} metadata=false but OpenAPI declares Idempotency-Key`);
     }
+
+    const contractPermission = operation['x-permission'];
+    const implementedPermissions = implemented.permissions ?? [];
+    if (contractPermission === undefined && implementedPermissions.length > 0) {
+      throw new Error(`${label} declares permission metadata but OpenAPI has no x-permission`);
+    }
+    if (
+      typeof contractPermission === 'string' &&
+      (implementedPermissions.length !== 1 || implementedPermissions[0] !== contractPermission)
+    ) {
+      throw new Error(
+        `${label} permission metadata ${implementedPermissions.join(',') || 'missing'} does not match OpenAPI x-permission ${contractPermission}`
+      );
+    }
   }
 }
 
@@ -177,8 +199,40 @@ function operationMappings(
     ) {
       throw new Error(`${label} contains an invalid contract operation mapping`);
     }
+    assertContractPathMatchesRuntimePath(runtimePath, mapping.contractPath, label);
     return { operationId: mapping.operationId, contractPath: mapping.contractPath };
   });
+}
+
+function assertContractPathMatchesRuntimePath(
+  runtimePath: string,
+  contractPath: string,
+  label: string
+): void {
+  const normalizedRuntime = normalizeRelativePath(runtimePath);
+  const normalizedContract = normalizeRelativePath(contractPath);
+  const segments = normalizedRuntime.split('/');
+  const internalIndex = segments.indexOf(INTERNAL_ACTION_ROUTE_SEGMENT);
+  const hasOneInternalSegment =
+    internalIndex > 0 &&
+    internalIndex === segments.lastIndexOf(INTERNAL_ACTION_ROUTE_SEGMENT) &&
+    internalIndex === segments.length - 2;
+  const expectedContract = hasOneInternalSegment
+    ? [
+        ...segments.slice(0, internalIndex - 1),
+        `${segments[internalIndex - 1]}:${segments[internalIndex + 1]}`,
+      ].join('/')
+    : normalizedRuntime;
+
+  if (expectedContract !== normalizedContract) {
+    throw new Error(
+      `${label} contractPath ${contractPath} does not match its internal runtime path ${runtimePath}`
+    );
+  }
+}
+
+function normalizeRelativePath(path: string): string {
+  return path.replace(/^\/+|\/+$/g, '');
 }
 
 function singlePathMetadata(target: object, label: string): string {

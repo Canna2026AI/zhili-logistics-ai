@@ -40,7 +40,7 @@ const REPLAYABLE_RESPONSE_HEADERS = new Set([
   'retry-after',
   'x-request-id',
 ]);
-const DETERMINISTIC_HTTP_STATUSES = new Set([400, 403, 404, 409, 412, 413, 422]);
+const DETERMINISTIC_HTTP_STATUSES = new Set([400, 403, 404, 409, 410, 412, 413, 422]);
 const DEFAULT_IDEMPOTENT_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export const IDEMPOTENT_COMMAND_METADATA_KEY = 'zhili:idempotent-command';
