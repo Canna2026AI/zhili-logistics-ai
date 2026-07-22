@@ -66,6 +66,12 @@ const mockFetch: typeof fetch = async (input) => {
       packages: Array<{ weightKg: string }>;
     };
     const postalCode = body.destination.postalCode ?? '90001';
+    const requestedAt = new Date(
+      request.headers.get('X-Zhili-Mock-Requested-At') ?? Date.now()
+    ).getTime();
+    const validUntil = new Date(
+      postalCode === 'EXPIRED' ? requestedAt - 1 : requestedAt + 8 * 60 * 60 * 1_000
+    ).toISOString();
     const quoteId =
       postalCode === '41000' ? '01JQUOTEGONE00000000000042' : '01JQUOTE000000000000000042';
     return json(
@@ -97,8 +103,7 @@ const mockFetch: typeof fetch = async (input) => {
               total: { amount: '5320.00', currency: 'CNY' },
             },
           ],
-          validUntil:
-            postalCode === 'EXPIRED' ? '2026-05-12T18:00:00+08:00' : '2026-07-22T18:00:00+08:00',
+          validUntil,
           version: 1,
         },
         meta,
@@ -118,7 +123,9 @@ const mockFetch: typeof fetch = async (input) => {
         status: 'ACCEPTED',
         options: [],
         acceptedOptionId: body.optionId,
-        validUntil: '2026-07-22T18:00:00+08:00',
+        validUntil:
+          request.headers.get('X-Zhili-Mock-Valid-Until') ??
+          new Date(Date.now() + 8 * 60 * 60 * 1_000).toISOString(),
         version: 2,
       },
       meta,
@@ -248,10 +255,12 @@ export class QuoteExpiredError extends Error {
 }
 
 export const customerPort = {
-  async quote(request: QuoteRequest): Promise<QuoteResult> {
+  async quote(request: QuoteRequest, now: () => number = Date.now): Promise<QuoteResult> {
+    const requestedAt = now();
     const sideCm = Math.max(1, Math.cbrt(request.volumeM3) * 100).toFixed(2);
     const response = await client.POST('/quotes', {
       params: { header: { 'Idempotency-Key': key() } },
+      headers: { 'X-Zhili-Mock-Requested-At': new Date(requestedAt).toISOString() },
       body: {
         customerId: '01JCUSTOMER000000000000001',
         origin: {
@@ -275,7 +284,7 @@ export const customerPort = {
             heightCm: sideCm,
           },
         ],
-        quoteDate: '2026-07-22',
+        quoteDate: new Date(requestedAt).toISOString().slice(0, 10),
         currency: 'CNY',
       },
     });
@@ -316,6 +325,7 @@ export const customerPort = {
         path: { quoteId: quote.id },
         header: { 'Idempotency-Key': key(), 'If-Match': `"${quote.version}"` },
       },
+      headers: { 'X-Zhili-Mock-Valid-Until': quote.validUntil },
       body: { optionId: quote.optionId, reason: '客户确认报价' },
     });
     if (response.response.status === 410) throw new QuoteExpiredError();

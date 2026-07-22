@@ -84,6 +84,50 @@ describe('客户门户', () => {
     );
   });
 
+  it('正常报价基于请求时钟跨日期生成八小时有效期', async () => {
+    const requestedAt = new Date('2031-01-02T23:30:00.000Z').getTime();
+    const quote = await customerPort.quote(
+      {
+        origin: 'CN-SZX',
+        destinationPostalCode: '90001',
+        weightKg: 123.5,
+        volumeM3: 0.48,
+      },
+      () => requestedAt
+    );
+
+    expect(quote.validUntil).toBe('2031-01-03T07:30:00.000Z');
+  });
+
+  it('过期与服务端 410 哨兵不受跨日期请求时钟影响', async () => {
+    const requestedAt = new Date('2031-01-02T23:30:00.000Z').getTime();
+    const now = () => requestedAt;
+    const expired = await customerPort.quote(
+      {
+        origin: 'CN-SZX',
+        destinationPostalCode: 'EXPIRED',
+        weightKg: 123.5,
+        volumeM3: 0.48,
+      },
+      now
+    );
+    const gone = await customerPort.quote(
+      {
+        origin: 'CN-SZX',
+        destinationPostalCode: '41000',
+        weightKg: 123.5,
+        volumeM3: 0.48,
+      },
+      now
+    );
+
+    expect(new Date(expired.validUntil).getTime()).toBeLessThan(requestedAt);
+    expect(new Date(gone.validUntil).getTime()).toBeGreaterThan(requestedAt);
+    await expect(customerPort.acceptQuote(gone)).rejects.toMatchObject({
+      code: 'QUOTE_EXPIRED',
+    });
+  });
+
   it('接受报价后订单显式携带已接受 quoteId、optionId 与 version', async () => {
     const create = vi.spyOn(customerPort, 'createOrder');
     const user = userEvent.setup();
@@ -152,7 +196,7 @@ describe('客户门户', () => {
 
   it('页面停留跨过 validUntil 后用注入时钟自动禁用接受', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    let currentTime = new Date('2026-07-22T17:59:59+08:00').getTime();
+    let currentTime = new Date('2031-01-02T23:30:00.000Z').getTime();
     const ClockedApp = App as ComponentType<{ now: () => number }>;
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<ClockedApp now={() => currentTime} />);
@@ -160,7 +204,7 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '获取报价' }));
     expect(screen.getByRole('button', { name: '选择此报价' })).toBeEnabled();
 
-    currentTime = new Date('2026-07-22T18:00:01+08:00').getTime();
+    currentTime = new Date('2031-01-03T07:30:01.000Z').getTime();
     await act(() => vi.advanceTimersByTimeAsync(1_000));
     expect(screen.getByRole('region', { name: '报价 Q2505120042' })).toHaveTextContent('已过期');
     expect(screen.getByRole('button', { name: '选择此报价' })).toBeDisabled();

@@ -376,12 +376,15 @@ function QuotePage({ choose, now }: { choose: (quote: QuoteResult) => void; now:
           setSubmitting(true);
           setError('');
           void customerPort
-            .quote({
-              origin: String(form.get('origin')),
-              destinationPostalCode: String(form.get('destinationPostalCode')) || '90001',
-              weightKg: Number(form.get('weightKg')),
-              volumeM3: Number(form.get('volumeM3')),
-            })
+            .quote(
+              {
+                origin: String(form.get('origin')),
+                destinationPostalCode: String(form.get('destinationPostalCode')) || '90001',
+                weightKg: Number(form.get('weightKg')),
+                volumeM3: Number(form.get('volumeM3')),
+              },
+              now
+            )
             .then((result) => {
               setCurrentTime(now());
               setQuote(result);
