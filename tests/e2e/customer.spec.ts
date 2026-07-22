@@ -1,5 +1,21 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import axe from 'axe-core';
+
+async function getOptionVisibility(option: Locator) {
+  return option.evaluate((element) => {
+    const listbox = element.closest<HTMLElement>('[role="listbox"]')!;
+    const listboxRect = listbox.getBoundingClientRect();
+    const optionRect = element.getBoundingClientRect();
+    return {
+      scrollTop: listbox.scrollTop,
+      listboxTop: listboxRect.top,
+      listboxBottom: listboxRect.bottom,
+      optionTop: optionRect.top,
+      optionBottom: optionRect.bottom,
+      fullyVisible: optionRect.top >= listboxRect.top && optionRect.bottom <= listboxRect.bottom,
+    };
+  });
+}
 
 async function expectNoSeriousAxeViolations(page: import('@playwright/test').Page) {
   await page.addScriptTag({ content: axe.source });
@@ -149,6 +165,69 @@ test('客户门户全局搜索在移动端打开 canonical 运单并通过 axe',
   await expect(page.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
   await expect(page.getByText('S2505120004')).toBeVisible();
   await expect(search).toBeFocused();
+});
+
+test('客户门户全局搜索键盘虚拟焦点始终滚入长列表可视区', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  const search = page.getByRole('combobox', { name: '全局搜索' });
+  await search.fill('页面');
+  const results = page.getByRole('listbox', { name: '全局搜索结果' });
+  const options = results.getByRole('option');
+  await expect(options).toHaveCount(10);
+
+  const firstOption = options.first();
+  const lastOption = options.last();
+  const firstOptionId = await firstOption.getAttribute('id');
+  const lastOptionId = await lastOption.getAttribute('id');
+  await expect(search).toHaveAttribute('aria-activedescendant', firstOptionId!);
+  expect((await getOptionVisibility(firstOption)).fullyVisible).toBe(true);
+
+  for (let index = 1; index < 10; index += 1) {
+    await search.press('ArrowDown');
+    const activeOption = options.nth(index);
+    await expect(search).toHaveAttribute(
+      'aria-activedescendant',
+      (await activeOption.getAttribute('id'))!
+    );
+    const activeMetrics = await getOptionVisibility(activeOption);
+    expect(
+      activeMetrics.fullyVisible,
+      `ArrowDown index ${index}: ${JSON.stringify(activeMetrics)}`
+    ).toBe(true);
+  }
+  await expect(search).toHaveAttribute('aria-activedescendant', lastOptionId!);
+  await expect(lastOption).toHaveAttribute('aria-selected', 'true');
+  const lastMetrics = await getOptionVisibility(lastOption);
+  expect(lastMetrics.scrollTop).toBeGreaterThan(0);
+  expect(lastMetrics.fullyVisible).toBe(true);
+
+  await search.press('ArrowDown');
+  await expect(search).toHaveAttribute('aria-activedescendant', lastOptionId!);
+  expect((await getOptionVisibility(lastOption)).fullyVisible).toBe(true);
+
+  for (let index = 8; index >= 0; index -= 1) {
+    await search.press('ArrowUp');
+    const activeOption = options.nth(index);
+    await expect(search).toHaveAttribute(
+      'aria-activedescendant',
+      (await activeOption.getAttribute('id'))!
+    );
+    const activeMetrics = await getOptionVisibility(activeOption);
+    expect(
+      activeMetrics.fullyVisible,
+      `ArrowUp index ${index}: ${JSON.stringify(activeMetrics)}`
+    ).toBe(true);
+  }
+  await expect(search).toHaveAttribute('aria-activedescendant', firstOptionId!);
+  await expect(firstOption).toHaveAttribute('aria-selected', 'true');
+  const firstMetrics = await getOptionVisibility(firstOption);
+  expect(firstMetrics.scrollTop).toBe(0);
+  expect(firstMetrics.fullyVisible).toBe(true);
+
+  await search.press('ArrowUp');
+  await expect(search).toHaveAttribute('aria-activedescendant', firstOptionId!);
+  expect((await getOptionVisibility(firstOption)).fullyVisible).toBe(true);
 });
 
 test('客户门户全局搜索支持键盘选择和零结果关闭', async ({ page }) => {

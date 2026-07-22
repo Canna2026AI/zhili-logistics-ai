@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
 import { customerPort, type OrderInput, type QuoteResult, type VersionDifference } from './api';
 
@@ -1134,6 +1134,8 @@ function CustomerPortalApp({
   const [searchOpen, setSearchOpen] = useState(false);
   const [activeSearchResult, setActiveSearchResult] = useState(0);
   const searchFormRef = useRef<HTMLFormElement>(null);
+  const searchResultsRef = useRef<HTMLDivElement>(null);
+  const activeSearchOptionRef = useRef<HTMLButtonElement>(null);
   const [rows, setRows] = useState<WaybillRow[]>(() => readRows(waybillsKey));
   const [paymentCreated, setPaymentCreated] = useState(
     () => localStorage.getItem(paymentKey) === 'created'
@@ -1224,6 +1226,23 @@ function CustomerPortalApp({
           .includes(normalizedSearchQuery)
       )
     : [];
+  const activeSearchResultId = searchResults[activeSearchResult]?.id;
+  useLayoutEffect(() => {
+    if (!searchOpen || !activeSearchResultId) return;
+    const listbox = searchResultsRef.current;
+    const option = activeSearchOptionRef.current;
+    if (!listbox || !option) return;
+    const listboxRect = listbox.getBoundingClientRect();
+    const optionRect = option.getBoundingClientRect();
+    if (optionRect.top < listboxRect.top) {
+      listbox.scrollTop = Math.max(
+        0,
+        listbox.scrollTop - Math.ceil(listboxRect.top - optionRect.top)
+      );
+    } else if (optionRect.bottom > listboxRect.bottom) {
+      listbox.scrollTop += Math.ceil(optionRect.bottom - listboxRect.bottom);
+    }
+  }, [activeSearchResultId, searchOpen]);
   const selectSearchResult = (result: SearchResult) => {
     if (result.waybillNo) setTrackingNo(result.waybillNo);
     setSearchQuery('');
@@ -1462,6 +1481,7 @@ function CustomerPortalApp({
             {searchOpen && normalizedSearchQuery ? (
               <div className="portal-search-surface">
                 <div
+                  ref={searchResultsRef}
                   id="customer-global-search-results"
                   className="portal-search-results"
                   role="listbox"
@@ -1470,6 +1490,7 @@ function CustomerPortalApp({
                   {searchResults.map((result, index) => (
                     <button
                       key={result.id}
+                      ref={index === activeSearchResult ? activeSearchOptionRef : undefined}
                       id={`customer-search-result-${result.id}`}
                       type="button"
                       role="option"
