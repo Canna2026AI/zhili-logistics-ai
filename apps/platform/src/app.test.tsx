@@ -9,6 +9,7 @@ import { platformPort } from './api';
 afterEach(() => {
   vi.restoreAllMocks();
   localStorage.clear();
+  window.history.replaceState({}, '', '/');
   cleanup();
 });
 
@@ -375,5 +376,97 @@ describe('平台控制台', () => {
     await user.clear(searchbox);
     await user.type(searchbox, '运行中心');
     expect(screen.getByRole('option', { name: /运行中心.*页面/ })).toBeVisible();
+  });
+
+  it('按 F08 主链路完成租户授权、角色、Diff、字段策略和用户视角验证', async () => {
+    window.history.replaceState({}, '', '/?mock=1');
+    const saveEntitlements = vi.spyOn(platformPort, 'saveEntitlements');
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '配置授权与策略' }));
+    expect(screen.getByRole('dialog', { name: '租户详情 · 授权配置' })).toHaveTextContent(
+      '320,000 / 500,000'
+    );
+    await user.click(screen.getByRole('button', { name: '继续：角色策略' }));
+    expect(screen.getByRole('dialog', { name: '角色策略编辑' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '预览最终权限' }));
+    expect(screen.getByRole('dialog', { name: '最终权限 Diff' })).toHaveTextContent(
+      '新增 3 项 · 移除 1 项'
+    );
+    await user.click(screen.getByRole('button', { name: '确认并配置字段' }));
+    expect(screen.getByRole('dialog', { name: '字段策略' })).toHaveTextContent('客户手机号');
+    await user.click(screen.getByRole('button', { name: '以用户视角模拟' }));
+    expect(screen.getByRole('dialog', { name: '用户视角模拟' })).toHaveTextContent('138****6612');
+    expect(screen.getByRole('dialog', { name: '用户视角模拟' })).toHaveTextContent('151****0821');
+    await user.click(screen.getByRole('button', { name: '结束模拟并验证' }));
+    expect(screen.getByRole('dialog', { name: '角色策略已验证并保存' })).toHaveTextContent(
+      '版本 v19 已生效'
+    );
+    expect(saveEntitlements).toHaveBeenCalledWith(
+      '01JTENANT0000000000000001',
+      1,
+      expect.objectContaining({ modules: expect.any(Array) })
+    );
+  });
+
+  it('权限 Diff 进入 STALE 后阻断确认并可重新加载恢复', async () => {
+    window.history.replaceState({}, '', '/?mock=1');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '配置授权与策略' }));
+    await user.click(screen.getByRole('button', { name: '继续：角色策略' }));
+    await user.click(screen.getByRole('button', { name: '预览最终权限' }));
+    await user.click(screen.getByRole('button', { name: '模拟版本冲突' }));
+
+    const stale = screen.getByRole('dialog', { name: '最终权限 Diff · STALE' });
+    expect(stale).toHaveTextContent('权限基线已由其他管理员更新');
+    expect(screen.queryByRole('button', { name: '确认并配置字段' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '重新加载并比较' }));
+    expect(screen.getByRole('dialog', { name: '最终权限 Diff' })).toHaveTextContent(
+      '权限基线已同步'
+    );
+    expect(screen.getByRole('button', { name: '确认并配置字段' })).toBeEnabled();
+  });
+
+  it('撤销最后管理员会进入锁定保护且可以返回修正', async () => {
+    window.history.replaceState({}, '', '/?mock=1');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '配置授权与策略' }));
+    await user.click(screen.getByRole('button', { name: '继续：角色策略' }));
+    await user.click(screen.getByRole('checkbox', { name: '撤销最后一个平台管理员' }));
+    await user.click(screen.getByRole('button', { name: '预览最终权限' }));
+
+    const lockout = screen.getByRole('dialog', { name: '管理员账号锁定保护' });
+    expect(lockout).toHaveTextContent('至少保留 1 名平台管理员');
+    await user.click(screen.getByRole('button', { name: '返回修正策略' }));
+    expect(screen.getByRole('dialog', { name: '角色策略编辑' })).toBeVisible();
+  });
+
+  it('版本发布的 FORBIDDEN 与代入撤权结果都是可恢复的持久状态', async () => {
+    window.history.replaceState({}, '', '/?mock=1');
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '版本发布' }));
+    await user.click(screen.getByRole('button', { name: '创建发布计划' }));
+    expect(screen.getByRole('region', { name: '禁止访问' })).toHaveTextContent(
+      'platform.release.publish'
+    );
+    await user.click(screen.getByRole('button', { name: '返回版本列表' }));
+    expect(screen.getByRole('heading', { name: '版本发布' })).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: '租户管理' }));
+    await user.click(screen.getByRole('button', { name: '代入 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '以管理员身份进入' }));
+    await user.click(screen.getByRole('button', { name: '模拟权限撤回' }));
+    expect(screen.getByRole('region', { name: '会话已撤权' })).toHaveTextContent('权限基线 v20');
+    await user.click(screen.getByRole('button', { name: '重新登录' }));
+    expect(screen.getByRole('heading', { name: '租户管理' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: '会话已撤权' })).not.toBeInTheDocument();
   });
 });

@@ -1,8 +1,18 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
 import { platformPort } from './api';
+import { OperationsPage, type OperationsPageName } from './features/operations/operations-page';
+import { AccessWorkflow } from './features/policies/access-workflow';
+import { SessionOutcome, type SessionOutcomeKind } from './features/sessions/session-outcome';
 
-type Page = '租户管理' | '套餐与模块' | '配额与用量' | '平台公告' | '代入与审计' | '运行中心';
+type Page =
+  | '租户管理'
+  | '套餐与模块'
+  | '配额与用量'
+  | '平台公告'
+  | '代入与审计'
+  | '运行中心'
+  | OperationsPageName;
 type RuntimeState = 'normal' | 'loading' | 'empty' | 'failed' | 'forbidden' | 'stale' | 'partial';
 type Tenant = {
   id: string;
@@ -140,6 +150,7 @@ const pages: Page[] = [
   '代入与审计',
   '运行中心',
 ];
+const operationPages: OperationsPageName[] = ['系统健康', '任务与队列', '审计日志', '版本发布'];
 const modules = [
   '运单管理',
   '仓库扫描',
@@ -323,9 +334,11 @@ function Header({
 function TenantDetail({
   tenant,
   changeStatus,
+  onConfigure,
 }: {
   tenant: Tenant;
   changeStatus: (status: 'ACTIVE' | 'SUSPENDED') => void;
+  onConfigure: () => void;
 }) {
   return (
     <div className="platform-detail">
@@ -357,6 +370,7 @@ function TenantDetail({
       >
         {tenant.status === 'ACTIVE' ? '停用租户' : '恢复租户'}
       </Button>
+      <Button onClick={onConfigure}>配置授权与策略</Button>
       <section>
         <h3>模块授权</h3>
         {modules.map((module) => (
@@ -1068,18 +1082,21 @@ export function App() {
   const [globalSearch, setGlobalSearch] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [detail, setDetail] = useState<Tenant | null>(null);
+  const [workflowTenant, setWorkflowTenant] = useState<Tenant | null>(null);
   const [impersonate, setImpersonate] = useState<Tenant | null>(null);
   const [reason, setReason] = useState('协助排查订单同步问题');
   const [auditReason, setAuditReason] = useState('');
   const [announcements, setAnnouncements] = useState<string[]>(readAnnouncements);
   const [toast, setToast] = useState('');
   const [session, setSession] = useState<Impersonation | null>(readSession);
+  const [sessionOutcome, setSessionOutcome] = useState<SessionOutcomeKind | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [newTenantPlan, setNewTenantPlan] = useState('专业版');
   const [selectedTenantId, setSelectedTenantId] = useState('01JTENANT0000000000000001');
+  const mockMode = new URLSearchParams(window.location.search).get('mock') === '1';
   useEffect(
     () => localStorage.setItem('zhili.platform.tenants', JSON.stringify(tenantRows)),
     [tenantRows]
@@ -1173,6 +1190,7 @@ export function App() {
       setRemainingSeconds(remaining);
       if (remaining === 0) {
         setSession(null);
+        setSessionOutcome('expired');
         setToast('代入会话已过期，已安全返回平台上下文；未提交草稿已保留。');
       }
     };
@@ -1218,6 +1236,7 @@ export function App() {
   };
   const go = (next: Page) => {
     if (!pageAvailable(next, Boolean(session))) return;
+    setSessionOutcome(null);
     setPage(next);
   };
   const navigateFromSearch = (result: SearchResult) => {
@@ -1306,6 +1325,8 @@ export function App() {
       />
     );
   else if (page === '代入与审计') content = <AuditPage records={auditRecords} />;
+  else if (operationPages.includes(page as OperationsPageName))
+    content = <OperationsPage page={page as OperationsPageName} />;
   else content = <RuntimePage readOnly={Boolean(session)} />;
 
   return (
@@ -1341,6 +1362,17 @@ export function App() {
             <button
               key={item}
               disabled={Boolean(session) && item !== '代入与审计' && item !== '运行中心'}
+              data-active={page === item || undefined}
+              onClick={() => go(item)}
+            >
+              {item}
+            </button>
+          ))}
+          <h2>系统运维</h2>
+          {operationPages.map((item) => (
+            <button
+              key={item}
+              disabled={Boolean(session)}
               data-active={page === item || undefined}
               onClick={() => go(item)}
             >
@@ -1383,16 +1415,49 @@ export function App() {
               onClick={() =>
                 void platformPort
                   .endImpersonation()
-                  .then(() => setSession(null))
+                  .then(() => {
+                    setSession(null);
+                    setSessionOutcome('ended');
+                  })
                   .catch((error: Error) => setToast(error.message))
               }
             >
               立即退出
             </button>
+            {mockMode ? (
+              <>
+                <button
+                  onClick={() => {
+                    setSession(null);
+                    setSessionOutcome('revoked');
+                    setPage('租户管理');
+                  }}
+                >
+                  模拟权限撤回
+                </button>
+                <button
+                  onClick={() => {
+                    setSession(null);
+                    setSessionOutcome('expired');
+                    setPage('租户管理');
+                  }}
+                >
+                  模拟会话过期
+                </button>
+              </>
+            ) : null}
           </div>
         ) : null}
         <main>
-          {session && page !== '代入与审计' && page !== '运行中心' ? (
+          {sessionOutcome ? (
+            <SessionOutcome
+              kind={sessionOutcome}
+              onRecover={() => {
+                setSessionOutcome(null);
+                setPage('租户管理');
+              }}
+            />
+          ) : session && page !== '代入与审计' && page !== '运行中心' ? (
             <section className="platform-panel" aria-label="代入租户上下文">
               <h1>{session.tenant.name} · 租户管理员视图</h1>
               <p>平台套餐、模块、配额、公告与租户生命周期写操作已隔离。</p>
@@ -1438,6 +1503,10 @@ export function App() {
         {detail ? (
           <TenantDetail
             tenant={detail}
+            onConfigure={() => {
+              setWorkflowTenant(detail);
+              setDetail(null);
+            }}
             changeStatus={(status) =>
               void platformPort
                 .changeTenantStatus(detail, status)
@@ -1452,6 +1521,30 @@ export function App() {
           />
         ) : null}
       </Drawer>
+      {workflowTenant ? (
+        <AccessWorkflow
+          tenant={workflowTenant}
+          onClose={() => setWorkflowTenant(null)}
+          onSave={async () => {
+            const version = await platformPort.saveEntitlements(
+              workflowTenant.id,
+              workflowTenant.version,
+              {
+                modules: modules.map((module) => ({
+                  moduleCode: module,
+                  enabled: module !== '自动化',
+                  quotas: {},
+                })),
+              }
+            );
+            setTenantRows((rows) =>
+              rows.map((tenant) =>
+                tenant.id === workflowTenant.id ? { ...tenant, version } : tenant
+              )
+            );
+          }}
+        />
+      ) : null}
       <Dialog
         open={createOpen}
         title="新建租户"
