@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
@@ -213,5 +213,160 @@ describe('平台控制台', () => {
     expect(screen.getByRole('dialog', { name: '新建租户' })).toBeVisible();
     expect(screen.getByLabelText('租户名称')).toHaveValue('失败租户');
     expect(screen.getByRole('table', { name: '租户列表' })).not.toHaveTextContent('失败租户');
+  });
+
+  it('紧凑导航在六个页面间切换并在关闭后把焦点还给触发按钮', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const trigger = screen.getByRole('button', { name: '打开平台导航' });
+
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    await user.click(trigger);
+    const drawer = screen.getByRole('dialog', { name: '平台导航菜单' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(within(drawer).getAllByRole('button')).toHaveLength(7);
+    expect(screen.getByRole('button', { name: '关闭' })).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(within(drawer).getByRole('button', { name: '运行中心' })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole('button', { name: '关闭' })).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: '平台导航菜单' })).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveFocus();
+
+    for (const destination of [
+      '租户管理',
+      '套餐与模块',
+      '配额与用量',
+      '平台公告',
+      '代入与审计',
+      '运行中心',
+    ]) {
+      await user.click(trigger);
+      await user.click(
+        within(screen.getByRole('dialog', { name: '平台导航菜单' })).getByRole('button', {
+          name: destination,
+        })
+      );
+      expect(screen.getByRole('heading', { name: destination })).toBeVisible();
+      expect(screen.queryByRole('dialog', { name: '平台导航菜单' })).not.toBeInTheDocument();
+      expect(trigger).toHaveFocus();
+    }
+  });
+
+  it('全局搜索支持键盘选择规范租户、真实页面跳转与零结果', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const searchbox = screen.getByRole('combobox', { name: '平台全局搜索' });
+
+    await user.type(searchbox, '上海智立');
+    expect(screen.getByRole('listbox', { name: '平台全局搜索结果' })).toBeVisible();
+    expect(
+      screen.getByRole('option', { name: /上海智立科技有限公司.*租户.*zhili-sh/ })
+    ).toBeVisible();
+    await user.keyboard('{ArrowDown}');
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('dialog', { name: '租户详情' })).toHaveTextContent('zhili-sh');
+    await user.keyboard('{Escape}');
+
+    await user.clear(searchbox);
+    await user.type(searchbox, '支付回调');
+    await user.click(screen.getByRole('option', { name: /支付回调.*运行作业.*运行中心/ }));
+    expect(screen.getByRole('heading', { name: '运行中心' })).toBeVisible();
+    expect(screen.getByRole('table', { name: '运行作业' })).toHaveTextContent('支付回调');
+
+    await user.clear(searchbox);
+    await user.type(searchbox, '绝对不存在的租户或作业');
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '未找到与“绝对不存在的租户或作业”匹配的结果'
+    );
+    expect(screen.queryByRole('listbox', { name: '平台全局搜索结果' })).not.toBeInTheDocument();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByText(/未找到与“绝对不存在/)).not.toBeInTheDocument();
+  });
+
+  it('搜索结果使用虚拟焦点且 Tab 和 Escape 不会把焦点丢到 body', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const searchbox = screen.getByRole('combobox', { name: '平台全局搜索' });
+
+    await user.type(searchbox, '上海智立');
+    const tenantOption = screen.getByRole('option', {
+      name: /上海智立科技有限公司.*租户.*zhili-sh/,
+    });
+    expect(tenantOption).toHaveAttribute('tabindex', '-1');
+
+    await user.tab();
+    expect(screen.getAllByRole('button', { name: '新建租户' })[0]).toHaveFocus();
+    expect(document.body).not.toHaveFocus();
+
+    await user.tab({ shift: true });
+    expect(searchbox).toHaveFocus();
+    expect(screen.getByRole('listbox', { name: '平台全局搜索结果' })).toBeVisible();
+    await user.keyboard('{Escape}');
+    expect(searchbox).toHaveFocus();
+    expect(screen.queryByRole('listbox', { name: '平台全局搜索结果' })).not.toBeInTheDocument();
+
+    await user.keyboard('{ArrowDown}{Enter}');
+    expect(screen.getByRole('dialog', { name: '租户详情' })).toBeVisible();
+    await user.keyboard('{Escape}');
+    expect(searchbox).toHaveFocus();
+  });
+
+  it('新发布公告立即进入与公告页相同的全局搜索索引', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '平台公告' }));
+    await user.type(screen.getByLabelText('公告标题'), '紧急港区升级通知');
+    await user.click(screen.getByRole('button', { name: '发布公告' }));
+    expect(await screen.findByText('紧急港区升级通知')).toBeVisible();
+
+    const searchbox = screen.getByRole('combobox', { name: '平台全局搜索' });
+    await user.type(searchbox, '紧急港区升级通知');
+    expect(screen.getByRole('option', { name: /紧急港区升级通知.*公告.*平台公告/ })).toBeVisible();
+  });
+
+  it('退出代入后全局搜索仍索引审计表显示的自定义原因', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '代入 上海智立科技有限公司' }));
+    const reason = screen.getByLabelText('代入原因');
+    await user.clear(reason);
+    await user.type(reason, '核查自定义审计原因XYZ');
+    await user.click(screen.getByRole('button', { name: '以管理员身份进入' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('核查自定义审计原因XYZ');
+    await user.click(screen.getByRole('button', { name: '立即退出' }));
+    await waitFor(() =>
+      expect(screen.queryByRole('button', { name: '立即退出' })).not.toBeInTheDocument()
+    );
+    await user.click(screen.getByRole('button', { name: '代入与审计' }));
+    expect(screen.getByRole('table', { name: '审计记录' })).toHaveTextContent(
+      '核查自定义审计原因XYZ'
+    );
+
+    const searchbox = screen.getByRole('combobox', { name: '平台全局搜索' });
+    await user.type(searchbox, '核查自定义审计原因XYZ');
+    expect(
+      screen.getByRole('option', { name: /以管理员身份代入.*审计记录.*核查自定义审计原因XYZ/ })
+    ).toBeVisible();
+  });
+
+  it('代入态只暴露允许访问的全局搜索结果', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '代入 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '以管理员身份进入' }));
+
+    const searchbox = screen.getByRole('combobox', { name: '平台全局搜索' });
+    await user.type(searchbox, '上海智立');
+    expect(
+      screen.queryByRole('option', { name: /上海智立科技有限公司.*租户/ })
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /以管理员身份代入.*审计记录/ })).toBeVisible();
+    await user.clear(searchbox);
+    await user.type(searchbox, '运行中心');
+    expect(screen.getByRole('option', { name: /运行中心.*页面/ })).toBeVisible();
   });
 });
