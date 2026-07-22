@@ -3212,6 +3212,8 @@ export interface components {
       | 'PAYMENT_CALLBACK_DUPLICATE'
       | 'PAYMENT_FAILED'
       | 'PERMISSION_DENIED'
+      | 'PRECONDITION_INVALID'
+      | 'PRECONDITION_REQUIRED'
       | 'QUOTE_EXPIRED'
       | 'RATE_VERSION_CHANGED'
       | 'REVIEWED_CHARGE_IMMUTABLE'
@@ -5576,7 +5578,7 @@ export interface components {
         'application/problem+json': components['schemas']['ErrorEnvelope'];
       };
     };
-    /** @description Missing, malformed or stale strong If-Match precondition. The error code is PRECONDITION_REQUIRED for a missing required header and STALE_VERSION for a mismatch. */
+    /** @description Missing, malformed or stale strong If-Match precondition. The error code is PRECONDITION_REQUIRED for a missing required header, PRECONDITION_INVALID for a weak or malformed header, and STALE_VERSION for a valid strong ETag that no longer matches. */
     PreconditionFailed: {
       headers: {
         [name: string]: unknown;

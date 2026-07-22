@@ -16,14 +16,18 @@ const json = (body: unknown, status = 200, authoritativeVersion?: number) =>
     },
   });
 
-const preconditionProblem = (code: 'PRECONDITION_REQUIRED' | 'PRECONDITION_INVALID') =>
+const preconditionProblem = (
+  code: 'PRECONDITION_REQUIRED' | 'PRECONDITION_INVALID' | 'STALE_VERSION'
+) =>
   new Response(
     JSON.stringify({
       code,
       message:
         code === 'PRECONDITION_REQUIRED'
           ? 'Missing required strong If-Match precondition.'
-          : 'If-Match must be a positive strong numeric ETag.',
+          : code === 'PRECONDITION_INVALID'
+            ? 'If-Match must be a positive strong numeric ETag.'
+            : 'If-Match no longer matches the current aggregate version.',
       details: [{ field: 'If-Match', reason: code }],
       remediation: 'Refresh the resource and retry with its latest strong ETag.',
       requestId: meta.requestId,
@@ -42,6 +46,10 @@ function readStrongIfMatch(request: Request): StrongPrecondition {
   const version = match ? Number(match[1]) : Number.NaN;
   if (!Number.isSafeInteger(version) || version < 1 || version >= Number.MAX_SAFE_INTEGER) {
     return { ok: false, response: preconditionProblem('PRECONDITION_INVALID') };
+  }
+  const mockCurrentVersion = request.headers.get('X-Zhili-Mock-Current-Version');
+  if (mockCurrentVersion !== null && mockCurrentVersion !== ifMatch) {
+    return { ok: false, response: preconditionProblem('STALE_VERSION') };
   }
   return { ok: true, version };
 }

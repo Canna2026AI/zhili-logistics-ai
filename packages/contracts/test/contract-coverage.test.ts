@@ -4,6 +4,24 @@ import { fileURLToPath } from "node:url";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
+import type { components as GeneratedComponents } from "../src/index.js";
+import {
+  preconditionFailedSchema,
+  validatePreconditionFailed,
+} from "./precondition-schema.js";
+
+type GeneratedPreconditionBody =
+  GeneratedComponents["responses"]["PreconditionFailed"]["content"]["application/problem+json"];
+
+const preconditionBodies = (
+  ["PRECONDITION_REQUIRED", "PRECONDITION_INVALID", "STALE_VERSION"] as const
+).map((code) => ({
+  code,
+  message: `Precondition failed: ${code}`,
+  details: [{ field: "If-Match", reason: code }],
+  remediation: "Refresh and retry with the latest strong ETag.",
+  requestId: "req-precondition-schema",
+})) satisfies GeneratedPreconditionBody[];
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = readFileSync(
@@ -687,6 +705,21 @@ describe("Backend B1 hardened operation contracts", () => {
       expect(operation).not.toContain("409:");
       expect(operation).not.toContain("'409':");
     }
+  });
+
+  it("validates every precondition code against the fully dereferenced 412 schema", () => {
+    expect(JSON.stringify(preconditionFailedSchema)).not.toContain('"$ref"');
+    for (const body of preconditionBodies) {
+      expect(validatePreconditionFailed(body), JSON.stringify(validatePreconditionFailed.errors)).toBe(
+        true,
+      );
+    }
+    expect(
+      validatePreconditionFailed({
+        ...preconditionBodies[0],
+        code: "VALIDATION_FAILED",
+      }),
+    ).toBe(false);
   });
 
   it("requires authoritative operation-specific responses instead of generic acknowledgements", () => {

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { validatePreconditionFailed } from '../../../packages/contracts/test/precondition-schema.js';
 import { customerMockFetch } from './api';
 
 const contract = readFileSync(
@@ -203,9 +204,30 @@ describe('customer mock OpenAPI conformance', () => {
         const problem = (await response.json()) as { code: string };
         expect(response.status, ifMatch).toBe(412);
         expect(problem.code).toMatch(/^PRECONDITION_(?:REQUIRED|INVALID)$/);
+        expect(
+          validatePreconditionFailed(problem),
+          JSON.stringify(validatePreconditionFailed.errors)
+        ).toBe(true);
       }
     }
   );
+
+  it('returns a schema-valid STALE_VERSION 412 for an expired strong If-Match', async () => {
+    const response = await customerMockFetch(
+      jsonRequest(
+        '/quotes/01JQUOTE000000000000000042:accept',
+        { optionId: 'option-1' },
+        { 'If-Match': '"6"', 'X-Zhili-Mock-Current-Version': '"7"' }
+      )
+    );
+    const problem = (await response.json()) as { code: string };
+    expect(response.status).toBe(412);
+    expect(problem.code).toBe('STALE_VERSION');
+    expect(
+      validatePreconditionFailed(problem),
+      JSON.stringify(validatePreconditionFailed.errors)
+    ).toBe(true);
+  });
 
   it('rejects an If-Match on customer-address CREATE because the OpenAPI upsert forbids it', async () => {
     const response = await customerMockFetch(
