@@ -7,6 +7,16 @@
 --   waybills(tenant_id,id), waybill_packages(tenant_id,id)
 -- This file intentionally does not redefine upstream tables or form a migration.
 
+-- Publish the authoritative relationship facts as candidate keys so downstream
+-- composite foreign keys also prevent later parent-side reassignment.
+ALTER TABLE waybill_packages
+  ADD CONSTRAINT waybill_packages_warehouse_pair_unique
+  UNIQUE (tenant_id, id, waybill_id);
+
+ALTER TABLE customer_addresses
+  ADD CONSTRAINT customer_addresses_delivery_pair_unique
+  UNIQUE (tenant_id, id, customer_id);
+
 CREATE TABLE warehouse_scans (
   id text PRIMARY KEY,
   tenant_id text NOT NULL,
@@ -131,7 +141,8 @@ CREATE TABLE inventory_balances (
   CONSTRAINT inventory_balances_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT,
   CONSTRAINT inventory_balances_warehouse_fk FOREIGN KEY (tenant_id, warehouse_id) REFERENCES warehouses (tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT inventory_balances_waybill_fk FOREIGN KEY (tenant_id, waybill_id) REFERENCES waybills (tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT inventory_balances_package_fk FOREIGN KEY (tenant_id, package_id) REFERENCES waybill_packages (tenant_id, id) ON DELETE RESTRICT
+  CONSTRAINT inventory_balances_package_waybill_fk FOREIGN KEY (tenant_id, package_id, waybill_id)
+    REFERENCES waybill_packages (tenant_id, id, waybill_id) ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
 CREATE TABLE inventory_ledger_entries (
@@ -220,7 +231,8 @@ CREATE TABLE load_unit_items (
   CONSTRAINT load_unit_items_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE RESTRICT,
   CONSTRAINT load_unit_items_load_unit_fk FOREIGN KEY (tenant_id, load_unit_id) REFERENCES load_units (tenant_id, id) ON DELETE CASCADE,
   CONSTRAINT load_unit_items_waybill_fk FOREIGN KEY (tenant_id, waybill_id) REFERENCES waybills (tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT load_unit_items_package_fk FOREIGN KEY (tenant_id, package_id) REFERENCES waybill_packages (tenant_id, id) ON DELETE RESTRICT
+  CONSTRAINT load_unit_items_package_waybill_fk FOREIGN KEY (tenant_id, package_id, waybill_id)
+    REFERENCES waybill_packages (tenant_id, id, waybill_id) ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
 CREATE TABLE linehaul_bookings (
@@ -311,7 +323,8 @@ CREATE TABLE delivery_tasks (
   CONSTRAINT delivery_tasks_waybill_fk FOREIGN KEY (tenant_id, waybill_id) REFERENCES waybills (tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT delivery_tasks_fba_fk FOREIGN KEY (tenant_id, fba_delivery_id) REFERENCES fba_deliveries (tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT delivery_tasks_customer_fk FOREIGN KEY (tenant_id, customer_id) REFERENCES customers (tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT delivery_tasks_address_fk FOREIGN KEY (tenant_id, destination_address_id) REFERENCES customer_addresses (tenant_id, id) ON DELETE RESTRICT,
+  CONSTRAINT delivery_tasks_address_customer_fk FOREIGN KEY (tenant_id, destination_address_id, customer_id)
+    REFERENCES customer_addresses (tenant_id, id, customer_id) ON UPDATE RESTRICT ON DELETE RESTRICT,
   CONSTRAINT delivery_tasks_device_fk FOREIGN KEY (tenant_id, assigned_device_id) REFERENCES devices (tenant_id, id) ON DELETE RESTRICT
 );
 

@@ -541,6 +541,46 @@ INSERT INTO load_units (
     );
 
     psql(`
+INSERT INTO inventory_balances (
+  id, tenant_id, warehouse_id, waybill_id, package_id, stock_state
+) VALUES (
+  'inventory-parent-protection', 't1', 'warehouse-1', 'waybill-1', 'package-1', 'RECEIVED'
+);
+INSERT INTO load_unit_items (
+  id, tenant_id, load_unit_id, waybill_id, package_id, item_sequence
+) VALUES (
+  'item-parent-protection', 't1', 'load-pair', 'waybill-1', 'package-2', 1
+);
+INSERT INTO delivery_tasks (
+  id, tenant_id, task_no, waybill_id, customer_id, destination_address_id
+) VALUES (
+  'delivery-parent-protection', 't1', 'DELIVERY-PARENT-PROTECTION',
+  'waybill-1', 'customer-1', 'address-1'
+);
+`);
+    expectRejected(
+      'package reassignment with existing inventory',
+      `UPDATE waybill_packages
+       SET waybill_id = 'waybill-2'
+       WHERE tenant_id = 't1' AND id = 'package-1';`,
+      'inventory_balances_package_waybill_fk',
+    );
+    expectRejected(
+      'package reassignment with existing load item',
+      `UPDATE waybill_packages
+       SET waybill_id = 'waybill-2'
+       WHERE tenant_id = 't1' AND id = 'package-2';`,
+      'load_unit_items_package_waybill_fk',
+    );
+    expectRejected(
+      'address reassignment with existing delivery task',
+      `UPDATE customer_addresses
+       SET customer_id = 'customer-2'
+       WHERE tenant_id = 't1' AND id = 'address-1';`,
+      'delivery_tasks_address_customer_fk',
+    );
+
+    psql(`
 INSERT INTO delivery_tasks (
   id, tenant_id, task_no, waybill_id, customer_id, destination_address_id
 ) VALUES
