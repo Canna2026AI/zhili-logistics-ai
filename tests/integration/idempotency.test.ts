@@ -61,10 +61,14 @@ function connectionUriFor(username: string, password: string): string {
   return uri.toString();
 }
 
-function executionContext(request: Record<string, unknown>, reply: TestReply): ExecutionContext {
+function executionContext(
+  request: Record<string, unknown>,
+  reply: TestReply,
+  idempotentCommand: boolean
+): ExecutionContext {
   class TestController {}
   const handler = () => undefined;
-  Reflect.defineMetadata(idempotentHandlerMetadataKey, true, handler);
+  if (idempotentCommand) Reflect.defineMetadata(idempotentHandlerMetadataKey, true, handler);
 
   return {
     switchToHttp: () => ({
@@ -82,8 +86,14 @@ async function invoke(
   interceptor: IdempotencyInterceptor,
   options: {
     body: unknown;
-    key: string;
+    idempotentCommand?: boolean;
+    key?: string;
+    method?: string;
+    params?: Record<string, unknown>;
+    query?: Record<string, unknown>;
     requestId: string;
+    routeTemplate?: string;
+    url?: string;
     handler: (reply: TestReply) => Promise<unknown>;
     subjectId?: string;
     tenantId?: string;
@@ -98,8 +108,16 @@ async function invoke(
   });
   const request: Record<string, unknown> = {
     body: options.body,
-    headers: { 'idempotency-key': options.key, 'x-request-id': options.requestId },
+    headers: {
+      ...(options.key ? { 'idempotency-key': options.key } : {}),
+      'x-request-id': options.requestId,
+    },
+    method: options.method ?? 'POST',
+    params: options.params ?? {},
     principal,
+    query: options.query ?? {},
+    routeOptions: { url: options.routeTemplate ?? '/api/v1/test-commands/:commandId' },
+    url: options.url ?? '/api/v1/test-commands/command-1',
   };
   request.requestContext = buildRequestContext(request as unknown as PrincipalRequest);
   const reply = new TestReply();
@@ -107,7 +125,9 @@ async function invoke(
     handle: () => defer(() => options.handler(reply)),
   };
 
-  const body = await lastValueFrom(interceptor.intercept(executionContext(request, reply), next));
+  const body = await lastValueFrom(
+    interceptor.intercept(executionContext(request, reply, options.idempotentCommand ?? true), next)
+  );
   return { body, headers: reply.getHeaders(), status: reply.statusCode };
 }
 
@@ -136,6 +156,46 @@ afterAll(async () => {
 });
 
 describe('PostgreSQL idempotency pipeline', () => {
+  it('fails closed for an unmarked POST without a key before executing the handler', async () => {
+    const interceptor = new IdempotencyInterceptor();
+    let executions = 0;
+
+    await expect(
+      invoke(interceptor, {
+        body: { command: 'create' },
+        idempotentCommand: false,
+        method: 'POST',
+        requestId: 'request-default-post',
+        handler: async () => ({ execution: ++executions }),
+      })
+    ).rejects.toBeInstanceOf(Error);
+
+    const [recordCount] = await admin<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM idempotency_records
+    `;
+    expect(executions).toBe(0);
+    expect(recordCount?.count).toBe('0');
+  });
+
+  it('bypasses an unmarked GET without requiring a key or creating a record', async () => {
+    const interceptor = new IdempotencyInterceptor();
+    let executions = 0;
+
+    const result = await invoke(interceptor, {
+      body: undefined,
+      idempotentCommand: false,
+      method: 'GET',
+      requestId: 'request-default-get',
+      handler: async () => ({ execution: ++executions }),
+    });
+
+    const [recordCount] = await admin<{ count: string }[]>`
+      SELECT count(*)::text AS count FROM idempotency_records
+    `;
+    expect(result.body).toEqual({ execution: 1 });
+    expect(recordCount?.count).toBe('0');
+  });
+
   it('replays the exact status, headers and body for the same canonical body', async () => {
     const interceptor = new IdempotencyInterceptor();
     let executions = 0;
@@ -202,7 +262,7 @@ describe('PostgreSQL idempotency pipeline', () => {
       return { accepted: true, sequence: executions };
     };
 
-    const [first, duplicate] = await Promise.all([
+    const results = await Promise.all([
       invoke(interceptor, {
         key: 'concurrent-key-0001',
         body: { command: 'dispatch', payload: { z: 1, a: 2 } },
@@ -218,7 +278,14 @@ describe('PostgreSQL idempotency pipeline', () => {
     ]);
 
     expect(executions).toBe(1);
-    expect(duplicate).toEqual(first);
+    const live = results.find((result) => result.headers['x-command-result'] === 'accepted-once');
+    const replay = results.find((result) => result !== live);
+    expect(live).toBeDefined();
+    expect(replay).toEqual({
+      body: live?.body,
+      headers: { 'x-request-id': live?.headers['x-request-id'] },
+      status: live?.status,
+    });
 
     const visibleInsideTenant = await database.withTenantTransaction(
       {
@@ -438,17 +505,102 @@ describe('PostgreSQL idempotency pipeline', () => {
     });
 
     expect(executions).toBe(1);
-    expect(replay).toEqual(first);
     expect(first.headers).toEqual({
+      connection: 'keep-alive',
       etag: '"9"',
       location: '/api/v1/waybills/9',
+      'set-cookie': 'session=secret',
+      'transfer-encoding': 'chunked',
+      'x-internal-debug': 'secret-debug',
       'x-request-id': 'request-safe-headers',
+    });
+    expect(replay).toEqual({
+      body: first.body,
+      headers: {
+        etag: '"9"',
+        location: '/api/v1/waybills/9',
+        'x-request-id': 'request-safe-headers',
+      },
+      status: first.status,
     });
 
     const [stored] = await admin<{ response_headers: Record<string, unknown> }[]>`
       SELECT response_headers FROM idempotency_records
     `;
-    expect(stored?.response_headers).toEqual(first.headers);
+    expect(stored?.response_headers).toEqual(replay.headers);
+  });
+
+  it.each([
+    ['operation', { method: 'POST' }, { method: 'DELETE' }],
+    [
+      'route operation',
+      { routeTemplate: '/api/v1/waybills/:waybillId/actions' },
+      { routeTemplate: '/api/v1/orders/:waybillId/actions' },
+    ],
+    [
+      'resource path parameter',
+      { params: { waybillId: '01J0000000000000000000100A' } },
+      { params: { waybillId: '01J0000000000000000000100B' } },
+    ],
+    ['query', { query: { mode: 'preview', page: 1 } }, { query: { page: 1, mode: 'commit' } }],
+    ['subject', { subjectId }, { subjectId: subjectB }],
+  ] as const)(
+    'returns 409 when the same tenant/key/body crosses %s',
+    async (_caseName, firstFingerprint, secondFingerprint) => {
+      const interceptor = new IdempotencyInterceptor();
+      let executions = 0;
+      const common = {
+        body: { command: 'same-body' },
+        key: 'fingerprint-conflict-0001',
+        routeTemplate: '/api/v1/waybills/:waybillId/actions',
+        url: '/api/v1/waybills/01J0000000000000000000100A/actions?mode=preview&page=1',
+        handler: async () => ({ execution: ++executions }),
+      };
+
+      await invoke(interceptor, {
+        ...common,
+        ...firstFingerprint,
+        requestId: 'request-fingerprint-first',
+      });
+      await expect(
+        invoke(interceptor, {
+          ...common,
+          ...secondFingerprint,
+          requestId: 'request-fingerprint-second',
+        })
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(executions).toBe(1);
+    }
+  );
+
+  it('stores only the SHA-256 fingerprint and no plaintext request secrets', async () => {
+    const interceptor = new IdempotencyInterceptor();
+
+    await invoke(interceptor, {
+      body: { authorization: 'body-top-secret', command: 'create' },
+      key: 'hashed-fingerprint-0001',
+      method: 'PATCH',
+      params: { waybillId: '01J0000000000000000000101A' },
+      query: { token: 'query-top-secret' },
+      requestId: 'request-hashed-fingerprint',
+      routeTemplate: '/api/v1/waybills/:waybillId',
+      url: '/api/v1/waybills/01J0000000000000000000101A?token=query-top-secret',
+      handler: async () => ({ accepted: true }),
+    });
+
+    const [stored] = await admin<
+      {
+        request_hash: string;
+        response_body: unknown;
+        response_headers: unknown;
+      }[]
+    >`
+      SELECT request_hash, response_body, response_headers FROM idempotency_records
+    `;
+    expect(stored?.request_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(stored)).not.toContain('body-top-secret');
+    expect(JSON.stringify(stored)).not.toContain('query-top-secret');
   });
 
   it('exactly replays an undefined response body', async () => {

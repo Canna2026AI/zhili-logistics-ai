@@ -114,6 +114,13 @@ describe('idempotency input', () => {
     expect(validateIdempotencyKey('z'.repeat(128))).toBe('z'.repeat(128));
   });
 
+  it('counts Idempotency-Key length in Unicode code points', () => {
+    expect(() => validateIdempotencyKey('🚀'.repeat(15))).toThrow(BadRequestException);
+    expect(validateIdempotencyKey('🚀'.repeat(16))).toBe('🚀'.repeat(16));
+    expect(validateIdempotencyKey('🚀'.repeat(128))).toBe('🚀'.repeat(128));
+    expect(() => validateIdempotencyKey('🚀'.repeat(129))).toThrow(BadRequestException);
+  });
+
   it('uses canonical JSON and SHA-256 for body hashes', () => {
     const expected = createHash('sha256').update('{"a":1,"nested":{"x":2,"y":3}}').digest('hex');
 
@@ -235,8 +242,12 @@ describe('authentication and permission guards', () => {
 });
 
 describe('idempotency route metadata', () => {
-  it('bypasses requests that are not declared idempotent commands', async () => {
-    const request: Record<string, unknown> = { headers: {}, body: { read: true } };
+  it.each(['GET', 'HEAD', 'OPTIONS'])('bypasses an unmarked %s request', async (method) => {
+    const request: Record<string, unknown> = {
+      method,
+      headers: {},
+      body: { read: true },
+    };
 
     const result = await lastValueFrom(
       new IdempotencyInterceptor().intercept(httpContext(request), {
@@ -245,6 +256,59 @@ describe('idempotency route metadata', () => {
     );
 
     expect(result).toEqual({ data: 'read-result' });
+  });
+
+  it.each(['POST', 'PUT', 'PATCH', 'DELETE'])(
+    'fails closed for an unmarked %s without a key and never executes the handler',
+    async (method) => {
+      const principal = createAuthenticatedPrincipal({ tenantId, subjectId, permissions: [] });
+      const request: Record<string, unknown> = {
+        method,
+        url: '/api/v1/commands',
+        routeOptions: { url: '/api/v1/commands' },
+        params: {},
+        query: {},
+        headers: { 'x-request-id': 'request-unmarked-post' },
+        body: { command: true },
+        principal,
+      };
+      request.requestContext = buildRequestContext(request as never);
+      const handler = vi.fn(() => of({ created: true }));
+
+      await expect(
+        lastValueFrom(
+          new IdempotencyInterceptor().intercept(httpContext(request), { handle: handler })
+        )
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(handler).not.toHaveBeenCalled();
+    }
+  );
+
+  it('allows @IdempotentCommand metadata to opt a GET into enforcement', async () => {
+    const handlerMetadataTarget = () => undefined;
+    Reflect.defineMetadata('zhili:idempotent-command', true, handlerMetadataTarget);
+    const principal = createAuthenticatedPrincipal({ tenantId, subjectId, permissions: [] });
+    const request: Record<string, unknown> = {
+      method: 'GET',
+      url: '/api/v1/export',
+      routeOptions: { url: '/api/v1/export' },
+      params: {},
+      query: {},
+      headers: { 'x-request-id': 'request-marked-get' },
+      principal,
+    };
+    request.requestContext = buildRequestContext(request as never);
+    const handler = vi.fn(() => of({ exported: true }));
+
+    await expect(
+      lastValueFrom(
+        new IdempotencyInterceptor().intercept(
+          httpContext(request, new TestReply(), handlerMetadataTarget),
+          { handle: handler }
+        )
+      )
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(handler).not.toHaveBeenCalled();
   });
 });
 
@@ -335,4 +399,41 @@ describe('Problem Details filter', () => {
     expect(logOutput).not.toContain('field-secret');
     expect(logOutput).not.toContain('name-secret');
   });
+
+  it.each([500, 418])(
+    'logs every exception finally mapped to 500 with an allowlisted diagnostic: %i',
+    (sourceStatus) => {
+      let logOutput = '';
+      const logger = createLogger(
+        { base: undefined },
+        {
+          write(message: string) {
+            logOutput += message;
+          },
+        }
+      );
+      const reply = new TestReply();
+
+      new ProblemFilter(logger).catch(
+        new HttpException(`password=server-secret-${sourceStatus}`, sourceStatus),
+        {
+          switchToHttp: () => ({
+            getRequest: () => ({ headers: { 'x-request-id': `request-5xx-${sourceStatus}` } }),
+            getResponse: () => reply,
+          }),
+        } as never
+      );
+
+      expect(reply.statusCode).toBe(500);
+      expect(reply.body).toEqual({
+        code: 'INTERNAL_ERROR',
+        detail: 'The service could not complete the request.',
+        remediation: expect.any(String),
+        requestId: `request-5xx-${sourceStatus}`,
+      });
+      expect(logOutput).toContain(`request-5xx-${sourceStatus}`);
+      expect(logOutput).toContain('"exception":{"type":"Error"}');
+      expect(logOutput).not.toContain(`server-secret-${sourceStatus}`);
+    }
+  );
 });

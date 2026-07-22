@@ -41,6 +41,7 @@ const REPLAYABLE_RESPONSE_HEADERS = new Set([
   'x-request-id',
 ]);
 const DETERMINISTIC_HTTP_STATUSES = new Set([400, 403, 404, 409, 412, 413, 422]);
+const DEFAULT_IDEMPOTENT_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
 export const IDEMPOTENT_COMMAND_METADATA_KEY = 'zhili:idempotent-command';
 
@@ -71,7 +72,8 @@ export function canonicalBodyHash(body: unknown): string {
 }
 
 export function validateIdempotencyKey(value: unknown): string {
-  if (typeof value !== 'string' || value.length < MIN_KEY_LENGTH || value.length > MAX_KEY_LENGTH) {
+  const length = typeof value === 'string' ? Array.from(value).length : 0;
+  if (typeof value !== 'string' || length < MIN_KEY_LENGTH || length > MAX_KEY_LENGTH) {
     throw new BadRequestException({
       code: 'INVALID_IDEMPOTENCY_KEY',
       detail: 'Idempotency-Key must contain between 16 and 128 characters.',
@@ -88,12 +90,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    const request = context.switchToHttp().getRequest<FastifyRequest>();
     const isIdempotentCommand =
       this.reflector.getAllAndOverride<boolean>(IDEMPOTENT_COMMAND_METADATA_KEY, [
         context.getHandler(),
         context.getClass(),
       ]) ?? false;
-    if (!isIdempotentCommand) return next.handle();
+    const method = request.method?.toUpperCase() ?? '';
+    if (!isIdempotentCommand && !DEFAULT_IDEMPOTENT_METHODS.has(method)) return next.handle();
     return defer(() => this.handle(context, next));
   }
 
@@ -105,7 +109,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     reply.header('x-request-id', requestContext.requestId);
 
     const key = validateIdempotencyKey(request.headers[IDEMPOTENCY_KEY_HEADER]);
-    const requestHash = canonicalBodyHash(request.body);
+    const requestHash = requestFingerprintHash(request, requestContext.subjectId);
 
     return this.runInTenantTransaction(requestContext, async (tx) => {
       await lockCommand(tx, requestContext.tenantId, key);
@@ -252,14 +256,23 @@ function responseHeaders(
   const snapshot: Record<string, string | readonly string[]> = {};
   for (const [name, value] of Object.entries(reply.getHeaders())) {
     const normalizedName = name.toLowerCase();
-    if (!REPLAYABLE_RESPONSE_HEADERS.has(normalizedName)) {
-      reply.removeHeader(name);
-      continue;
-    }
+    if (!REPLAYABLE_RESPONSE_HEADERS.has(normalizedName)) continue;
     if (value === undefined) continue;
     snapshot[normalizedName] = Array.isArray(value) ? value.map(String) : String(value);
   }
   return snapshot;
+}
+
+function requestFingerprintHash(request: FastifyRequest, subjectId: string): string {
+  const routeTemplate = request.routeOptions?.url || request.url.split('?', 1)[0] || '/';
+  return canonicalBodyHash({
+    subjectId,
+    method: request.method.toUpperCase(),
+    route: routeTemplate,
+    params: request.params ?? {},
+    query: request.query ?? {},
+    body: request.body,
+  });
 }
 
 function isDeterministicHttpException(error: unknown): error is HttpException {

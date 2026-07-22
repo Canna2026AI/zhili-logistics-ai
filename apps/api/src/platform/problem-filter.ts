@@ -88,7 +88,7 @@ export class ProblemFilter implements ExceptionFilter {
       request.requestContext?.requestId ?? requestIdFromRequestHeaders(request.headers ?? {});
     const problem = mapExceptionToProblem(exception, requestId);
 
-    if (!(exception instanceof HttpException)) {
+    if (problem.status === 500) {
       this.logger.error(
         { exception: allowlistedExceptionDiagnostic(exception), requestId },
         'Unhandled request exception'
