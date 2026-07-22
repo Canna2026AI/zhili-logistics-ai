@@ -131,5 +131,11 @@ export default defineConfig({
       url: 'http://127.0.0.1:6006',
       reuseExistingServer: !process.env.CI,
     },
+    {
+      command:
+        'pnpm --filter @zhili/pda build && pnpm --filter @zhili/pda exec vite preview --host 127.0.0.1 --port 4202',
+      url: 'http://127.0.0.1:4202',
+      reuseExistingServer: !process.env.CI,
+    },
   ],
 });

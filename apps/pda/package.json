@@ -8,16 +8,26 @@
     "build": "tsc -b && vite build",
     "lint": "eslint src",
     "typecheck": "tsc -b --pretty false",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "cap:add:android": "cap add android",
+    "cap:sync": "cap sync android",
+    "cap:open:android": "cap open android"
   },
   "dependencies": {
     "@zhili/api-client": "workspace:*",
+    "@zhili/contracts": "workspace:*",
     "@zhili/mocks": "workspace:*",
     "@zhili/ui": "workspace:*",
+    "@capacitor/android": "^8.0.0",
+    "@capacitor/core": "^8.0.0",
     "idb": "^8.0.3",
     "lucide-react": "^0.554.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.0.0",
+    "fake-indexeddb": "^6.2.4"
   }
 }
