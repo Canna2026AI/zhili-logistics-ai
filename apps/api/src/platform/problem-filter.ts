@@ -10,9 +10,17 @@ export interface ProblemLogger {
 
 export interface ProblemDetailsBody {
   readonly code: string;
+  readonly message: string;
   readonly detail: string;
+  readonly details: readonly ProblemErrorDetail[];
   readonly remediation: string;
   readonly requestId: string;
+}
+
+export interface ProblemErrorDetail {
+  readonly field?: string;
+  readonly reason: string;
+  readonly rejectedValue?: unknown;
 }
 
 interface ProblemDefinition {
@@ -108,25 +116,32 @@ export function mapExceptionToProblem(
   requestId: string
 ): { readonly body: ProblemDetailsBody; readonly status: number } {
   const known = exception instanceof HttpException;
-  const candidateStatus = known ? exception.getStatus() : 500;
+  const candidateStatus = known ? exception.getStatus() : statusCodeFromUnknown(exception);
   const status = PROBLEMS[candidateStatus] ? candidateStatus : 500;
   const fallback = PROBLEMS[status] ?? PROBLEMS[500]!;
-  const supplied = known && status !== 500 ? problemFields(exception.getResponse()) : {};
+  const parsed = known && status !== 500 ? problemFields(exception.getResponse()) : {};
+  const supplied = status === 413 && parsed.detail === 'Request body is too large' ? {} : parsed;
+  const detail = supplied.detail ?? fallback.detail;
 
   return {
     status,
     body: {
       code: supplied.code ?? fallback.code,
-      detail: supplied.detail ?? fallback.detail,
+      message: detail,
+      detail,
+      details: supplied.details ?? [],
       remediation: supplied.remediation ?? fallback.remediation,
       requestId,
     },
   };
 }
 
-function problemFields(value: string | object): Partial<ProblemDefinition> {
+function problemFields(
+  value: string | object
+): Partial<ProblemDefinition> & { readonly details?: readonly ProblemErrorDetail[] } {
   if (typeof value === 'string') return { detail: value };
   if (!isRecord(value)) return {};
+  if (isFrameworkDefaultResponse(value)) return {};
   return {
     code: typeof value.code === 'string' ? value.code : undefined,
     detail:
@@ -135,8 +150,39 @@ function problemFields(value: string | object): Partial<ProblemDefinition> {
         : typeof value.message === 'string'
           ? value.message
           : undefined,
+    details: problemErrorDetails(value.details),
     remediation: typeof value.remediation === 'string' ? value.remediation : undefined,
   };
+}
+
+function isFrameworkDefaultResponse(value: Record<string, unknown>): boolean {
+  return (
+    typeof value.statusCode === 'number' &&
+    typeof value.error === 'string' &&
+    typeof value.message === 'string' &&
+    value.code === undefined &&
+    value.detail === undefined &&
+    value.remediation === undefined
+  );
+}
+
+function problemErrorDetails(value: unknown): readonly ProblemErrorDetail[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((detail) => {
+    if (!isRecord(detail) || typeof detail.reason !== 'string') return [];
+    return [
+      {
+        ...(typeof detail.field === 'string' ? { field: detail.field } : {}),
+        reason: detail.reason,
+        ...('rejectedValue' in detail ? { rejectedValue: detail.rejectedValue } : {}),
+      },
+    ];
+  });
+}
+
+function statusCodeFromUnknown(exception: unknown): number {
+  if (!isRecord(exception)) return 500;
+  return typeof exception.statusCode === 'number' ? exception.statusCode : 500;
 }
 
 function requestIdFromRequestHeaders(

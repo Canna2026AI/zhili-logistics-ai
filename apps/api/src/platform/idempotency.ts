@@ -163,13 +163,14 @@ export class IdempotencyInterceptor implements NestInterceptor {
         if (!isDeterministicHttpException(error)) throw error;
 
         const problem = mapExceptionToProblem(error, requestContext.requestId);
+        const responseBody = jsonbStableValue(problem.body);
         reply
           .status(problem.status)
           .header('content-type', 'application/problem+json')
           .header('x-request-id', requestContext.requestId);
-        const snapshot = captureResponse(reply, problem.body);
+        const snapshot = captureResponse(reply, responseBody);
         await persistSnapshot(tx, requestContext, key, requestHash, snapshot, now);
-        return problem.body;
+        return responseBody;
       }
     });
   }
@@ -337,6 +338,27 @@ function canonicalize(value: unknown): unknown {
     return result;
   }
   return undefined;
+}
+
+function jsonbStableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(jsonbStableValue);
+  if (!isPlainRecord(value)) return value;
+  return Object.fromEntries(
+    Object.keys(value)
+      .sort(compareJsonbKeys)
+      .map((key) => [key, jsonbStableValue(value[key])])
+  );
+}
+
+function compareJsonbKeys(left: string, right: string): number {
+  const lengthDifference = Buffer.byteLength(left) - Buffer.byteLength(right);
+  return lengthDifference || Buffer.compare(Buffer.from(left), Buffer.from(right));
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false;
+  const prototype = Object.getPrototypeOf(value) as object | null;
+  return prototype === Object.prototype || prototype === null;
 }
 
 function newUlid(now = Date.now()): string {

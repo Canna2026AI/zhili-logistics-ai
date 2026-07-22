@@ -412,7 +412,9 @@ describe('Problem Details filter', () => {
     expect(reply.headers['content-type']).toBe('application/problem+json');
     expect(reply.body).toEqual({
       code,
+      message: status === 500 ? 'The service could not complete the request.' : `detail-${status}`,
       detail: status === 500 ? 'The service could not complete the request.' : `detail-${status}`,
+      details: [],
       remediation: expect.any(String),
       requestId: 'request-problem',
     });
@@ -433,7 +435,9 @@ describe('Problem Details filter', () => {
 
     expect(reply.body).toEqual({
       code: 'INTERNAL_ERROR',
+      message: 'The service could not complete the request.',
       detail: 'The service could not complete the request.',
+      details: [],
       remediation: expect.any(String),
       requestId: 'request-unknown',
     });
@@ -499,7 +503,9 @@ describe('Problem Details filter', () => {
       expect(reply.statusCode).toBe(500);
       expect(reply.body).toEqual({
         code: 'INTERNAL_ERROR',
+        message: 'The service could not complete the request.',
         detail: 'The service could not complete the request.',
+        details: [],
         remediation: expect.any(String),
         requestId: `request-5xx-${sourceStatus}`,
       });

@@ -571,7 +571,9 @@ describe('PostgreSQL idempotency pipeline', () => {
       },
       body: {
         code: 'STATE_TRANSITION_NOT_ALLOWED',
+        message: 'The waybill is already cancelled.',
         detail: 'The waybill is already cancelled.',
+        details: [],
         remediation: 'Refresh the waybill before choosing another action.',
         requestId: 'request-deterministic-4xx',
       },
