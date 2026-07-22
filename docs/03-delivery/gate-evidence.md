@@ -8,7 +8,7 @@
 | 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过                      | 无                                                                         |
 | Figma 同步   | PASSED      | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、45 个五端画布、104 条原型 reaction；独立终审 C0/I0/M0 | Code Connect 受方案与发布条件阻塞，记录为 `BLOCKED_EXTERNAL`，不阻塞本门槛 |
 | 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过                     | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                         |
-| 后端         | IN_PROGRESS | `5cb423d`                | Foundation API/DB/Worker/RLS/Compose 已合并并通过独立 0 C/I/M 审查与主分支门禁                   | B1 三个领域工作树正在先行产出统一迁移所需的 schema proposals               |
+| 后端         | IN_PROGRESS | `2a26938`                | Foundation 已通过；B1 三份 schema proposal 均经独立 C0/I0/M0 审查并按依赖顺序合并                | 统一 Drizzle schema、迁移与领域服务仍在独立工作树实现                      |
 | 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                                              | 前置门槛未通过                                                             |
 
 ## UI 门槛与 B 方案决策
@@ -95,3 +95,10 @@ Code Connect 当前是明确的外部门槛：Pro 方案与未发布的本地组
 - 复用现有五端服务执行 `pnpm e2e`，41/41 通过；包含五端、移动端、PDA 离线/PWA、权限、安全状态和 axe。
 - 后端基础分支经独立终审为 0 Critical / 0 Important / 0 Minor，合入主分支提交 `5cb423d`；合并后 `pnpm format:check`、`pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 全部退出码 0。
 - 后端基础证据保存在 `.superpowers/sdd/task-6-report.md`；Compose 提供 PostgreSQL、Redis、MinIO、API、Worker、迁移、RLS、幂等、审计与 Outbox 冷启动/恢复验收。B1 仍在进行，因此后端总门槛不提前标记 `PASSED`。
+
+## 2026-07-22 B1 schema proposal 证据
+
+- 身份主数据、费率/运单、仓储/干线三份 proposal 分别在独立工作树完成 SQL、真实 PostgreSQL 验证器、修复循环与报告；最终独立审查均为 `C0 / I0 / M0`。
+- Proposal 严格复用 Foundation 的 `current_setting('app.tenant_id', true)`，身份域拥有 tenants/customers/customer_addresses/devices，费率域拥有 waybills/waybill_packages，仓储域只引用上游复合租户键，没有重复定义上游表。
+- 三个分支按身份主数据 `21d1501` → 费率/运单 `ae5e5d0` → 仓储/干线 `2a26938` 合入主分支；合并后 `pnpm --filter @zhili/db test` 为 2 files / 3 tests 通过，`git diff --check` 通过且工作区干净。
+- 统一迁移不由三个领域分支各自生成；它固定在 `codex/backend-b1-schema` 工作树一次性产出 Drizzle schema、`0001_b1_domains.sql`、RLS 与 up/down/up 指纹门禁，完成独立审查后再同步给领域工作树。
