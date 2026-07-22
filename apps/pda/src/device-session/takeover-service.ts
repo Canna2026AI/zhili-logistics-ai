@@ -1,4 +1,9 @@
-import type { DeviceContext, MediaQueueItem, QueuedEvent } from '../domain/types';
+import type {
+  DeviceContext,
+  DeviceTakeoverExportReceipt,
+  MediaQueueItem,
+  QueuedEvent,
+} from '../domain/types';
 import type { MediaQueue } from '../offline/media-queue';
 import type { OfflineQueue } from '../offline/offline-queue';
 import { readBlobBytes } from '../offline/blob-bytes';
@@ -52,14 +57,29 @@ function assertExactScope(
   }
 }
 
+function isExpiredError(error: unknown) {
+  const status = typeof error === 'object' && error && 'status' in error ? Number(error.status) : 0;
+  const message = error instanceof Error ? error.message : '';
+  return status === 410 || message.includes('过期') || message.toLowerCase().includes('expired');
+}
+
 type ExportableMedia = Omit<MediaQueueItem, 'blob'> & { bytesBase64: string };
+
+export type TakeoverProgressStage =
+  | 'AUTHORIZING'
+  | 'AUTHORIZED'
+  | 'ENCRYPTING'
+  | 'UPLOADING'
+  | 'VERIFIED'
+  | 'EXPIRED';
 
 export class DeviceTakeoverService {
   constructor(
     private readonly queue: OfflineQueue,
     private readonly media: MediaQueue,
     private readonly port: PdaPort,
-    private readonly now = () => new Date()
+    private readonly now = () => new Date(),
+    private readonly onProgress?: (stage: TakeoverProgressStage) => void
   ) {}
 
   async exportAndClear(session: LocalDeviceSession, reason: string) {
@@ -78,18 +98,27 @@ export class DeviceTakeoverService {
     const encoder = new TextEncoder();
     const manifestBytes = encoder.encode(canonical(manifest));
     const manifestHash = await sha256(manifestBytes);
-    const authorization = await this.port.authorizeDeviceTakeoverExport(
-      session.deviceId,
-      `pda:takeover:authorize:${session.deviceId}:${manifestHash}`,
-      {
-        reason: reason.trim(),
-        manifestHash,
-        eventCount: events.length,
-        mediaCount: media.length,
-      }
-    );
+    this.onProgress?.('AUTHORIZING');
+    let authorization;
+    try {
+      authorization = await this.port.authorizeDeviceTakeoverExport(
+        session.deviceId,
+        `pda:takeover:authorize:${session.deviceId}:${manifestHash}`,
+        {
+          reason: reason.trim(),
+          manifestHash,
+          eventCount: events.length,
+          mediaCount: media.length,
+        }
+      );
+    } catch (error) {
+      if (isExpiredError(error)) this.onProgress?.('EXPIRED');
+      throw error;
+    }
 
     assertExactScope(authorization.scope, session);
+    const authorizationExpired =
+      new Date(authorization.expiresAt).getTime() <= this.now().getTime();
     if (
       authorization.deviceId !== session.deviceId ||
       authorization.manifestHash !== manifestHash ||
@@ -98,11 +127,14 @@ export class DeviceTakeoverService {
       authorization.status !== 'AUTHORIZED' ||
       authorization.keyEncryptionAlgorithm !== 'RSA-OAEP-256' ||
       authorization.contentEncryptionAlgorithm !== 'A256GCM' ||
-      new Date(authorization.expiresAt).getTime() <= this.now().getTime()
+      authorizationExpired
     ) {
+      if (authorizationExpired) this.onProgress?.('EXPIRED');
       throw new Error('管理员接管授权与声明清单不一致或已过期，已保留全部数据。');
     }
+    this.onProgress?.('AUTHORIZED');
 
+    this.onProgress?.('ENCRYPTING');
     const exportableMedia: ExportableMedia[] = await Promise.all(
       media.map(async ({ blob, ...item }) => ({
         ...item,
@@ -130,18 +162,25 @@ export class DeviceTakeoverService {
       name: 'RSA-OAEP',
     });
     const ciphertextHash = await sha256(new Uint8Array(ciphertext));
-    const receipt = await this.port.uploadEncryptedDeviceTakeoverExport(
-      session.deviceId,
-      authorization.authorizationId,
-      `pda:takeover:upload:${authorization.authorizationId}:${ciphertextHash}`,
-      {
-        manifestHash,
-        ciphertextHash,
-        ciphertext: new Blob([ciphertext], { type: 'application/octet-stream' }),
-        iv: base64(iv),
-        wrappedKey: new Blob([wrappedKey], { type: 'application/octet-stream' }),
-      }
-    );
+    this.onProgress?.('UPLOADING');
+    let receipt: DeviceTakeoverExportReceipt;
+    try {
+      receipt = await this.port.uploadEncryptedDeviceTakeoverExport(
+        session.deviceId,
+        authorization.authorizationId,
+        `pda:takeover:upload:${authorization.authorizationId}:${ciphertextHash}`,
+        {
+          manifestHash,
+          ciphertextHash,
+          ciphertext: new Blob([ciphertext], { type: 'application/octet-stream' }),
+          iv: base64(iv),
+          wrappedKey: new Blob([wrappedKey], { type: 'application/octet-stream' }),
+        }
+      );
+    } catch (error) {
+      if (isExpiredError(error)) this.onProgress?.('EXPIRED');
+      throw error;
+    }
 
     assertExactScope(receipt.scope, session);
     if (
@@ -155,13 +194,13 @@ export class DeviceTakeoverService {
     ) {
       throw new Error('管理员接管回执未通过完整性验证，已保留全部数据。');
     }
-
     await this.queue.setMeta('last-takeover-export-receipt', receipt);
     await this.queue.clearTakeoverPackage(
       events.map((event) => event.envelope.eventId),
       media.map((item) => item.mediaId)
     );
     await this.media.restore();
+    this.onProgress?.('VERIFIED');
     return receipt;
   }
 

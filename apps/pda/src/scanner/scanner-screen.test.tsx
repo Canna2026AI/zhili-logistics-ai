@@ -58,6 +58,37 @@ function taskForAction(action: DeviceTaskAction): DeviceTask {
 describe('ScannerScreen action safety', () => {
   afterEach(cleanup);
 
+  it('shows the F09 action-specific title, step and primary command', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const selectedTask = taskForAction('PUTAWAY');
+    render(
+      <ScannerScreen
+        session={session}
+        queue={queue}
+        media={media}
+        port={new MemoryPdaPort()}
+        online={false}
+        tasks={[selectedTask]}
+        selectedTask={selectedTask}
+        initialCode={selectedTask.reference}
+        assertBusinessAllowed={() => undefined}
+        onChanged={() => undefined}
+        onTaskUpdated={async () => undefined}
+        onTasksRefreshed={async () => undefined}
+        onUnauthorized={async () => undefined}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('作业动作'), { target: { value: 'PUTAWAY' } });
+
+    expect(screen.getByRole('heading', { name: '扫描上架' })).toBeVisible();
+    expect(screen.getByText(/步骤 4\/11/)).toBeVisible();
+    expect(screen.getByText('确认上架')).toBeVisible();
+  });
+
   it.each(DEVICE_TASK_ACTIONS.map((definition) => definition.id))(
     'does not write IndexedDB when %s is missing required business values',
     async (action) => {

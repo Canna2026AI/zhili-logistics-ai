@@ -34,12 +34,23 @@ export function LoginScreen({
 
   return (
     <main className="pda-login-shell">
-      <section className="pda-login-card" aria-labelledby="login-title">
-        <div className="pda-brand-mark" aria-hidden="true">
-          ZL
+      <header className="pda-login-header">
+        <span aria-hidden="true">‹</span>
+        <strong>智立科技物流AI系统</strong>
+        <em>需绑定</em>
+      </header>
+      <section className="pda-login-card pda-login-card--binding" aria-labelledby="login-title">
+        <h2 className="pda-sr-only">设备登录与仓库绑定</h2>
+        <h1 id="login-title">绑定设备与仓库</h1>
+        <p>首次登录或切换工作范围时必须重新认证</p>
+        <div className="pda-flow-summary">
+          <strong>设备 {input.deviceCode} · App 0.2.0</strong>
+          <span>tenant / subject / device / warehouse 四重绑定</span>
         </div>
-        <h1 id="login-title">设备登录与仓库绑定</h1>
-        <p>绑定会限定任务的租户、用户和仓库范围。</p>
+        <div className="pda-flow-alert">
+          <strong>当前设备尚未完成安全绑定</strong>
+          <span>未绑定前不会下载任务，也不会写入离线队列。</span>
+        </div>
         {pendingCount > 0 && (
           <div className="pda-message pda-message--warning" role="alert">
             本机还有 {pendingCount} 条未同步数据，不允许换用户或仓库。
@@ -50,7 +61,8 @@ export function LoginScreen({
             {error}
           </div>
         )}
-        <form onSubmit={submit} className="pda-form">
+        <form onSubmit={submit} className="pda-form pda-binding-form">
+          <strong>绑定信息</strong>
           <label>
             设备编码
             <input
@@ -81,7 +93,7 @@ export function LoginScreen({
             />
           </label>
           <Button type="submit" size="large" loading={busy} disabled={busy}>
-            绑定设备并登录
+            <span aria-label="绑定设备并登录">绑定并继续</span>
           </Button>
         </form>
       </section>

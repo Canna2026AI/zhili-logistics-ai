@@ -1,6 +1,7 @@
 import type { components } from '@zhili/contracts';
 import type { PdaPort } from './pda-port';
 import type { UploadEncryptedTakeoverInput } from './pda-port';
+import { readBlobBytes } from '../offline/blob-bytes';
 import type {
   DeliveryEvent,
   DeliveryTaskTransitionReceipt,
@@ -15,6 +16,13 @@ import type {
 
 const future = '2099-12-31T23:59:59.000Z';
 
+async function sha256Hex(blob: Blob) {
+  const digest = await crypto.subtle.digest('SHA-256', await readBlobBytes(blob));
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
 export class MemoryPdaPort implements PdaPort {
   readonly synchronized = new Set<string>();
   readonly conflictResolutions: Array<{ conflictId: string; resolution: string; reason: string }> =
@@ -22,6 +30,16 @@ export class MemoryPdaPort implements PdaPort {
   readonly uploadedMedia = new Set<string>();
   syncCallCount = 0;
   uploadFailures = new Set<string>();
+  private readonly takeoverAuthorizations = new Map<
+    string,
+    {
+      deviceId: string;
+      manifestHash: string;
+      eventCount: number;
+      mediaCount: number;
+      expiresAt: string;
+    }
+  >();
 
   async bindDevice(
     deviceId: string,
@@ -65,6 +83,70 @@ export class MemoryPdaPort implements PdaPort {
         priority: 'URGENT' as const,
         version: 7,
       })),
+      {
+        id: '01JPDATASK0000000000000010',
+        type: 'MOVE' as const,
+        reference: 'MOVE-DEMO',
+        status: 'READY',
+        priority: 'HIGH' as const,
+        version: 4,
+      },
+      {
+        id: '01JPDATASK0000000000000011',
+        type: 'PICK' as const,
+        reference: 'PICK-DEMO',
+        status: 'READY',
+        priority: 'HIGH' as const,
+        version: 5,
+      },
+      {
+        id: '01JPDATASK0000000000000012',
+        type: 'LOAD' as const,
+        reference: 'LOAD-DEMO',
+        status: 'READY',
+        priority: 'HIGH' as const,
+        version: 6,
+      },
+      {
+        id: '01JPDATASK0000000000000013',
+        type: 'DISPATCH' as const,
+        reference: 'DISPATCH-DEMO',
+        status: 'READY',
+        priority: 'HIGH' as const,
+        version: 2,
+      },
+      {
+        id: '01JPDATASK0000000000000014',
+        type: 'STOCKTAKE' as const,
+        reference: 'STOCKTAKE-DEMO',
+        status: 'READY',
+        priority: 'HIGH' as const,
+        version: 3,
+      },
+      {
+        id: '01JPDATASK0000000000000015',
+        type: 'LAST_MILE_DELIVERY' as const,
+        reference: 'LM-PLANNED',
+        status: 'PLANNED',
+        priority: 'HIGH' as const,
+        version: 11,
+      },
+      {
+        id: '01JPDATASK0000000000000016',
+        type: 'LAST_MILE_DELIVERY' as const,
+        reference: 'LM-PALLETIZED',
+        status: 'PALLETIZED',
+        priority: 'HIGH' as const,
+        version: 12,
+      },
+      {
+        id: '01JPDATASK0000000000000017',
+        type: 'LAST_MILE_DELIVERY' as const,
+        reference: 'LM-OUT',
+        status: 'OUT_FOR_DELIVERY',
+        priority: 'HIGH' as const,
+        version: 14,
+      },
       {
         id: '01JPDATASK0000000000000002',
         type: 'LAST_MILE_DELIVERY' as const,
@@ -233,26 +315,102 @@ export class MemoryPdaPort implements PdaPort {
   async amendProofOfDelivery() {}
 
   async authorizeDeviceTakeoverExport(
-    _deviceId: string,
+    deviceId: string,
     _idempotencyKey: string,
-    _body: AuthorizeDeviceTakeoverExportRequest
+    body: AuthorizeDeviceTakeoverExportRequest
   ): Promise<DeviceTakeoverExportAuthorization> {
-    void _deviceId;
     void _idempotencyKey;
-    void _body;
-    throw new Error('MemoryPdaPort 不提供管理员接管密钥；请使用测试专用端口或真实 API。');
+    const keyPair = await crypto.subtle.generateKey(
+      {
+        name: 'RSA-OAEP',
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: 'SHA-256',
+      },
+      true,
+      ['wrapKey', 'unwrapKey']
+    );
+    const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+    const authorizationId = `01JMOCKAUTH${crypto.randomUUID().replaceAll('-', '').slice(0, 15).toUpperCase()}`.slice(
+      0,
+      26
+    );
+    const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
+    this.takeoverAuthorizations.set(authorizationId, {
+      deviceId,
+      manifestHash: body.manifestHash,
+      eventCount: body.eventCount,
+      mediaCount: body.mediaCount,
+      expiresAt,
+    });
+    return {
+      authorizationId,
+      deviceId,
+      scope: {
+        tenantId: '01JTENANT0000000000000001',
+        warehouseId: '01JWAREHOUSE00000000000001',
+        subjectId: '01JSUBJECT0000000000000001',
+        deviceId,
+      },
+      manifestHash: body.manifestHash,
+      eventCount: body.eventCount,
+      mediaCount: body.mediaCount,
+      expiresAt,
+      keyEncryptionAlgorithm: 'RSA-OAEP-256',
+      contentEncryptionAlgorithm: 'A256GCM',
+      publicKeyJwk: {
+        kty: 'RSA',
+        kid: 'mock-takeover-key',
+        use: 'enc',
+        alg: 'RSA-OAEP-256',
+        key_ops: ['wrapKey'],
+        n: jwk.n!,
+        e: jwk.e!,
+      },
+      maxCiphertextBytes: 5_000_000,
+      status: 'AUTHORIZED',
+    };
   }
 
   async uploadEncryptedDeviceTakeoverExport(
-    _deviceId: string,
-    _authorizationId: string,
+    deviceId: string,
+    authorizationId: string,
     _idempotencyKey: string,
-    _input: UploadEncryptedTakeoverInput
+    input: UploadEncryptedTakeoverInput
   ): Promise<DeviceTakeoverExportReceipt> {
-    void _deviceId;
-    void _authorizationId;
     void _idempotencyKey;
-    void _input;
-    throw new Error('MemoryPdaPort 不提供管理员接管上传；请使用测试专用端口或真实 API。');
+    const authorization = this.takeoverAuthorizations.get(authorizationId);
+    if (
+      !authorization ||
+      authorization.deviceId !== deviceId ||
+      authorization.manifestHash !== input.manifestHash ||
+      new Date(authorization.expiresAt).getTime() <= Date.now()
+    )
+      throw new Error('模拟接管授权不存在、作用域不匹配或已过期。');
+    if ((await sha256Hex(input.ciphertext)) !== input.ciphertextHash)
+      throw new Error('模拟接管密文哈希校验失败，未返回 VERIFIED。');
+    this.takeoverAuthorizations.delete(authorizationId);
+    return {
+      exportId: `01JMOCKEXPORT${crypto.randomUUID().replaceAll('-', '').slice(0, 13).toUpperCase()}`.slice(
+        0,
+        26
+      ),
+      authorizationId,
+      deviceId,
+      scope: {
+        tenantId: '01JTENANT0000000000000001',
+        warehouseId: '01JWAREHOUSE00000000000001',
+        subjectId: '01JSUBJECT0000000000000001',
+        deviceId,
+      },
+      manifestHash: input.manifestHash,
+      ciphertextHash: input.ciphertextHash,
+      eventCount: authorization.eventCount,
+      mediaCount: authorization.mediaCount,
+      checksumAlgorithm: 'SHA-256',
+      status: 'VERIFIED',
+      receivedAt: new Date().toISOString(),
+      verifiedAt: new Date().toISOString(),
+    };
   }
 }

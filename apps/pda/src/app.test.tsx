@@ -46,6 +46,13 @@ describe('PDA application', () => {
     expect(screen.getByText(/#1/)).toHaveTextContent('S2505120004');
   });
 
+  it('uses the approved product name in the F09 application header', async () => {
+    render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
+    await bind();
+
+    expect(screen.getByText('智立科技物流AI系统')).toBeVisible();
+  });
+
   it('labels a repeated business intent as already queued instead of reporting a new success', async () => {
     render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
     await bind();
@@ -379,6 +386,22 @@ describe('PDA application', () => {
     expect(screen.getByRole('button', { name: '获取当前位置（可选）' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '确认作业' })).toBeDisabled();
     expect(screen.getByRole('alert')).toHaveTextContent('缺少 lastmile.pod.write 权限');
+  });
+
+  it('completes the encrypted takeover demo only after a VERIFIED receipt', async () => {
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+    render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
+    await bind();
+    await userEvent.click(screen.getByRole('button', { name: '扫描' }));
+    const scan = screen.getByLabelText('扫描码 / 运单号');
+    await userEvent.type(scan, 'S2505120004{Enter}');
+    await screen.findByText(/已本地排队/);
+    await userEvent.click(screen.getByRole('button', { name: '离线' }));
+    await userEvent.type(screen.getByLabelText('管理员接管原因'), '设备损坏，由主管接管');
+    await userEvent.click(screen.getByRole('button', { name: '导出接管' }));
+
+    expect(await screen.findByRole('heading', { name: '加密接管上传已验证' })).toBeVisible();
+    expect(screen.getByTestId('pending-count')).toHaveTextContent('0');
   });
 
   it('locks the composition root when persisted event context differs from the bound session', async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, Cloud, CloudOff, ScanLine, UserRound, WifiOff } from 'lucide-react';
+import { ChevronLeft, ClipboardList, Cloud, CloudOff, ScanLine, UserRound, WifiOff } from 'lucide-react';
 import { createZhiliClient } from '@zhili/api-client';
 import { Button } from '@zhili/ui';
 import type { DeviceTask } from './domain/types';
@@ -21,7 +21,10 @@ import { ScannerScreen } from './scanner/scanner-screen';
 import { OfflinePanel } from './offline/offline-panel';
 import { ConflictPanel } from './conflicts/conflict-panel';
 import { MyScreen } from './device-session/my-screen';
-import { DeviceTakeoverService } from './device-session/takeover-service';
+import {
+  DeviceTakeoverService,
+  type TakeoverProgressStage,
+} from './device-session/takeover-service';
 
 type Tab = 'tasks' | 'scan' | 'offline' | 'my' | 'conflict';
 
@@ -64,8 +67,9 @@ export function App({
   const media = useMemo(() => new MediaQueue(store), [store]);
   const guard = useMemo(() => new SessionGuard(queue), [queue]);
   const syncService = useMemo(() => new PdaSyncService(queue, media, port), [queue, media, port]);
+  const [takeoverStage, setTakeoverStage] = useState<TakeoverProgressStage>();
   const takeoverService = useMemo(
-    () => new DeviceTakeoverService(queue, media, port),
+    () => new DeviceTakeoverService(queue, media, port, undefined, setTakeoverStage),
     [queue, media, port]
   );
 
@@ -274,6 +278,7 @@ export function App({
     }
     setBusy(true);
     setSyncMessage(undefined);
+    setTakeoverStage(undefined);
     try {
       guard.assertAllowed('EXPORT');
       const receipt = await takeoverService.exportAndClear(session, reason);
@@ -359,16 +364,19 @@ export function App({
   return (
     <main className="pda-app" data-revision={revision}>
       <header className="pda-topbar">
-        <div>
-          <strong>智立科技物流 AI</strong>
-          <span>
-            {session.warehouseId.slice(-8)} · {session.deviceId.slice(-8)}
-          </span>
-        </div>
+        <button
+          type="button"
+          className="pda-topbar-back"
+          aria-label="返回任务"
+          onClick={() => setTab('tasks')}
+        >
+          <ChevronLeft aria-hidden="true" />
+        </button>
+        <strong className="pda-topbar-title">智立科技物流AI系统</strong>
         <div className="pda-network" role="status" aria-live="polite" data-online={online}>
           {online ? <Cloud aria-hidden="true" /> : <CloudOff aria-hidden="true" />}
           <span>
-            {online ? '在线' : '离线'} · 待同步{' '}
+            {online ? '在线' : '离线'} ·{' '}
             <b data-testid="pending-count">{snapshot.events.length}</b>/200
             <br />
             媒体 {headerMediaReserved}/{mediaItems.length}
@@ -403,6 +411,12 @@ export function App({
         {tab === 'tasks' && (
           <TaskHome
             tasks={tasks}
+            online={online}
+            pendingCount={snapshot.events.length}
+            onSwitchWarehouse={() => {
+              setPhase('login');
+              setError(undefined);
+            }}
             onScan={(task) => {
               setSelectedTask(task);
               setScanCode(task.reference);
@@ -480,6 +494,7 @@ export function App({
               await queue.retryRejected(eventId);
               changed();
             }}
+            takeoverStage={takeoverStage}
           />
         )}
         {tab === 'conflict' && selectedConflict && (
@@ -514,6 +529,7 @@ export function App({
               snapshot.events.length > 0 &&
               session.permissions.includes('pda.takeover.export')
             }
+            takeoverStage={takeoverStage}
           />
         )}
       </div>

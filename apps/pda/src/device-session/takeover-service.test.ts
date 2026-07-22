@@ -70,6 +70,100 @@ function bytesFromBase64(value: string) {
 }
 
 describe('DeviceTakeoverService', () => {
+  it('reports each authorization and encrypted-upload stage in order', async () => {
+    const { queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const { jwk } = await createKeyPair();
+    vi.spyOn(port, 'authorizeDeviceTakeoverExport').mockImplementation(
+      async (deviceId, _key, body) => ({
+        authorizationId,
+        deviceId,
+        scope,
+        manifestHash: body.manifestHash,
+        eventCount: body.eventCount,
+        mediaCount: body.mediaCount,
+        expiresAt: '2099-12-31T23:59:59.000Z',
+        keyEncryptionAlgorithm: 'RSA-OAEP-256',
+        contentEncryptionAlgorithm: 'A256GCM',
+        publicKeyJwk: {
+          kty: 'RSA',
+          kid: 'takeover-key-1',
+          use: 'enc',
+          alg: 'RSA-OAEP-256',
+          key_ops: ['wrapKey'],
+          n: jwk.n!,
+          e: jwk.e!,
+        },
+        maxCiphertextBytes: 5_000_000,
+        status: 'AUTHORIZED',
+      })
+    );
+    vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport').mockImplementation(
+      async (deviceId, receivedAuthorizationId, _key, input) => ({
+        exportId: '01JTAKEOVEREXPORT0000000001',
+        authorizationId: receivedAuthorizationId,
+        deviceId,
+        scope,
+        manifestHash: input.manifestHash,
+        ciphertextHash: input.ciphertextHash,
+        eventCount: 1,
+        mediaCount: 1,
+        checksumAlgorithm: 'SHA-256',
+        status: 'VERIFIED',
+        receivedAt: '2026-07-22T12:00:00.000Z',
+        verifiedAt: '2026-07-22T12:00:01.000Z',
+      })
+    );
+    const progress = vi.fn();
+
+    await new DeviceTakeoverService(queue, media, port, undefined, progress).exportAndClear(
+      session,
+      '设备损坏，由主管接管'
+    );
+
+    expect(progress.mock.calls.map(([stage]) => stage)).toEqual([
+      'AUTHORIZING',
+      'AUTHORIZED',
+      'ENCRYPTING',
+      'UPLOADING',
+      'VERIFIED',
+    ]);
+  });
+
+  it('supports a complete encrypted takeover in the mock port', async () => {
+    const { queue, media } = await setup();
+
+    const receipt = await new DeviceTakeoverService(
+      queue,
+      media,
+      new MemoryPdaPort()
+    ).exportAndClear(session, '设备损坏，由主管接管');
+
+    expect(receipt.status).toBe('VERIFIED');
+    expect(queue.snapshot().events).toHaveLength(0);
+    expect(media.snapshot()).toHaveLength(0);
+  });
+
+  it('does not present VERIFIED as complete when the authorized local clear fails', async () => {
+    const { queue, media } = await setup();
+    const progress = vi.fn();
+    vi.spyOn(queue, 'clearTakeoverPackage').mockRejectedValueOnce(
+      new Error('local transaction failed')
+    );
+
+    await expect(
+      new DeviceTakeoverService(
+        queue,
+        media,
+        new MemoryPdaPort(),
+        undefined,
+        progress
+      ).exportAndClear(session, '设备损坏，由主管接管')
+    ).rejects.toThrow('local transaction failed');
+
+    expect(progress).not.toHaveBeenCalledWith('VERIFIED');
+  });
+
   it('encrypts the complete package and clears only after a matching VERIFIED receipt', async () => {
     const { store, queue, media } = await setup();
     const port = new MemoryPdaPort();
@@ -209,6 +303,51 @@ describe('DeviceTakeoverService', () => {
     await expect(
       new DeviceTakeoverService(queue, media, port).exportAndClear(session, '设备损坏，由主管接管')
     ).rejects.toThrow('未通过完整性验证');
+    expect(await store.getEvents()).toHaveLength(1);
+    expect(await store.getMedia()).toHaveLength(1);
+  });
+
+  it('moves to EXPIRED when the short-lived authorization expires during upload', async () => {
+    const { store, queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const { jwk } = await createKeyPair();
+    vi.spyOn(port, 'authorizeDeviceTakeoverExport').mockImplementation(
+      async (deviceId, _key, body) => ({
+        authorizationId,
+        deviceId,
+        scope,
+        manifestHash: body.manifestHash,
+        eventCount: body.eventCount,
+        mediaCount: body.mediaCount,
+        expiresAt: '2099-12-31T23:59:59.000Z',
+        keyEncryptionAlgorithm: 'RSA-OAEP-256',
+        contentEncryptionAlgorithm: 'A256GCM',
+        publicKeyJwk: {
+          kty: 'RSA',
+          kid: 'takeover-key-1',
+          use: 'enc',
+          alg: 'RSA-OAEP-256',
+          key_ops: ['wrapKey'],
+          n: jwk.n!,
+          e: jwk.e!,
+        },
+        maxCiphertextBytes: 5_000_000,
+        status: 'AUTHORIZED',
+      })
+    );
+    vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport').mockRejectedValue(
+      new Error('接管授权已过期')
+    );
+    const progress = vi.fn();
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port, undefined, progress).exportAndClear(
+        session,
+        '设备损坏，由主管接管'
+      )
+    ).rejects.toThrow('接管授权已过期');
+
+    expect(progress.mock.calls.at(-1)?.[0]).toBe('EXPIRED');
     expect(await store.getEvents()).toHaveLength(1);
     expect(await store.getMedia()).toHaveLength(1);
   });

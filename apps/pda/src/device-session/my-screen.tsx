@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Button } from '@zhili/ui';
 import type { LocalDeviceSession } from '../session/session-guard';
+import type { TakeoverProgressStage } from './takeover-service';
+import { TakeoverProgress } from './takeover-progress';
 
 export function MyScreen({
   session,
@@ -9,6 +11,7 @@ export function MyScreen({
   onReauth,
   onExport,
   exportAvailable,
+  takeoverStage,
 }: {
   session: LocalDeviceSession;
   expired: boolean;
@@ -16,6 +19,7 @@ export function MyScreen({
   onReauth: () => void;
   onExport: (reason: string) => Promise<void>;
   exportAvailable: boolean;
+  takeoverStage?: TakeoverProgressStage;
 }) {
   const [takeoverReason, setTakeoverReason] = useState('');
   return (
@@ -31,6 +35,7 @@ export function MyScreen({
           会话已过期，已停止新业务、同步和服务端写入。本地密文安全保留，请重新认证。
         </div>
       )}
+      <TakeoverProgress stage={takeoverStage} />
       <dl className="pda-detail-list">
         <dt>设备</dt>
         <dd>{session.deviceId}</dd>
