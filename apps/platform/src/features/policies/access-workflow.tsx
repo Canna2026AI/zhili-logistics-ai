@@ -296,7 +296,11 @@ export function AccessWorkflow({
     } catch (caught) {
       const status = errorStatus(caught);
       const code = errorCode(caught);
-      if (status === 409 || status === 412) {
+      if (savedReceiptRef.current && (status === 404 || status === 410)) {
+        setSimulation(undefined);
+        setReceipt(savedReceiptRef.current);
+        setStep('saved');
+      } else if (status === 409 || status === 412) {
         try {
           await port.endPermissionSimulation(simulation.id);
         } catch {

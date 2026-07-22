@@ -726,6 +726,35 @@ describe('平台控制台', () => {
     expect(updateRolePolicy.mock.calls.map(([, version]) => version)).toEqual([18, 19]);
   });
 
+  it('保存成功会缓存服务端规范化后的权威 statements 供第二次编辑', async () => {
+    const authoritativeStatements = [
+      { effect: 'ALLOW' as const, resource: 'waybill', actions: ['read'], dataScope: 'TENANT' },
+    ];
+    const updateRolePolicy = vi.spyOn(platformPort, 'updateRolePolicy').mockResolvedValueOnce({
+      roleId: '01JROLE000000000000000001',
+      statements: authoritativeStatements,
+      version: 19,
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await saveDefaultPolicy(user);
+    await user.click(screen.getByRole('button', { name: '完成' }));
+    await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
+    await user.click(screen.getByRole('button', { name: '配置授权与策略' }));
+    await user.click(screen.getByRole('button', { name: '继续：角色策略' }));
+
+    expect(screen.getByRole('checkbox', { name: '运单管理编辑' })).not.toBeChecked();
+    await user.click(screen.getByRole('button', { name: '预览最终权限' }));
+    await user.click(screen.getByRole('button', { name: '确认并配置字段' }));
+    await user.click(screen.getByRole('button', { name: '以用户视角模拟' }));
+    await user.click(screen.getByRole('button', { name: '结束模拟并验证' }));
+
+    expect(updateRolePolicy.mock.calls[1]?.[2]).toMatchObject({
+      statements: authoritativeStatements,
+    });
+  });
+
   it('退出模拟必定结束服务端 simulation，再关闭工作流', async () => {
     const endPermissionSimulation = vi.spyOn(platformPort, 'endPermissionSimulation');
     const user = userEvent.setup();
@@ -736,6 +765,27 @@ describe('平台控制台', () => {
 
     await waitFor(() => expect(endPermissionSimulation).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole('dialog', { name: '用户视角模拟' })).not.toBeInTheDocument();
+  });
+
+  it.each([404, 410])('策略已保存后 simulation DELETE %s 视为幂等清理成功', async (status) => {
+    const updateRolePolicy = vi.spyOn(platformPort, 'updateRolePolicy');
+    const saveEntitlements = vi.spyOn(platformPort, 'saveEntitlements');
+    vi.spyOn(platformPort, 'endPermissionSimulation').mockRejectedValueOnce(
+      new PlatformApiError(
+        status,
+        status === 410 ? 'SIMULATION_EXPIRED' : 'SIMULATION_NOT_FOUND',
+        'simulation already gone'
+      )
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await reachPermissionSimulation(user);
+
+    await user.click(screen.getByRole('button', { name: '结束模拟并验证' }));
+
+    expect(await screen.findByRole('dialog', { name: '角色策略已验证并保存' })).toBeVisible();
+    expect(updateRolePolicy).toHaveBeenCalledTimes(1);
+    expect(saveEntitlements).toHaveBeenCalledTimes(1);
   });
 
   it('角色保存失败不会结束 simulation，原会话可直接重试', async () => {
@@ -876,6 +926,37 @@ describe('平台控制台', () => {
     await act(() => vi.advanceTimersByTimeAsync(3_000));
     expect(check).toHaveBeenCalledTimes(callsAfterRevocation);
     vi.useRealTimers();
+  });
+
+  it('代入未决同意图复用 key，明确 422 后取消切租户必须隔离新 key', async () => {
+    const start = vi
+      .spyOn(platformPort, 'startImpersonation')
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockRejectedValueOnce(new PlatformApiError(422, 'INVALID_REASON', 'reason rejected'));
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '代入 上海智立科技有限公司' }));
+    const submit = screen.getByRole('button', { name: '以管理员身份进入' });
+
+    await user.click(submit);
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.click(submit);
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(submit).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: '取消' }));
+
+    await user.click(screen.getByRole('button', { name: '代入 深圳海运通物流有限公司' }));
+    await user.click(screen.getByRole('button', { name: '以管理员身份进入' }));
+    await waitFor(() =>
+      expect(document.querySelector('.platform-session')).toHaveTextContent(
+        '正在代入：深圳海运通物流有限公司'
+      )
+    );
+
+    expect(start.mock.calls[1]?.[2]).toBe(start.mock.calls[0]?.[2]);
+    expect(start.mock.calls[2]?.[2]).not.toBe(start.mock.calls[1]?.[2]);
+    expect(start.mock.calls[2]?.[0]).toBe('01JTENANT0000000000000002');
   });
 
   it('切换运维页面会清理上一页回执，搜索 option id 使用安全 slug', async () => {

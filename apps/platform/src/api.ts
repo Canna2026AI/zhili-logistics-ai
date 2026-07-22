@@ -156,30 +156,40 @@ const pendingPlatformCommandKeys = new Map<string, string>();
 /** App-local port for platform operations pending inclusion in shared OpenAPI. */
 const platformCommand = async <TResponse>(
   path: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  validate: (value: unknown) => value is TResponse
 ): Promise<TResponse> => {
   const mock =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('mock') === '1';
+  const accept = (value: unknown): TResponse => {
+    if (!validate(value))
+      throw new PlatformApiError(
+        200,
+        'PLATFORM_RESPONSE_INCOMPLETE',
+        '平台命令响应不完整，已保留原幂等键供恢复。'
+      );
+    return value;
+  };
   if (mock && path === '/api/v1/platform/plans')
-    return { id: 'PLAN-CUSTOM', name: body.name, status: 'DRAFT', version: 1 } as TResponse;
+    return accept({ id: 'PLAN-CUSTOM', name: body.name, status: 'DRAFT', version: 1 });
   if (mock && path === '/api/v1/platform/announcements')
-    return { id: 'ANN-20260722-01', status: 'PUBLISHED', version: 1 } as TResponse;
+    return accept({ id: 'ANN-20260722-01', status: 'PUBLISHED', version: 1 });
   if (mock && path === '/api/v1/platform/runtime-snapshots:compare')
-    return {
+    return accept({
       serverVersion: 'runtime-v13',
       differences: [{ field: 'snapshotAt', local: '10:18', server: '10:21' }],
-    } as TResponse;
+    });
   if (mock && path === '/api/v1/platform/runtime-snapshots:refresh')
-    return { version: 'runtime-v13', refreshedAt: '10:21' } as TResponse;
+    return accept({ version: 'runtime-v13', refreshedAt: '10:21' });
   if (mock && path === '/api/v1/platform/runtime-jobs:retry-failed') {
     const itemIds = body.itemIds as string[];
-    return { items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) } as TResponse;
+    return accept({ items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) });
   }
   if (mock && path === '/api/v1/platform/access-policy-baselines:reload') {
     const roleId = String(body.roleId);
     const finance = roleId.endsWith('2');
-    return {
+    return accept({
       tenantId: String(body.tenantId),
       tenantVersion: Number(body.tenantVersion) + 1,
       role: {
@@ -222,16 +232,16 @@ const platformCommand = async <TResponse>(
         { id: '01JUSER000000000000000001', name: '李明' },
         { id: '01JUSER000000000000000002', name: '王芳' },
       ],
-    } as TResponse;
+    });
   }
   if (mock && path.startsWith('/api/v1/platform/operations/')) {
     if (path.endsWith('/release'))
       throw new PlatformApiError(403, 'FORBIDDEN', '缺少 platform.release.publish 权限');
-    return {
+    return accept({
       operationId: `OPS-${path.split('/').at(-1)?.toUpperCase()}-21`,
       status: 'SUCCEEDED',
       message: '服务端操作已完成',
-    } as TResponse;
+    });
   }
   const fingerprint = `${path}:${JSON.stringify(body)}`;
   const idempotencyKey = pendingPlatformCommandKeys.get(fingerprint) ?? key();
@@ -242,18 +252,29 @@ const platformCommand = async <TResponse>(
     headers: { 'content-type': 'application/json', 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(body),
   });
-  pendingPlatformCommandKeys.delete(fingerprint);
-  const payload =
-    response.status === 204 ? undefined : await response.json().catch(() => undefined);
+  let payload: unknown;
+  try {
+    payload = response.status === 204 ? undefined : await response.json();
+  } catch {
+    throw new PlatformApiError(
+      response.status,
+      'PLATFORM_RESPONSE_INCOMPLETE',
+      '平台命令响应不完整，已保留原幂等键供恢复。'
+    );
+  }
   if (!response.ok) {
     const value = isRecord(payload) ? payload : {};
+    pendingPlatformCommandKeys.delete(fingerprint);
     throw new PlatformApiError(
       response.status,
       String(value.code ?? 'PLATFORM_OPERATION_FAILED'),
       String(value.message ?? `平台命令失败（${response.status}）`)
     );
   }
-  return (isRecord(payload) && 'data' in payload ? payload.data : payload) as TResponse;
+  const value: unknown = isRecord(payload) && 'data' in payload ? payload.data : payload;
+  const accepted = accept(value);
+  pendingPlatformCommandKeys.delete(fingerprint);
+  return accepted;
 };
 
 const key = () => `f1c-${crypto.randomUUID?.() ?? Date.now()}`;
@@ -323,13 +344,15 @@ function isStringArray(value: unknown): value is string[] {
 
 function isRolePolicy(
   value: unknown,
-  roleId: string
+  roleId: string,
+  previousVersion: number
 ): value is components['schemas']['RolePolicy'] {
   return (
     isRecord(value) &&
     value.roleId === roleId &&
     Array.isArray(value.statements) &&
-    isPositiveVersion(value.version)
+    isPositiveVersion(value.version) &&
+    value.version > previousVersion
   );
 }
 
@@ -395,6 +418,111 @@ function isImpersonationSession(
     typeof value.reason === 'string' &&
     typeof value.expiresAt === 'string' &&
     Number.isFinite(Date.parse(value.expiresAt))
+  );
+}
+
+type AccessPolicyBaselineResponse = {
+  tenantId: string;
+  tenantVersion: number;
+  role: {
+    id: string;
+    name: string;
+    version: number;
+    memberCount: number;
+    statements: components['schemas']['PolicyStatement'][];
+  };
+  subjects: Array<{ id: string; name: string }>;
+};
+
+function isVersionedCommandReceipt(value: unknown): value is {
+  id: string;
+  status: string;
+  version: number;
+} {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    value.id.length > 0 &&
+    typeof value.status === 'string' &&
+    value.status.length > 0 &&
+    isPositiveVersion(value.version)
+  );
+}
+
+function isRuntimeComparison(
+  value: unknown
+): value is { serverVersion: string; differences: RuntimeDifference[] } {
+  return (
+    isRecord(value) &&
+    typeof value.serverVersion === 'string' &&
+    Array.isArray(value.differences) &&
+    value.differences.every(
+      (item) =>
+        isRecord(item) &&
+        typeof item.field === 'string' &&
+        typeof item.local === 'string' &&
+        typeof item.server === 'string'
+    )
+  );
+}
+
+function isRuntimeRefresh(value: unknown): value is { version: string; refreshedAt: string } {
+  return (
+    isRecord(value) &&
+    typeof value.version === 'string' &&
+    value.version.length > 0 &&
+    typeof value.refreshedAt === 'string' &&
+    value.refreshedAt.length > 0
+  );
+}
+
+function isRuntimeRetryReceipt(
+  value: unknown
+): value is { items: Array<{ id: string; status: 'SUCCEEDED' }> } {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.items) &&
+    value.items.every(
+      (item) => isRecord(item) && typeof item.id === 'string' && item.status === 'SUCCEEDED'
+    )
+  );
+}
+
+function isOperationReceipt(
+  value: unknown
+): value is { operationId: string; status: 'SUCCEEDED'; message: string } {
+  return (
+    isRecord(value) &&
+    typeof value.operationId === 'string' &&
+    value.operationId.length > 0 &&
+    value.status === 'SUCCEEDED' &&
+    typeof value.message === 'string'
+  );
+}
+
+function isAccessPolicyBaseline(
+  value: unknown,
+  tenantId: string,
+  roleId: string,
+  userId: string
+): value is AccessPolicyBaselineResponse {
+  return (
+    isRecord(value) &&
+    value.tenantId === tenantId &&
+    isPositiveVersion(value.tenantVersion) &&
+    isRecord(value.role) &&
+    value.role.id === roleId &&
+    typeof value.role.name === 'string' &&
+    isPositiveVersion(value.role.version) &&
+    Number.isSafeInteger(value.role.memberCount) &&
+    Number(value.role.memberCount) >= 0 &&
+    Array.isArray(value.role.statements) &&
+    Array.isArray(value.subjects) &&
+    value.subjects.every(
+      (subject) =>
+        isRecord(subject) && typeof subject.id === 'string' && typeof subject.name === 'string'
+    ) &&
+    value.subjects.some((subject) => subject.id === userId)
   );
 }
 
@@ -466,7 +594,7 @@ export function createPlatformApi(
       });
       throwResponseError(response);
       const data: unknown = ensure(response.data, response.error).data;
-      if (!isRolePolicy(data, roleId)) throw new Error('ROLE_POLICY_RESPONSE_MISMATCH');
+      if (!isRolePolicy(data, roleId, version)) throw new Error('ROLE_POLICY_RESPONSE_MISMATCH');
       return data;
     },
     async previewEffectivePermissions(
@@ -626,10 +754,14 @@ export const platformPort = {
     });
   },
   async createPlan(name: string) {
-    await platformCommand('/api/v1/platform/plans', { name });
+    await platformCommand('/api/v1/platform/plans', { name }, isVersionedCommandReceipt);
   },
   async publishAnnouncement(title: string) {
-    await platformCommand('/api/v1/platform/announcements', { title, audience: 'ALL_TENANTS' });
+    await platformCommand(
+      '/api/v1/platform/announcements',
+      { title, audience: 'ALL_TENANTS' },
+      isVersionedCommandReceipt
+    );
   },
   async reloadAccessPolicyBaseline(
     tenantId: string,
@@ -638,52 +770,32 @@ export const platformPort = {
     roleVersion: number,
     userId: string
   ) {
-    const value = await platformCommand<{
-      tenantId: string;
-      tenantVersion: number;
-      role: {
-        id: string;
-        name: string;
-        version: number;
-        memberCount: number;
-        statements: components['schemas']['PolicyStatement'][];
-      };
-      subjects: Array<{ id: string; name: string }>;
-    }>('/api/v1/platform/access-policy-baselines:reload', {
-      tenantId,
-      tenantVersion,
-      roleId,
-      roleVersion,
-      userId,
-    });
-    if (
-      value.tenantId !== tenantId ||
-      !isPositiveVersion(value.tenantVersion) ||
-      value.role.id !== roleId ||
-      !isPositiveVersion(value.role.version) ||
-      !Array.isArray(value.role.statements) ||
-      !value.subjects.some((subject) => subject.id === userId)
-    ) {
-      throw new Error('ACCESS_POLICY_BASELINE_RESPONSE_MISMATCH');
-    }
-    return value;
+    return platformCommand<AccessPolicyBaselineResponse>(
+      '/api/v1/platform/access-policy-baselines:reload',
+      { tenantId, tenantVersion, roleId, roleVersion, userId },
+      (value): value is AccessPolicyBaselineResponse =>
+        isAccessPolicyBaseline(value, tenantId, roleId, userId)
+    );
   },
   compareRuntime(localVersion: string) {
     return platformCommand<{ serverVersion: string; differences: RuntimeDifference[] }>(
       '/api/v1/platform/runtime-snapshots:compare',
-      { localVersion }
+      { localVersion },
+      isRuntimeComparison
     );
   },
   refreshRuntime(serverVersion = 'runtime-v13') {
     return platformCommand<{ version: string; refreshedAt: string }>(
       '/api/v1/platform/runtime-snapshots:refresh',
-      { serverVersion }
+      { serverVersion },
+      isRuntimeRefresh
     );
   },
   retryRuntimeJobs(itemIds: string[]) {
     return platformCommand<{ items: Array<{ id: string; status: 'SUCCEEDED' }> }>(
       '/api/v1/platform/runtime-jobs:retry-failed',
-      { itemIds }
+      { itemIds },
+      isRuntimeRetryReceipt
     );
   },
   executeOperation(page: '系统健康' | '任务与队列' | '审计日志' | '版本发布') {
@@ -695,7 +807,8 @@ export const platformPort = {
     }[page];
     return platformCommand<{ operationId: string; status: 'SUCCEEDED'; message: string }>(
       `/api/v1/platform/operations/${code}`,
-      { page }
+      { page },
+      isOperationReceipt
     );
   },
   async checkImpersonation(sessionId: string, permissionsVersion: number) {

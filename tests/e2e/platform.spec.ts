@@ -184,3 +184,235 @@ test('平台全局搜索实时跟随已发布公告和退出后的代入审计�
     })
   ).toBeVisible();
 });
+
+test('平台命令响应体丢失时复用原幂等键并从同一逻辑操作恢复', async ({ page }) => {
+  const keys: Array<string | undefined> = [];
+  let attempt = 0;
+  await page.route('**/api/v1/platform/operations/health', async (route) => {
+    keys.push(route.request().headers()['idempotency-key']);
+    attempt += 1;
+    if (attempt === 1) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '{"data":',
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: { operationId: 'OPS-HEALTH-RECOVERED', status: 'SUCCEEDED', message: '恢复完成' },
+      }),
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: '系统健康' }).click();
+
+  await page.getByRole('button', { name: '运行健康检查' }).click();
+  await expect(page.getByRole('alert')).toContainText('响应不完整');
+  await page.getByRole('button', { name: '运行健康检查' }).click();
+
+  await expect(page.getByRole('status')).toContainText('OPS-HEALTH-RECOVERED');
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]);
+});
+
+test('策略保存后清理 410 保留回执且重开采用服务端规范化 statements', async ({ page }) => {
+  const meta = { requestId: 'req-platform-fault', asOf: '2026-07-23T00:00:00.000Z' };
+  let roleSaves = 0;
+  let tenantSaves = 0;
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    const body = request.postDataJSON() as Record<string, unknown>;
+    if (path.includes('/effective-permissions:preview')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            userId: '01JUSER000000000000000001',
+            effectiveStatements: [],
+            differences: [],
+          },
+          meta,
+        }),
+      });
+      return;
+    }
+    if (path.endsWith('/iam/field-policy:preview')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            subjectId: '01JUSER000000000000000001',
+            effectivePolicies: body.proposedPolicies,
+            differences: [],
+          },
+          meta,
+        }),
+      });
+      return;
+    }
+    if (path.endsWith('/iam/permission-simulations') && request.method() === 'POST') {
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            id: '01JSIMULATION0000000000001',
+            userId: '01JUSER000000000000000001',
+            actorId: '01JADMIN000000000000000001',
+            expiresAt: '2099-12-31T23:59:59.000Z',
+          },
+          meta,
+        }),
+      });
+      return;
+    }
+    if (path.endsWith(':verify')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ data: { allowed: true, trace: ['role'] }, meta }),
+      });
+      return;
+    }
+    if (path.includes('/iam/permission-simulations/') && request.method() === 'DELETE') {
+      await route.fulfill({
+        status: 410,
+        contentType: 'application/json',
+        body: JSON.stringify({ code: 'SIMULATION_EXPIRED', message: 'already gone' }),
+      });
+      return;
+    }
+    if (path.includes('/iam/roles/') && path.endsWith('/policy')) {
+      roleSaves += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            roleId: '01JROLE000000000000000001',
+            version: 19,
+            statements: [
+              { effect: 'ALLOW', resource: 'waybill', actions: ['read'], dataScope: 'TENANT' },
+            ],
+          },
+          meta,
+        }),
+      });
+      return;
+    }
+    if (path.endsWith('/entitlements')) {
+      tenantSaves += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            tenantId: '01JTENANT0000000000000001',
+            modules: body.modules,
+            version: 2,
+          },
+          meta,
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 'UNHANDLED_TEST_ROUTE', message: path }),
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: '查看租户 上海智立科技有限公司' }).click();
+  await page.getByRole('button', { name: '配置授权与策略' }).click();
+  await page.getByRole('button', { name: '继续：角色策略' }).click();
+  await page.getByRole('button', { name: '预览最终权限' }).click();
+  await page.getByRole('button', { name: '确认并配置字段' }).click();
+  await page.getByRole('button', { name: '以用户视角模拟' }).click();
+  await page.getByRole('button', { name: '结束模拟并验证' }).click();
+
+  await expect(page.getByRole('dialog', { name: '角色策略已验证并保存' })).toBeVisible();
+  expect(roleSaves).toBe(1);
+  expect(tenantSaves).toBe(1);
+  await page.getByRole('button', { name: '完成' }).click();
+  await page.getByRole('button', { name: '查看租户 上海智立科技有限公司' }).click();
+  await page.getByRole('button', { name: '配置授权与策略' }).click();
+  await page.getByRole('button', { name: '继续：角色策略' }).click();
+  await expect(page.getByRole('checkbox', { name: '运单管理编辑' })).not.toBeChecked();
+});
+
+test('代入丢响应复用同意图 key，明确 422 后跨租户使用新 key', async ({ page }) => {
+  const starts: Array<{ key?: string; tenantId?: string }> = [];
+  let attempt = 0;
+  await page.route('**/api/v1/platform/impersonations**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('/impersonations') && request.method() === 'POST') {
+      const body = request.postDataJSON() as { tenantId?: string; reason?: string };
+      starts.push({ key: request.headers()['idempotency-key'], tenantId: body.tenantId });
+      attempt += 1;
+      if (attempt === 1) {
+        await route.abort('failed');
+        return;
+      }
+      if (attempt === 2) {
+        await route.fulfill({
+          status: 422,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 'INVALID_REASON', message: 'reason rejected' }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            id: '01JIMPERSONATE000000000002',
+            tenantId: body.tenantId,
+            actorId: '01JADMIN000000000000000001',
+            reason: body.reason,
+            expiresAt: '2099-12-31T23:59:59.000Z',
+          },
+          meta: { requestId: 'req-impersonation', asOf: '2026-07-23T00:00:00.000Z' },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          sessionId: '01JIMPERSONATE000000000002',
+          status: 'ACTIVE',
+          permissionsVersion: 19,
+          eventId: 'ACL-19',
+        },
+      }),
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: '代入 上海智立科技有限公司' }).click();
+  const submit = page.getByRole('button', { name: '以管理员身份进入' });
+  await submit.click();
+  await expect(submit).toBeEnabled();
+  await submit.click();
+  await expect(submit).toBeEnabled();
+  await page.getByRole('button', { name: '取消' }).click();
+  await page.getByRole('button', { name: '代入 深圳海运通物流有限公司' }).click();
+  await page.getByRole('button', { name: '以管理员身份进入' }).click();
+
+  await expect(page.locator('.platform-session')).toContainText('深圳海运通物流有限公司');
+  expect(starts).toHaveLength(3);
+  expect(starts[1]?.key).toBe(starts[0]?.key);
+  expect(starts[2]?.key).not.toBe(starts[1]?.key);
+  expect(starts[2]?.tenantId).toBe('01JTENANT0000000000000002');
+});

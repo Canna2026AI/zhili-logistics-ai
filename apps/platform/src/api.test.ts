@@ -96,6 +96,26 @@ describe('platform OpenAPI adapter', () => {
     ).rejects.toThrow('PERMISSION_DECISION_RESPONSE_MISMATCH');
   });
 
+  it('fails closed when a role policy PUT does not advance the authoritative version', async () => {
+    const createPlatformApi = (apiModule as unknown as { createPlatformApi?: PlatformApiFactory })
+      .createPlatformApi!;
+    const roleId = '01JROLE000000000000000001';
+    const api = createPlatformApi(
+      {
+        PUT: vi.fn().mockResolvedValue({
+          data: { data: { roleId, statements: [], version: 18 } },
+        }),
+        POST: vi.fn(),
+        DELETE: vi.fn(),
+      },
+      () => 'idem-version'
+    );
+
+    await expect(
+      api.updateRolePolicy(roleId, 18, { statements: [], reason: '季度权限复核' })
+    ).rejects.toThrow('ROLE_POLICY_RESPONSE_MISMATCH');
+  });
+
   it('reuses an app-local command idempotency key after a lost response and rotates it after success', async () => {
     window.history.replaceState({}, '', '/');
     const fetchMock = vi
@@ -135,6 +155,50 @@ describe('platform OpenAPI adapter', () => {
     expect(idempotencyKeys[0]).toBeTruthy();
     expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
     expect(idempotencyKeys[2]).not.toBe(idempotencyKeys[1]);
+    vi.unstubAllGlobals();
+  });
+
+  it('keeps the same app-local command key when JSON or required response fields are lost', async () => {
+    window.history.replaceState({}, '', '/');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('{"data":', {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: {} }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: { operationId: 'OPS-RECOVERED', status: 'SUCCEEDED', message: 'done' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiModule.platformPort.executeOperation('系统健康')).rejects.toMatchObject({
+      code: 'PLATFORM_RESPONSE_INCOMPLETE',
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).rejects.toMatchObject({
+      code: 'PLATFORM_RESPONSE_INCOMPLETE',
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-RECOVERED',
+    });
+
+    const idempotencyKeys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get('Idempotency-Key')
+    );
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[2]).toBe(idempotencyKeys[0]);
     vi.unstubAllGlobals();
   });
 

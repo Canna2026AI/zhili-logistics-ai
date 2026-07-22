@@ -1123,12 +1123,18 @@ export function App() {
   );
   const [impersonationBusy, setImpersonationBusy] = useState(false);
   const impersonationPendingRef = useRef(false);
-  const impersonationKeyRef = useRef<string | undefined>(undefined);
+  const impersonationIntentRef = useRef<
+    { fingerprint: string; idempotencyKey: string } | undefined
+  >(undefined);
   const sessionRef = useRef(session);
   const accessSaveProgress = useRef<
     | {
         key: string;
-        role?: { roleId: string; version: number };
+        role?: {
+          roleId: string;
+          version: number;
+          statements: AccessPolicyDraft['statements'];
+        };
         tenantVersion?: number;
         roleKey: string;
         tenantKey: string;
@@ -1337,11 +1343,15 @@ export function App() {
     setImpersonationBusy(true);
     const target = impersonate;
     const why = reason.trim();
-    impersonationKeyRef.current ??= interactionKey();
+    const fingerprint = JSON.stringify({ tenantId: target.id, reason: why, durationMinutes: 60 });
+    if (impersonationIntentRef.current?.fingerprint !== fingerprint) {
+      impersonationIntentRef.current = { fingerprint, idempotencyKey: interactionKey() };
+    }
+    const intent = impersonationIntentRef.current;
     let created: Awaited<ReturnType<typeof platformPort.startImpersonation>> | undefined;
     try {
-      created = await platformPort.startImpersonation(target.id, why, impersonationKeyRef.current);
-      impersonationKeyRef.current = undefined;
+      created = await platformPort.startImpersonation(target.id, why, intent.idempotencyKey);
+      if (impersonationIntentRef.current === intent) impersonationIntentRef.current = undefined;
       const checked = await platformPort.checkImpersonation(created.id, 0);
       if (checked.status !== 'ACTIVE') {
         await platformPort.endImpersonation().catch(() => undefined);
@@ -1365,6 +1375,9 @@ export function App() {
       setImpersonate(null);
     } catch (error) {
       if (created) await platformPort.endImpersonation().catch(() => undefined);
+      if (!(error instanceof TypeError) && impersonationIntentRef.current === intent) {
+        impersonationIntentRef.current = undefined;
+      }
       setToast(error instanceof Error ? error.message : '代入会话创建失败');
     } finally {
       impersonationPendingRef.current = false;
@@ -1389,6 +1402,7 @@ export function App() {
         onCreate={() => setCreateOpen(true)}
         onDetail={setDetail}
         onImpersonate={(tenant) => {
+          impersonationIntentRef.current = undefined;
           setReason('协助排查订单同步问题');
           setImpersonate(tenant);
         }}
@@ -1761,7 +1775,7 @@ export function App() {
                       ? {
                           ...item,
                           version: role.version,
-                          statements: draft.statements.map((statement) => ({
+                          statements: role.statements.map((statement) => ({
                             ...statement,
                             actions: [...statement.actions],
                           })),
@@ -1838,13 +1852,21 @@ export function App() {
         open={Boolean(impersonate)}
         title="代入租户"
         description={`将进入 ${impersonate?.name ?? ''}。所有操作都会审计，默认限时 60 分钟。`}
-        onOpenChange={(open) => !open && !impersonationBusy && setImpersonate(null)}
+        onOpenChange={(open) => {
+          if (!open && !impersonationBusy) {
+            impersonationIntentRef.current = undefined;
+            setImpersonate(null);
+          }
+        }}
         footer={
           <>
             <Button
               variant="secondary"
               disabled={impersonationBusy}
-              onClick={() => setImpersonate(null)}
+              onClick={() => {
+                impersonationIntentRef.current = undefined;
+                setImpersonate(null);
+              }}
             >
               取消
             </Button>
