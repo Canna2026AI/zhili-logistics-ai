@@ -3,16 +3,22 @@ import fastifyHelmet from '@fastify/helmet';
 import type { DynamicModule, Type } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
+import type { IncomingMessage } from 'node:http';
 import { pathToFileURL } from 'node:url';
 import { loadEnv } from '@zhili/config';
 import { createLogger } from '@zhili/observability';
 import { AppModule } from './app.module';
+import { rewriteColonActionUrl } from './platform/action-route';
 
 export const API_BODY_LIMIT_BYTES = 1024 * 1024;
 export const API_GLOBAL_PREFIX = '/api/v1';
 
 export function createApiFastifyAdapter(): FastifyAdapter {
-  return new FastifyAdapter({ bodyLimit: API_BODY_LIMIT_BYTES, logger: false });
+  return new FastifyAdapter({
+    bodyLimit: API_BODY_LIMIT_BYTES,
+    logger: false,
+    rewriteUrl: (request: IncomingMessage) => rewriteColonActionUrl(request.url ?? '/'),
+  });
 }
 
 export async function configureApiApplication(

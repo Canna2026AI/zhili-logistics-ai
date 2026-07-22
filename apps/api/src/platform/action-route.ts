@@ -1,35 +1,36 @@
-import { NotFoundException } from '@nestjs/common';
+export const INTERNAL_ACTION_ROUTE_SEGMENT = '__zhili_action__';
 
-export interface ParsedResourceAction<Action extends string> {
-  readonly resourceId: string;
-  readonly action: Action;
+const ACTION_NAME = /^[A-Za-z][A-Za-z0-9-]*$/;
+
+export function internalActionPath(basePath: string, action: string): string {
+  const base = basePath.replace(/^\/+|\/+$/g, '');
+  if (
+    base === '' ||
+    base.split('/').includes(INTERNAL_ACTION_ROUTE_SEGMENT) ||
+    !ACTION_NAME.test(action)
+  ) {
+    throw new Error('Invalid internal action route');
+  }
+  return `${base}/${INTERNAL_ACTION_ROUTE_SEGMENT}/${action}`;
 }
 
-export function parseResourceActionSegment<const Action extends string>(
-  segment: string,
-  allowedActions: readonly Action[]
-): ParsedResourceAction<Action> {
-  const separator = segment.lastIndexOf(':');
-  const resourceId = separator > 0 ? segment.slice(0, separator) : '';
-  const action = separator > 0 ? segment.slice(separator + 1) : '';
+export function rewriteColonActionUrl(url: string): string {
+  const queryStart = url.indexOf('?');
+  const path = queryStart === -1 ? url : url.slice(0, queryStart);
+  const query = queryStart === -1 ? '' : url.slice(queryStart);
+  const segments = path.split('/');
 
-  if (
-    resourceId === '' ||
-    resourceId.includes(':') ||
-    action === '' ||
-    !allowedActions.some((allowed) => allowed === action)
-  ) {
-    throw new NotFoundException();
+  if (segments.includes(INTERNAL_ACTION_ROUTE_SEGMENT)) {
+    return `/__invalid_internal_action_route__${query}`;
   }
 
-  return { resourceId, action: action as Action };
-}
+  const rewritten = segments.flatMap((segment) => {
+    const separator = segment.lastIndexOf(':');
+    if (separator <= 0 || separator === segment.length - 1) return [segment];
+    const base = segment.slice(0, separator);
+    const action = segment.slice(separator + 1);
+    return ACTION_NAME.test(action) ? [base, INTERNAL_ACTION_ROUTE_SEGMENT, action] : [segment];
+  });
 
-export function selectRouteVariant<const Variant extends string>(
-  segment: string,
-  allowedVariants: readonly Variant[]
-): Variant {
-  const variant = allowedVariants.find((allowed) => allowed === segment);
-  if (variant === undefined) throw new NotFoundException();
-  return variant;
+  return `${rewritten.join('/')}${query}`;
 }

@@ -4,9 +4,9 @@ import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 import { API_GLOBAL_PREFIX, createApiFastifyAdapter } from '../src/main';
-import { parseResourceActionSegment, selectRouteVariant } from '../src/platform/action-route';
+import { internalActionPath, rewriteColonActionUrl } from '../src/platform/action-route';
 import {
-  ContractOperations,
+  ContractOperation,
   assertOpenApiCoverage,
   collectControllerOperations,
 } from '../src/platform/contract-operation';
@@ -17,29 +17,35 @@ import { parse } from 'yaml';
 
 @Controller('warehouse/receipts')
 class ReceiptActionController {
-  @Post(':receiptAction')
-  @ContractOperations([
-    { operationId: 'confirmReceipt', contractPath: ':receiptId:confirm' },
-    { operationId: 'undoReceipt', contractPath: ':receiptId:undo' },
-  ])
+  @Post(internalActionPath(':receiptId', 'confirm'))
+  @ContractOperation('confirmReceipt', ':receiptId:confirm')
   @IdempotentCommand()
-  dispatch(@Param('receiptAction') segment: string): object {
-    return parseResourceActionSegment(segment, ['confirm', 'undo'] as const);
+  confirm(@Param('receiptId') receiptId: string): object {
+    return { receiptId, action: 'confirm' };
+  }
+
+  @Post(internalActionPath(':receiptId', 'undo'))
+  @ContractOperation('undoReceipt', ':receiptId:undo')
+  @IdempotentCommand()
+  undo(@Param('receiptId') receiptId: string): object {
+    return { receiptId, action: 'undo' };
   }
 }
 
 @Controller('last-mile/delivery-tasks/:deliveryTaskId')
 class PodActionController {
-  @Post(':podVariant')
-  @ContractOperations([
-    { operationId: 'captureProofOfDelivery', contractPath: 'proof-of-delivery' },
-    { operationId: 'amendProofOfDelivery', contractPath: 'proof-of-delivery:amend' },
-  ])
+  @Post('proof-of-delivery')
+  @ContractOperation('captureProofOfDelivery')
   @IdempotentCommand()
-  dispatch(@Param('podVariant') segment: string): object {
-    return {
-      variant: selectRouteVariant(segment, ['proof-of-delivery', 'proof-of-delivery:amend']),
-    };
+  capture(): object {
+    return { action: 'capture' };
+  }
+
+  @Post(internalActionPath('proof-of-delivery', 'amend'))
+  @ContractOperation('amendProofOfDelivery', 'proof-of-delivery:amend')
+  @IdempotentCommand()
+  amend(): object {
+    return { action: 'amend' };
   }
 }
 
@@ -61,52 +67,59 @@ async function createApplication(): Promise<NestFastifyApplication> {
   return app;
 }
 
-describe('Fastify action-route dispatcher', () => {
-  it('boots one runtime route and dispatches both colon-suffixed resource actions', async () => {
+describe('Fastify colon-action URL rewriting', () => {
+  it.each([
+    ['/api/v1/orders/order-1:submit', '/api/v1/orders/order-1/__zhili_action__/submit'],
+    [
+      '/api/v1/tasks/task-1/proof-of-delivery:amend?locale=zh-CN',
+      '/api/v1/tasks/task-1/proof-of-delivery/__zhili_action__/amend?locale=zh-CN',
+    ],
+    ['/api/v1/auth/sessions:refresh', '/api/v1/auth/sessions/__zhili_action__/refresh'],
+    ['/api/v1/waybills/order-1', '/api/v1/waybills/order-1'],
+  ])('rewrites only a path action and preserves the query: %s', (external, internal) => {
+    expect(rewriteColonActionUrl(external)).toBe(internal);
+  });
+
+  it('boots distinct handlers and serves every external colon-action URL', async () => {
     const app = await createApplication();
     const fastify = app.getHttpAdapter().getInstance();
+    const resourceId = '01J0000000000000000000000A';
 
     const confirm = await fastify.inject({
       method: 'POST',
-      url: `${API_GLOBAL_PREFIX}/warehouse/receipts/01J0000000000000000000000A:confirm`,
+      url: `${API_GLOBAL_PREFIX}/warehouse/receipts/${resourceId}:confirm`,
     });
     const undo = await fastify.inject({
       method: 'POST',
-      url: `${API_GLOBAL_PREFIX}/warehouse/receipts/01J0000000000000000000000A:undo`,
+      url: `${API_GLOBAL_PREFIX}/warehouse/receipts/${resourceId}:undo`,
     });
-    const unknown = await fastify.inject({
+    const capture = await fastify.inject({
       method: 'POST',
-      url: `${API_GLOBAL_PREFIX}/warehouse/receipts/01J0000000000000000000000A:delete`,
+      url: `${API_GLOBAL_PREFIX}/last-mile/delivery-tasks/${resourceId}/proof-of-delivery`,
+    });
+    const amend = await fastify.inject({
+      method: 'POST',
+      url: `${API_GLOBAL_PREFIX}/last-mile/delivery-tasks/${resourceId}/proof-of-delivery:amend`,
     });
 
-    expect(confirm.statusCode).toBe(201);
-    expect(confirm.json()).toEqual({
-      resourceId: '01J0000000000000000000000A',
-      action: 'confirm',
-    });
-    expect(undo.statusCode).toBe(201);
-    expect(undo.json()).toEqual({
-      resourceId: '01J0000000000000000000000A',
-      action: 'undo',
-    });
-    expect(unknown.statusCode).toBe(404);
+    expect(confirm.json()).toEqual({ receiptId: resourceId, action: 'confirm' });
+    expect(undo.json()).toEqual({ receiptId: resourceId, action: 'undo' });
+    expect(capture.json()).toEqual({ action: 'capture' });
+    expect(amend.json()).toEqual({ action: 'amend' });
   });
 
-  it('dispatches a static segment and its colon action without duplicate Fastify routes', async () => {
+  it('keeps the internal routing namespace unreachable from a direct client request', async () => {
     const app = await createApplication();
     const fastify = app.getHttpAdapter().getInstance();
-    const base = `${API_GLOBAL_PREFIX}/last-mile/delivery-tasks/01J0000000000000000000000A`;
+    const direct = await fastify.inject({
+      method: 'POST',
+      url: `${API_GLOBAL_PREFIX}/warehouse/receipts/01J0000000000000000000000A/__zhili_action__/confirm`,
+    });
 
-    const capture = await fastify.inject({ method: 'POST', url: `${base}/proof-of-delivery` });
-    const amend = await fastify.inject({ method: 'POST', url: `${base}/proof-of-delivery:amend` });
-
-    expect(capture.statusCode).toBe(201);
-    expect(capture.json()).toEqual({ variant: 'proof-of-delivery' });
-    expect(amend.statusCode).toBe(201);
-    expect(amend.json()).toEqual({ variant: 'proof-of-delivery:amend' });
+    expect(direct.statusCode).toBe(404);
   });
 
-  it('reports every external action path to the OpenAPI coverage guard', async () => {
+  it('reports external paths, operation IDs and idempotency to the OpenAPI guard', async () => {
     const operations = collectControllerOperations(
       [ReceiptActionController, PodActionController],
       API_GLOBAL_PREFIX

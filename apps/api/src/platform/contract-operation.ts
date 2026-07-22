@@ -17,8 +17,14 @@ export interface ContractOperationMapping {
   readonly contractPath: string;
 }
 
-export function ContractOperation(operationId: string): CustomDecorator<string> {
-  return SetMetadata(CONTRACT_OPERATION_METADATA_KEY, operationId);
+export function ContractOperation(
+  operationId: string,
+  contractPath?: string
+): CustomDecorator<string> {
+  return SetMetadata(
+    CONTRACT_OPERATION_METADATA_KEY,
+    contractPath === undefined ? operationId : [{ operationId, contractPath }]
+  );
 }
 
 export function ContractOperations(
