@@ -7,6 +7,7 @@ import {
   quoteInputFixture,
   type QuoteExplanationView,
   type QuotePort,
+  type QuoteWorkflowRequest,
 } from '../model/quote';
 import './quote-workbench.css';
 
@@ -20,23 +21,114 @@ export interface QuoteWorkbenchProps {
   onSubmitForecast?: () => void | Promise<void>;
 }
 
+interface QuoteFormState {
+  customerId: string;
+  orderType: 'STANDARD' | 'FBA';
+  currency: string;
+  origin: {
+    countryCode: string;
+    city: string;
+    line1: string;
+    postalCode: string;
+    contactName: string;
+    phone: string;
+  };
+  destination: {
+    countryCode: string;
+    state: string;
+    city: string;
+    line1: string;
+    postalCode: string;
+    contactName: string;
+    phone: string;
+  };
+  pieces: string;
+  weightKg: string;
+  lengthCm: string;
+  widthCm: string;
+  heightCm: string;
+  commodityDescription: string;
+  fbaShipmentId: string;
+  fbaBoxCount: string;
+  fbaFulfillmentCenter: string;
+}
+
+const initialForm: QuoteFormState = {
+  customerId: quoteInputFixture.request.customerId,
+  orderType: 'STANDARD',
+  currency: quoteInputFixture.request.currency,
+  origin: {
+    countryCode: quoteInputFixture.request.origin.countryCode,
+    city: quoteInputFixture.request.origin.city,
+    line1: quoteInputFixture.request.origin.line1,
+    postalCode: quoteInputFixture.request.origin.postalCode,
+    contactName: quoteInputFixture.request.origin.contactName ?? '',
+    phone: quoteInputFixture.request.origin.phone ?? '',
+  },
+  destination: {
+    countryCode: quoteInputFixture.request.destination.countryCode,
+    state: quoteInputFixture.request.destination.state ?? '',
+    city: quoteInputFixture.request.destination.city,
+    line1: quoteInputFixture.request.destination.line1,
+    postalCode: quoteInputFixture.request.destination.postalCode,
+    contactName: quoteInputFixture.request.destination.contactName ?? '',
+    phone: quoteInputFixture.request.destination.phone ?? '',
+  },
+  pieces: '1',
+  weightKg: quoteInputFixture.request.packages[0]?.weightKg ?? '0',
+  lengthCm: quoteInputFixture.request.packages[0]?.lengthCm ?? '0',
+  widthCm: quoteInputFixture.request.packages[0]?.widthCm ?? '0',
+  heightCm: quoteInputFixture.request.packages[0]?.heightCm ?? '0',
+  commodityDescription: quoteInputFixture.request.packages[0]?.commodityDescription ?? '',
+  fbaShipmentId: 'FBA15LAX20260722',
+  fbaBoxCount: '5',
+  fbaFulfillmentCenter: 'LAX9',
+};
+
 export function QuoteWorkbench({
   state = 'normal',
   port = memoryQuotePort,
   readOnly = false,
   onSubmitForecast,
 }: QuoteWorkbenchProps) {
-  const [weightKg, setWeightKg] = useState(quoteInputFixture.request.packages[0]?.weightKg ?? '0');
-  const request = useMemo(
-    () => ({
-      ...quoteInputFixture.request,
-      packages: quoteInputFixture.request.packages.map((item, index) =>
-        index === 0 ? { ...item, weightKg } : item
-      ),
-    }),
-    [weightKg]
-  );
+  const [form, setForm] = useState<QuoteFormState>(initialForm);
+  const request = useMemo<QuoteWorkflowRequest>(() => {
+    const pieceCount = Math.max(1, Math.floor(Number(form.pieces) || 1));
+    return {
+      quote: {
+        customerId: form.customerId,
+        origin: form.origin,
+        destination: form.destination,
+        packages: Array.from({ length: pieceCount }, (_, index) => ({
+          packageRef: `PKG-${String(index + 1).padStart(2, '0')}`,
+          weightKg: form.weightKg,
+          lengthCm: form.lengthCm,
+          widthCm: form.widthCm,
+          heightCm: form.heightCm,
+          commodityDescription:
+            form.orderType === 'FBA'
+              ? `Amazon FBA ${form.commodityDescription} / ${form.fbaShipmentId} / ${form.fbaFulfillmentCenter}`
+              : form.commodityDescription,
+        })),
+        quoteDate: quoteInputFixture.request.quoteDate,
+        currency: form.currency,
+      },
+      orderContext: {
+        orderType: form.orderType,
+        ...(form.orderType === 'FBA'
+          ? {
+              fba: {
+                shipmentId: form.fbaShipmentId,
+                boxCount: Number(form.fbaBoxCount) || 0,
+                fulfillmentCenter: form.fbaFulfillmentCenter,
+              },
+            }
+          : {}),
+      },
+    };
+  }, [form]);
   const [quote, setQuote] = useState(() => calculateQuote(quoteInputFixture));
+  const [quoteDirty, setQuoteDirty] = useState(false);
   const [selectedId, setSelectedId] = useState('dhl-express');
   const [explanation, setExplanation] = useState<QuoteExplanationView | null>(null);
   const [pending, setPending] = useState<'quote' | 'explain' | 'accept' | 'save' | 'submit' | null>(
@@ -44,8 +136,15 @@ export function QuoteWorkbench({
   );
   const [actionError, setActionError] = useState('');
   const [actionStatus, setActionStatus] = useState('');
-  const [commodityCount, setCommodityCount] = useState(1);
+  const commodityCount = 1;
   const selected = quote.options.find((option) => option.id === selectedId) ?? quote.options[0]!;
+
+  const updateForm = (update: (current: QuoteFormState) => QuoteFormState) => {
+    setForm(update);
+    setQuoteDirty(true);
+    setExplanation(null);
+    setActionStatus('输入已更改；刷新报价后可解释或接受新快照。');
+  };
 
   const run = async <T,>(kind: NonNullable<typeof pending>, operation: () => Promise<T>) => {
     setPending(kind);
@@ -69,6 +168,8 @@ export function QuoteWorkbench({
     const next = await run('quote', () => port.create(request));
     if (next) {
       setQuote(next);
+      setQuoteDirty(false);
+      setExplanation(null);
       setSelectedId(
         next.options.find((option) => option.available)?.id ?? next.options[0]?.id ?? ''
       );
@@ -80,8 +181,23 @@ export function QuoteWorkbench({
       setExplanation(null);
       return;
     }
-    const next = await run('explain', () => port.explain(quote.id, selected.id));
-    if (next) setExplanation(next);
+    const snapshot = {
+      quoteId: quote.id,
+      optionId: selected.id,
+      version: quote.version,
+      localExplanation: {
+        rateCardVersion: selected.rateCardVersion,
+        steps: selected.explanationSteps,
+      },
+    };
+    const next = await run('explain', () => port.explain(snapshot));
+    if (
+      next &&
+      next.quoteId === quote.id &&
+      next.optionId === selected.id &&
+      next.version === quote.version
+    )
+      setExplanation(next);
   };
 
   if (state === 'loading')
@@ -119,77 +235,226 @@ export function QuoteWorkbench({
             <h1 id="quote-title">新建运单与报价说明</h1>
             <p>标准 / FBA 下单 · 地址、包裹、品名和限制校验</p>
           </div>
-          <StatusTag tone="info">草稿自动保存</StatusTag>
+          <StatusTag tone="info">草稿待保存</StatusTag>
         </header>
         <fieldset className="quote-section quote-grid quote-grid--four">
           <legend>客户与渠道</legend>
           <label>
             客户
-            <select defaultValue="xinyuan">
-              <option value="xinyuan">深圳鑫源贸易有限公司</option>
+            <select
+              value={form.customerId}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({ ...current, customerId: event.target.value }))
+              }
+            >
+              <option value="customer-xinyuan">深圳鑫源贸易有限公司</option>
             </select>
           </label>
           <label>
             始发地 → 目的地
-            <select defaultValue="route">
+            <select value="route" disabled title="待集成：多线路地址模板端口尚未接入">
               <option value="route">CN-SZX → US-LAX</option>
             </select>
           </label>
           <label>
             订单类型
-            <select defaultValue="standard">
-              <option value="standard">标准运单</option>
-              <option value="fba">FBA 入仓</option>
+            <select
+              value={form.orderType}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  orderType: event.target.value as QuoteFormState['orderType'],
+                }))
+              }
+            >
+              <option value="STANDARD">标准运单</option>
+              <option value="FBA">FBA 入仓</option>
             </select>
           </label>
           <label>
             币种
-            <select defaultValue="CNY">
+            <select
+              value={form.currency}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({ ...current, currency: event.target.value }))
+              }
+            >
               <option>CNY</option>
             </select>
           </label>
         </fieldset>
+        {form.orderType === 'FBA' ? (
+          <fieldset className="quote-section quote-grid quote-grid--three">
+            <legend>Amazon FBA 关联</legend>
+            <label>
+              Amazon Shipment ID
+              <input
+                value={form.fbaShipmentId}
+                disabled={readOnly}
+                onChange={(event) =>
+                  updateForm((current) => ({ ...current, fbaShipmentId: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              FBA 箱数
+              <input
+                value={form.fbaBoxCount}
+                disabled={readOnly}
+                onChange={(event) =>
+                  updateForm((current) => ({ ...current, fbaBoxCount: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              目标仓
+              <input
+                value={form.fbaFulfillmentCenter}
+                disabled={readOnly}
+                onChange={(event) =>
+                  updateForm((current) => ({
+                    ...current,
+                    fbaFulfillmentCenter: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          </fieldset>
+        ) : null}
         <fieldset className="quote-section quote-grid quote-grid--three">
           <legend>收寄件信息</legend>
           <label>
-            发货人
-            <input defaultValue="深圳鑫源贸易有限公司" />
+            始发城市
+            <input
+              value={form.origin.city}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  origin: { ...current.origin, city: event.target.value },
+                }))
+              }
+            />
           </label>
           <label>
-            联系人
-            <input defaultValue="王经理" />
+            发货联系人
+            <input
+              value={form.origin.contactName}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  origin: { ...current.origin, contactName: event.target.value },
+                }))
+              }
+            />
           </label>
           <label>
-            电话
-            <input defaultValue="+86 755 1234 5678" />
+            发货电话
+            <input
+              value={form.origin.phone}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  origin: { ...current.origin, phone: event.target.value },
+                }))
+              }
+            />
           </label>
           <label className="quote-span-two">
             发货地址
-            <input defaultValue="广东省深圳市宝安区西乡街道建源路 2001 号" />
+            <input
+              value={form.origin.line1}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  origin: { ...current.origin, line1: event.target.value },
+                }))
+              }
+            />
           </label>
           <label>
-            国家/地区
-            <input defaultValue="中国" />
+            始发地邮编
+            <input
+              value={form.origin.postalCode}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  origin: { ...current.origin, postalCode: event.target.value },
+                }))
+              }
+            />
           </label>
           <label>
-            收货人
-            <input defaultValue="LAX RECEIVING WAREHOUSE" />
+            目的地城市
+            <input
+              value={form.destination.city}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  destination: { ...current.destination, city: event.target.value },
+                }))
+              }
+            />
           </label>
           <label>
-            联系人
-            <input defaultValue="John Smith" />
+            收货联系人
+            <input
+              value={form.destination.contactName}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  destination: { ...current.destination, contactName: event.target.value },
+                }))
+              }
+            />
           </label>
           <label>
-            电话
-            <input defaultValue="+1 213 555 0199" />
+            收货电话
+            <input
+              value={form.destination.phone}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  destination: { ...current.destination, phone: event.target.value },
+                }))
+              }
+            />
           </label>
           <label className="quote-span-two">
             收货地址
-            <input defaultValue="123 Harbor Ave, Los Angeles, CA 90001, USA" />
+            <input
+              value={form.destination.line1}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  destination: { ...current.destination, line1: event.target.value },
+                }))
+              }
+            />
           </label>
           <label>
-            国家/地区
-            <input defaultValue="美国" />
+            目的地邮编
+            <input
+              value={form.destination.postalCode}
+              disabled={readOnly}
+              onChange={(event) =>
+                updateForm((current) => ({
+                  ...current,
+                  destination: { ...current.destination, postalCode: event.target.value },
+                }))
+              }
+            />
           </label>
         </fieldset>
         <fieldset className="quote-section">
@@ -197,19 +462,53 @@ export function QuoteWorkbench({
           <div className="quote-package-row">
             <label>
               件数
-              <input defaultValue="1" />
+              <input
+                value={form.pieces}
+                disabled={readOnly}
+                onChange={(event) =>
+                  updateForm((current) => ({ ...current, pieces: event.target.value }))
+                }
+              />
             </label>
             <label>
               实重 (kg)
               <input
-                value={weightKg}
+                value={form.weightKg}
                 disabled={readOnly}
-                onChange={(event) => setWeightKg(event.target.value)}
+                onChange={(event) =>
+                  updateForm((current) => ({ ...current, weightKg: event.target.value }))
+                }
               />
             </label>
             <label>
-              体积 (cm)
-              <input defaultValue="100 × 80 × 60" />
+              长 (cm)
+              <input
+                value={form.lengthCm}
+                disabled={readOnly}
+                onChange={(event) =>
+                  updateForm((current) => ({ ...current, lengthCm: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              宽 (cm)
+              <input
+                value={form.widthCm}
+                disabled={readOnly}
+                onChange={(event) =>
+                  updateForm((current) => ({ ...current, widthCm: event.target.value }))
+                }
+              />
+            </label>
+            <label>
+              高 (cm)
+              <input
+                value={form.heightCm}
+                disabled={readOnly}
+                onChange={(event) =>
+                  updateForm((current) => ({ ...current, heightCm: event.target.value }))
+                }
+              />
             </label>
             <label>
               材积重 (kg)
@@ -225,60 +524,87 @@ export function QuoteWorkbench({
               <span>{index + 1}</span>
               <input
                 aria-label={`品名 ${index + 1}`}
-                defaultValue={index === 0 ? '电子产品及配件' : ''}
+                value={index === 0 ? form.commodityDescription : ''}
+                disabled={readOnly}
+                onChange={(event) => {
+                  if (index === 0)
+                    updateForm((current) => ({
+                      ...current,
+                      commodityDescription: event.target.value,
+                    }));
+                }}
               />
               <input
                 aria-label={`HS 编码 ${index + 1}`}
                 defaultValue={index === 0 ? '8504900000' : ''}
+                disabled
+                title="待契约扩展：报价请求尚无 HS 编码字段"
               />
               <input
                 aria-label={`申报价值 ${index + 1}`}
                 defaultValue={index === 0 ? '50,000.00' : ''}
+                disabled
+                title="待契约扩展：报价请求尚无申报价值字段"
               />
-              <input aria-label={`原产国 ${index + 1}`} defaultValue="中国" />
-              <input aria-label={`数量 ${index + 1}`} defaultValue={index === 0 ? '5 箱' : '1'} />
+              <input
+                aria-label={`原产国 ${index + 1}`}
+                defaultValue="中国"
+                disabled
+                title="待契约扩展：报价请求尚无原产国字段"
+              />
+              <input
+                aria-label={`数量 ${index + 1}`}
+                defaultValue={index === 0 ? '5 箱' : '1'}
+                disabled
+                title="待契约扩展：报价请求尚无品名数量字段"
+              />
             </div>
           ))}
           <div className="quote-inline-actions">
             <Button
               variant="secondary"
               size="compact"
-              disabled={readOnly}
-              onClick={() => setCommodityCount((count) => count + 1)}
+              disabled
+              title="待契约扩展：多品名结构尚未进入报价请求"
             >
               新增品名
             </Button>
             <Button
               variant="secondary"
               size="compact"
-              disabled={readOnly}
-              onClick={() => setActionStatus('已打开品名批量导入映射；当前表单内容保持不变。')}
+              disabled
+              title="待集成：品名文件上传与字段映射端口尚未接入"
             >
               批量导入
             </Button>
+            <small>批量导入待文件上传与映射端口接入；当前不可用。</small>
           </div>
         </fieldset>
         <fieldset className="quote-section quote-grid quote-grid--four">
           <legend>清关与附件</legend>
           <label>
             贸易条款
-            <select defaultValue="FOB">
+            <select defaultValue="FOB" disabled title="待契约扩展：报价请求尚无贸易条款字段">
               <option>FOB</option>
             </select>
           </label>
           <label>
             申报要素
-            <select defaultValue="electronics">
+            <select
+              defaultValue="electronics"
+              disabled
+              title="待契约扩展：报价请求尚无申报要素字段"
+            >
               <option value="electronics">电子产品</option>
             </select>
           </label>
           <label>
             监管条件
-            <input defaultValue="无" />
+            <input defaultValue="无" disabled title="待契约扩展：报价请求尚无监管条件字段" />
           </label>
           <label>
             目的港清关
-            <input defaultValue="自有清关" />
+            <input defaultValue="自有清关" disabled title="待契约扩展：报价请求尚无清关方式字段" />
           </label>
         </fieldset>
         <footer className="quote-actions">
@@ -294,7 +620,7 @@ export function QuoteWorkbench({
             {pending === 'save' ? '保存中…' : '保存草稿'}
           </Button>
           <Button
-            disabled={readOnly || pending !== null}
+            disabled={readOnly || quoteDirty || pending !== null}
             onClick={() =>
               void run('submit', () =>
                 port.submitForecast(quote.id, selected.id, quote.version)
@@ -307,11 +633,7 @@ export function QuoteWorkbench({
           >
             {pending === 'submit' ? '提交中…' : '提交预报'}
           </Button>
-          <Button
-            variant="quiet"
-            disabled={readOnly}
-            onClick={() => setActionStatus('更多操作：复制草稿、保存模板、导出校验报告。')}
-          >
+          <Button variant="quiet" disabled title="待集成：复制草稿、模板和导出命令端口尚未接入">
             更多操作
           </Button>
           {actionError ? <span role="alert">{actionError}</span> : null}
@@ -358,7 +680,10 @@ export function QuoteWorkbench({
                 aria-label={`${option.product} ${formatMoney(option.total)}`}
                 checked={selectedId === option.id}
                 disabled={!option.available}
-                onChange={() => setSelectedId(option.id)}
+                onChange={() => {
+                  setSelectedId(option.id);
+                  setExplanation(null);
+                }}
               />
               <span>
                 <strong>{option.product}</strong>
@@ -392,23 +717,29 @@ export function QuoteWorkbench({
             </div>
           ) : (
             <div className="quote-cost">
-              <span>成本 {formatMoney(selected.cost)}</span>
-              <span>
-                毛利 {formatMoney(selected.margin)} / {selected.marginPercent}
-              </span>
+              {selected.cost && selected.margin && selected.marginPercent ? (
+                <>
+                  <span>成本 {formatMoney(selected.cost)}</span>
+                  <span>
+                    毛利 {formatMoney(selected.margin)} / {selected.marginPercent}
+                  </span>
+                </>
+              ) : (
+                <span>成本与毛利未由服务端报价契约返回</span>
+              )}
             </div>
           )}
           <Button
             variant="secondary"
             size="compact"
-            disabled={pending !== null}
+            disabled={quoteDirty || pending !== null}
             onClick={() => void loadExplanation()}
           >
             {pending === 'explain' ? '加载解释…' : explanation ? '收起解释' : '查看解释'}
           </Button>
           <Button
             size="compact"
-            disabled={readOnly || pending !== null}
+            disabled={readOnly || quoteDirty || pending !== null}
             onClick={() =>
               void run('accept', () => port.accept(quote.id, selected.id, quote.version)).then(
                 (result) => {

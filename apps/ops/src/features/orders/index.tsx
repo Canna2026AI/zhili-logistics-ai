@@ -173,6 +173,16 @@ export function OpsOrdersWorkspace({
         port={activePorts.waybills}
         readOnly={simulation}
         dataScope={simulation ? '深圳分公司' : '全租户'}
+        fieldPolicy={
+          simulation
+            ? {
+                customer: 'MASK',
+                customerCode: 'MASK',
+                contactName: 'MASK',
+                contactPhone: 'MASK',
+              }
+            : undefined
+        }
         onCreate={() => open('quotes')}
       />
     );

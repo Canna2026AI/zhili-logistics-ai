@@ -3,6 +3,7 @@ import type { components } from '@zhili/contracts';
 type Money = components['schemas']['Money'];
 type QuoteLine = components['schemas']['QuoteLine'];
 type QuoteRequest = components['schemas']['CreateQuoteRequest'];
+type OrderType = components['schemas']['CreateOrderDraftRequest']['orderType'];
 
 export interface QuoteInputFixture {
   request: QuoteRequest;
@@ -18,9 +19,9 @@ export interface CalculatedOption {
   unavailableReason?: string;
   lines: QuoteLine[];
   total: Money;
-  cost: Money;
-  margin: Money;
-  marginPercent: string;
+  cost?: Money;
+  margin?: Money;
+  marginPercent?: string;
   rateCardVersion: string;
   explanationSteps: string[];
 }
@@ -35,8 +36,35 @@ export interface CalculatedQuote {
 }
 
 export interface QuoteExplanationView {
+  quoteId: string;
+  optionId: string;
+  version: number;
   rateCardVersion: string;
   steps: string[];
+}
+
+export interface QuoteOrderContext {
+  orderType: OrderType;
+  fba?: {
+    shipmentId: string;
+    boxCount: number;
+    fulfillmentCenter: string;
+  };
+}
+
+export interface QuoteWorkflowRequest {
+  quote: QuoteRequest;
+  orderContext: QuoteOrderContext;
+}
+
+export interface QuoteSnapshotRef {
+  quoteId: string;
+  optionId: string;
+  version: number;
+  localExplanation?: {
+    rateCardVersion: string;
+    steps: string[];
+  };
 }
 
 export interface QuoteActionResult {
@@ -46,10 +74,10 @@ export interface QuoteActionResult {
 }
 
 export interface QuotePort {
-  create(request: QuoteRequest): Promise<CalculatedQuote>;
-  explain(quoteId: string, optionId?: string): Promise<QuoteExplanationView>;
+  create(request: QuoteWorkflowRequest): Promise<CalculatedQuote>;
+  explain(snapshot: QuoteSnapshotRef): Promise<QuoteExplanationView>;
   accept(quoteId: string, optionId: string, version: number): Promise<QuoteActionResult>;
-  saveDraft(request: QuoteRequest): Promise<QuoteActionResult>;
+  saveDraft(request: QuoteWorkflowRequest): Promise<QuoteActionResult>;
   submitForecast(quoteId: string, optionId: string, version: number): Promise<QuoteActionResult>;
 }
 
@@ -89,6 +117,11 @@ export const quoteInputFixture: QuoteInputFixture = {
   },
 };
 
+export const quoteWorkflowFixture: QuoteWorkflowRequest = {
+  quote: quoteInputFixture.request,
+  orderContext: { orderType: 'STANDARD' },
+};
+
 function money(amount: number): Money {
   return { amount: (amount / 100).toFixed(2), currency: 'CNY' };
 }
@@ -115,10 +148,24 @@ function sumLines(lines: QuoteLine[]): Money {
 export function calculateQuote(input: QuoteInputFixture): CalculatedQuote {
   const firstPackage = input.request.packages[0];
   if (!firstPackage) throw new Error('至少需要一个包裹');
-  const volumeWeight =
-    (Number(firstPackage.lengthCm) * Number(firstPackage.widthCm) * Number(firstPackage.heightCm)) /
-    input.volumeDivisor;
-  const chargeableWeight = Math.max(Number(firstPackage.weightKg), volumeWeight);
+  const volumeWeight = input.request.packages.reduce(
+    (total, item) =>
+      total +
+      (Number(item.lengthCm) * Number(item.widthCm) * Number(item.heightCm)) / input.volumeDivisor,
+    0
+  );
+  const actualWeight = input.request.packages.reduce(
+    (total, item) => total + Number(item.weightKg),
+    0
+  );
+  const chargeableWeight = Math.max(actualWeight, volumeWeight);
+  const longestEdge = Math.max(
+    ...input.request.packages.flatMap((item) => [
+      Number(item.lengthCm),
+      Number(item.widthCm),
+      Number(item.heightCm),
+    ])
+  );
   const dhlFreight = proportionalCents(468000, chargeableWeight);
   const dhlLines: QuoteLine[] = [
     {
@@ -180,7 +227,7 @@ export function calculateQuote(input: QuoteInputFixture): CalculatedQuote {
         ...optionFinancials(dhlTotal, 458050, chargeableWeight),
         rateCardVersion: 'RATE-DHL-CN-US-2026.05-v3',
         explanationSteps: [
-          `计费重取实重与材积重较大值：max(${Number(firstPackage.weightKg).toFixed(2)}, ${volumeWeight.toFixed(2)})`,
+          `计费重取实重与材积重较大值：max(${actualWeight.toFixed(2)}, ${volumeWeight.toFixed(2)})`,
           `基础运费按 37.8947368 × ${chargeableWeight.toFixed(2)} kg 计算`,
           '燃油附加费按本次基础运费 × 11.00% 计算',
           `偏远附加费按目的地邮编 ${input.request.destination.postalCode ?? '未提供'} 计算`,
@@ -206,7 +253,7 @@ export function calculateQuote(input: QuoteInputFixture): CalculatedQuote {
         carrier: '专线',
         product: '美西空派（含电）',
         available: false,
-        unavailableReason: '单件最长边 100 cm 超出该渠道 80 cm 限制',
+        unavailableReason: `单件最长边 ${longestEdge} cm 超出该渠道 80 cm 限制`,
         lines: airLines,
         total: airTotal,
         ...optionFinancials(airTotal, 452000, chargeableWeight),
@@ -221,13 +268,20 @@ export function calculateQuote(input: QuoteInputFixture): CalculatedQuote {
 }
 
 export const memoryQuotePort: QuotePort = {
-  async create(request) {
-    return calculateQuote({ request, volumeDivisor: quoteInputFixture.volumeDivisor });
+  async create(workflow) {
+    return calculateQuote({
+      request: workflow.quote,
+      volumeDivisor: quoteInputFixture.volumeDivisor,
+    });
   },
-  async explain(_quoteId, optionId) {
-    const quote = calculateQuote(quoteInputFixture);
-    const option = quote.options.find((item) => item.id === optionId) ?? quote.options[0]!;
-    return { rateCardVersion: option.rateCardVersion, steps: option.explanationSteps };
+  async explain(snapshot) {
+    if (!snapshot.localExplanation) throw new Error('QUOTE_SNAPSHOT_NOT_FOUND');
+    return {
+      quoteId: snapshot.quoteId,
+      optionId: snapshot.optionId,
+      version: snapshot.version,
+      ...snapshot.localExplanation,
+    };
   },
   async accept(_quoteId, optionId, version) {
     return { acceptedOptionId: optionId, version: version + 1, message: '报价快照已接受' };

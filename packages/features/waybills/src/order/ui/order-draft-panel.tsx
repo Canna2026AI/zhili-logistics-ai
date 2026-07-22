@@ -6,6 +6,7 @@ import {
   type OrderPort,
   type OrderResult,
   type OrderType,
+  type OrderValidation,
 } from '../model/order';
 import './order-draft-panel.css';
 
@@ -40,13 +41,19 @@ export function OrderDraftPanel({
   ]);
   const nextId = useRef(2);
   const [order, setOrder] = useState<OrderResult | null>(null);
+  const [validationItems, setValidationItems] = useState<OrderValidation['items']>([]);
+  const [fba, setFba] = useState({
+    shipmentId: 'FBA15LAX20260722',
+    boxCount: '5',
+    fulfillmentCenter: 'LAX9',
+  });
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
 
   const request = () => ({
     ...buildOrderRequest(type),
-    packages: packages.map((item, index) => {
+    packages: packages.map((item) => {
       const [lengthCm = '0', widthCm = '0', heightCm = '0'] = item.dimensions.split(/\s*[×x]\s*/);
       return {
         packageRef: item.ref,
@@ -54,7 +61,15 @@ export function OrderDraftPanel({
         lengthCm,
         widthCm,
         heightCm,
-        commodityDescription: commodities[index]?.description ?? commodities[0]?.description ?? '',
+        commodityDescription: [
+          ...commodities.map(
+            (commodity) =>
+              `${commodity.description} / HS ${commodity.hs} / 数量 ${commodity.quantity}`
+          ),
+          ...(type === 'FBA'
+            ? [`FBA ${fba.shipmentId} / ${fba.boxCount} 箱 / ${fba.fulfillmentCenter}`]
+            : []),
+        ].join('；'),
       };
     }),
   });
@@ -110,15 +125,36 @@ export function OrderDraftPanel({
           <legend>Amazon FBA 关联</legend>
           <label>
             Amazon Shipment ID
-            <input aria-label="Amazon Shipment ID" defaultValue="FBA15LAX20260722" />
+            <input
+              aria-label="Amazon Shipment ID"
+              value={fba.shipmentId}
+              disabled={readOnly}
+              onChange={(event) =>
+                setFba((current) => ({ ...current, shipmentId: event.target.value }))
+              }
+            />
           </label>
           <label>
             FBA 箱数
-            <input aria-label="FBA 箱数" type="number" defaultValue={5} />
+            <input
+              aria-label="FBA 箱数"
+              type="number"
+              value={fba.boxCount}
+              disabled={readOnly}
+              onChange={(event) =>
+                setFba((current) => ({ ...current, boxCount: event.target.value }))
+              }
+            />
           </label>
           <label>
             目标仓
-            <input defaultValue="LAX9" />
+            <input
+              value={fba.fulfillmentCenter}
+              disabled={readOnly}
+              onChange={(event) =>
+                setFba((current) => ({ ...current, fulfillmentCenter: event.target.value }))
+              }
+            />
           </label>
         </fieldset>
       ) : null}
@@ -261,6 +297,7 @@ export function OrderDraftPanel({
               const current = await ensureOrder();
               setOrder(current);
               const validation = await port.validate(current.id, current.version);
+              setValidationItems(validation.items);
               setMessage(validation.valid ? '校验通过，可以提交预报' : '校验失败，请修正错误项');
             })
           }
@@ -295,6 +332,17 @@ export function OrderDraftPanel({
           提交预报
         </Button>
       </footer>
+      {validationItems.length ? (
+        <ul aria-label="订单校验问题">
+          {validationItems.map((item) => (
+            <li key={`${item.code}-${item.fieldPath ?? ''}`}>
+              <strong>{item.message}</strong>
+              {item.fieldPath ? <span> · {item.fieldPath}</span> : null}
+              {item.remediation ? <p>{item.remediation}</p> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {message ? <p role="status">{message}</p> : null}
       {error ? <p role="alert">{error}</p> : null}
     </section>

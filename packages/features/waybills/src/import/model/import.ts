@@ -11,13 +11,14 @@ export interface ImportJobRef {
   created?: number;
   failed?: number;
   status?: string;
+  jobId?: string;
 }
 
 export interface ImportPort {
   create(source: string): Promise<ImportJobRef>;
   validate(importId: string, version: number): Promise<ImportJobRef>;
   commit(importId: string, version: number, acknowledgePartial: boolean): Promise<ImportJobRef>;
-  rollback(importId: string, version: number): Promise<ImportJobRef>;
+  rollback(importId: string, version: number, reason: string): Promise<ImportJobRef>;
 }
 
 export const memoryImportPort: ImportPort = {
@@ -27,8 +28,14 @@ export const memoryImportPort: ImportPort = {
   async validate(importId, version) {
     return { id: importId, version: version + 1 };
   },
-  async commit(importId, version) {
-    return { id: importId, version: version + 1 };
+  async commit(importId, version, acknowledgePartial) {
+    return {
+      id: importId,
+      version: version + 1,
+      created: 1,
+      failed: acknowledgePartial ? 1 : 0,
+      status: 'COMPLETED',
+    };
   },
   async rollback(importId, version) {
     return { id: importId, version: version + 1, status: 'ROLLED_BACK' };

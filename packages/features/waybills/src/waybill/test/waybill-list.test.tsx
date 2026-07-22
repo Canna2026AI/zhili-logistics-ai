@@ -39,7 +39,7 @@ describe('waybill list', () => {
     fireEvent.click(screen.getByRole('button', { name: '批量操作（1）' }));
     fireEvent.click(screen.getByRole('button', { name: '取消运单' }));
     expect(screen.getByText(/将取消 1 票运单/)).toBeInTheDocument();
-    expect(screen.getByText(/版本 v7/)).toBeInTheDocument();
+    expect(screen.getByText(/S2505120004 v7/)).toBeInTheDocument();
     expect(screen.getByText(/审计：waybill\.batch-command/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '确认取消' })).toBeDisabled();
   });
@@ -97,9 +97,9 @@ describe('waybill list', () => {
       get: vi.fn(),
       submit: vi.fn(async () => ({ version: 8 })),
       createLabel: vi.fn(async () => ({ id: 'label-1', status: 'QUEUED', version: 1 })),
-      batch: vi.fn(async () => ({
-        succeeded: ['wb-004'],
-        failed: [{ id: 'wb-007', reason: '状态不允许' }],
+      batch: vi.fn(async (ids: string[]) => ({
+        succeeded: ids.filter((id) => id === 'wb-004'),
+        failed: ids.filter((id) => id === 'wb-007').map((id) => ({ id, reason: '状态不允许' })),
       })),
     };
     render(<WaybillList port={port as never} />);
@@ -116,8 +116,55 @@ describe('waybill list', () => {
       target: { value: '客户书面通知取消运输' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认取消' }));
-    await waitFor(() => expect(port.batch).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(port.batch).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('批量执行：成功 1，失败 1')).toBeInTheDocument();
+  });
+
+  it.each([
+    ['生成标签', 'createLabel'],
+    ['提交预报', 'submit'],
+  ] as const)(
+    'keeps per-waybill outcomes when %s is only partially successful',
+    async (command, method) => {
+      const port = {
+        get: vi.fn(),
+        submit: vi.fn(),
+        createLabel: vi.fn(),
+        batch: vi.fn(),
+      };
+      port[method]
+        .mockResolvedValueOnce({ version: 8 })
+        .mockRejectedValueOnce(new Error('VERSION_CONFLICT'));
+      render(<WaybillList port={port as never} />);
+      for (const number of ['S2505120004', 'S2505120007']) {
+        const row = screen.getByRole('button', { name: number }).closest('tr')!;
+        fireEvent.click(within(row).getByRole('checkbox'));
+      }
+      fireEvent.click(screen.getByRole('button', { name: '批量操作（2）' }));
+      fireEvent.click(screen.getByRole('button', { name: command }));
+      expect(await screen.findByText('批量执行：成功 1，失败 1')).toBeInTheDocument();
+      expect(screen.getByText(/S2505120007：VERSION_CONFLICT/)).toBeInTheDocument();
+    }
+  );
+
+  it('cancels each selected resource with its own displayed version', async () => {
+    const batch = vi.fn(async (ids: string[]) => ({ succeeded: ids, failed: [] }));
+    render(<WaybillList port={{ batch } as never} />);
+    for (const number of ['S2505120004', 'S2505120007']) {
+      const row = screen.getByRole('button', { name: number }).closest('tr')!;
+      fireEvent.click(within(row).getByRole('checkbox'));
+    }
+    fireEvent.click(screen.getByRole('button', { name: '批量操作（2）' }));
+    fireEvent.click(screen.getByRole('button', { name: '取消运单' }));
+    expect(screen.getByText(/S2505120004 v7/)).toBeInTheDocument();
+    expect(screen.getByText(/S2505120007 v6/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('取消原因'), {
+      target: { value: '客户书面通知取消运输' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认取消' }));
+    await waitFor(() => expect(batch).toHaveBeenCalledTimes(2));
+    expect(batch).toHaveBeenNthCalledWith(1, ['wb-004'], 'CANCEL', 7, '客户书面通知取消运输');
+    expect(batch).toHaveBeenNthCalledWith(2, ['wb-007'], 'CANCEL', 6, '客户书面通知取消运输');
   });
 
   it('keeps read access while disabling every write action', () => {
@@ -126,5 +173,37 @@ describe('waybill list', () => {
     expect(screen.getByRole('button', { name: '新增预报' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '批量操作（0）' })).toBeDisabled();
     expect(screen.getAllByRole('button', { name: /复制 S/ })[0]).toBeDisabled();
+  });
+
+  it('applies the readonly field policy inside the detail drawer and never exposes clear PII', async () => {
+    render(<WaybillList readOnly dataScope="深圳分公司" />);
+    fireEvent.click(screen.getByRole('button', { name: 'S2505120004' }));
+    const drawer = screen.getByRole('dialog', { name: '运单详情' });
+    await waitFor(() =>
+      expect(within(drawer).queryByText('139 2654 8800')).not.toBeInTheDocument()
+    );
+    expect(within(drawer).getByText('139 **** 8800')).toBeInTheDocument();
+    expect(within(drawer).getByRole('button', { name: '问题件登记' })).toBeDisabled();
+  });
+
+  it('disables unavailable visible controls with an explicit integration reason', () => {
+    render(<WaybillList />);
+    expect(screen.getByRole('button', { name: '高级筛选' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '高级筛选' })).toHaveAttribute(
+      'title',
+      expect.stringMatching(/待集成/)
+    );
+    expect(screen.getByRole('button', { name: '刷新' })).toBeDisabled();
+    expect(screen.getAllByRole('button', { name: /复制 S/ })[0]).toBeDisabled();
+    expect(screen.getByText(/待服务端查询与命令端口接入/)).toBeInTheDocument();
+  });
+
+  it('renders detail rejection without showing protected customer fields', async () => {
+    render(
+      <WaybillList port={{ get: vi.fn().mockRejectedValue(new Error('FORBIDDEN')) } as never} />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'S2505120004' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('详情加载失败');
+    expect(screen.queryByText('139 2654 8800')).not.toBeInTheDocument();
   });
 });

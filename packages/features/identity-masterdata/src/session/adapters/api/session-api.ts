@@ -9,8 +9,8 @@ export function createSessionApi(client: ZhiliApiClient): SessionPort {
   }): SessionInfo => {
     if (response.error) throw response.error;
     if (!response.data) throw new Error('SESSION_RESPONSE_EMPTY');
-    const { subjectId, tenantId, expiresAt, permissionsVersion } = response.data.data;
-    return { subjectId, tenantId, expiresAt, permissionsVersion };
+    const { id, subjectId, tenantId, expiresAt, permissionsVersion } = response.data.data;
+    return { id, subjectId, tenantId, expiresAt, permissionsVersion };
   };
   return {
     async login(credentials) {
@@ -23,7 +23,7 @@ export function createSessionApi(client: ZhiliApiClient): SessionPort {
     },
     async reauthenticate(session) {
       const response = await client.POST('/auth/sessions/current:reauthenticate', {
-        body: { id: 'current-session', ...session },
+        body: session,
       });
       if (response.error) throw response.error;
     },

@@ -3,7 +3,7 @@ import type { components } from '@zhili/contracts';
 export type LoginCredentials = components['schemas']['PasswordLoginRequest'];
 export type SessionInfo = Pick<
   components['schemas']['Session'],
-  'subjectId' | 'tenantId' | 'expiresAt' | 'permissionsVersion'
+  'id' | 'subjectId' | 'tenantId' | 'expiresAt' | 'permissionsVersion'
 >;
 
 export interface SessionPort {

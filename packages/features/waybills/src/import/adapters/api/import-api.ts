@@ -33,15 +33,32 @@ export function createImportApi(
         body: { mappingVersion: 1, validationVersion: version, acknowledgePartial },
       });
       if (response.error) throw response.error;
-      return { id: importId, version: version + 1 };
+      if (!response.data) throw new Error('IMPORT_COMMIT_JOB_EMPTY');
+      return {
+        id: importId,
+        version,
+        jobId: response.data.data.id,
+        status: response.data.data.status,
+      };
     },
-    async rollback(importId, version) {
+    async rollback(importId, version, reason) {
       const response = await client.POST('/imports/{importId}:rollback', {
         params: { path: { importId }, header: headers(version) },
-        body: { id: importId, version },
+        body: {
+          id: importId,
+          status: 'ROLLBACK_REQUESTED',
+          version,
+          reason,
+          auditEvent: 'import.batch.rolled-back',
+        },
       });
       if (response.error) throw response.error;
-      return { id: importId, version: version + 1, status: 'ROLLED_BACK' };
+      if (!response.data) throw new Error('IMPORT_ROLLBACK_RESULT_EMPTY');
+      return {
+        id: importId,
+        version: response.data.data.version,
+        status: response.data.data.status,
+      };
     },
   };
 }

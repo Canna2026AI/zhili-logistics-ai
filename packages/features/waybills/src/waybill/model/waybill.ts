@@ -203,6 +203,41 @@ export interface WaybillDetail {
   timeline: string[];
 }
 
+export type WaybillSensitiveField = 'customer' | 'customerCode' | 'contactName' | 'contactPhone';
+export type WaybillFieldPolicy = Partial<Record<WaybillSensitiveField, 'ALLOW' | 'MASK' | 'HIDE'>>;
+
+function maskPhone(value: string) {
+  const digits = value.replace(/\D/g, '');
+  const prefix = digits.slice(0, 3);
+  const suffix = digits.slice(-4);
+  return prefix && suffix ? `${prefix} **** ${suffix}` : '***';
+}
+
+function maskText(value: string) {
+  if (!value) return '***';
+  return `${value.slice(0, 1)}${'*'.repeat(Math.min(4, Math.max(2, value.length - 1)))}`;
+}
+
+export function applyWaybillFieldPolicy(
+  detail: WaybillDetail,
+  policy: WaybillFieldPolicy
+): WaybillDetail {
+  const value = (field: WaybillSensitiveField, original: string) => {
+    const decision = policy[field] ?? 'ALLOW';
+    if (decision === 'HIDE') return '无权查看';
+    if (decision === 'MASK')
+      return field === 'contactPhone' ? maskPhone(original) : maskText(original);
+    return original;
+  };
+  return {
+    ...detail,
+    customer: value('customer', detail.customer),
+    customerCode: value('customerCode', detail.customerCode),
+    contactName: value('contactName', detail.contactName),
+    contactPhone: value('contactPhone', detail.contactPhone),
+  };
+}
+
 const destinationRoutes: Record<string, string> = {
   '美国/洛杉矶': 'CN-SZX → US-LAX',
   '德国/法兰克福': 'CN-SZX → DE-FRA',

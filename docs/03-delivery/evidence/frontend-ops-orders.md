@@ -13,42 +13,45 @@
 
 ## 功能状态（按 operation/验收，不再整包宣称完成）
 
-| 功能 ID                 | 状态        | 本分支可执行证据                                                                            | 尚未宣称完成的边界                             |
-| ----------------------- | ----------- | ------------------------------------------------------------------------------------------- | ---------------------------------------------- |
-| IAM-01                  | IMPLEMENTED | 密码登录 UI、typed session port、失败/过期/禁止态                                           | —                                              |
-| IAM-03                  | PARTIAL     | refresh/logout/reauth typed adapter 与契约测试                                              | 尚未装入共享用户菜单                           |
-| IAM-06                  | PARTIAL     | 只读模拟真实保留 read、全模块禁 write、深圳范围、手机号脱敏                                 | 服务端权限预览/模拟生命周期待系统权限页        |
-| MDM-01/03/04/05、CRM-01 | PARTIAL     | 主数据目录、客户异步保存/reject、信用字段、范围/脱敏；组织、地址、引用、信用 typed adapters | 组织树/库位/完整地址和引用编辑器未在本域标完成 |
-| RATE-01..05             | PARTIAL     | 渠道/分区/价卡/附加费/限制/特殊价目录，计费段/进位/最低消费，价卡异步发布/reject            | 完整渠道 CRUD、限制维护编辑器未标完成          |
-| RATE-06                 | IMPLEMENTED | 受控输入构造 `CreateQuoteRequest`，多渠道异步报价/reject、成本脱敏                          | —                                              |
-| RATE-07                 | IMPLEMENTED | 渠道专属解释、接受不可变快照、版本/过期提示                                                 | —                                              |
-| ORD-01/02               | IMPLEMENTED | 标准/FBA 草稿、包裹/品名编辑、save/copy/validate/submit typed ports                         | —                                              |
-| ORD-03/04               | IMPLEMENTED | CSV BOM/引号/正重量校验，create/validate/commit/partial/rollback ports                      | XLSX 二进制解析留给上传服务                    |
-| ORD-05                  | IMPLEMENTED | 包裹重量/尺寸/品名真实状态与唯一 ID                                                         | —                                              |
-| ORD-06                  | PARTIAL     | label job 异步队列与版本头                                                                  | 报关/保险/附件编辑器未标完成                   |
-| ORD-07                  | PARTIAL     | submit 与 renumber typed adapter                                                            | 改号 UI 尚未标完成                             |
-| ORD-08                  | PARTIAL     | 批量提交/标签/取消、逐项 partial/reject；split/merge typed adapters                         | 拆合单编辑 UI 尚未标完成                       |
+| 功能 ID                 | 状态        | 本分支可执行证据                                                                            | 尚未宣称完成的边界                              |
+| ----------------------- | ----------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| IAM-01                  | IMPLEMENTED | 密码登录 UI、typed session port、失败/过期/禁止态                                           | —                                               |
+| IAM-03                  | PARTIAL     | refresh/logout/reauth typed adapter 与契约测试                                              | 尚未装入共享用户菜单                            |
+| IAM-06                  | PARTIAL     | 只读模拟真实保留 read、全模块禁 write、深圳范围、手机号脱敏                                 | 服务端权限预览/模拟生命周期待系统权限页         |
+| MDM-01/03/04/05、CRM-01 | PARTIAL     | 主数据目录、客户异步保存/reject、信用字段、范围/脱敏；组织、地址、引用、信用 typed adapters | 组织树/库位/完整地址和引用编辑器未在本域标完成  |
+| RATE-01..05             | PARTIAL     | 渠道/分区/价卡/附加费/限制/特殊价目录，计费段/进位/最低消费，价卡异步发布/reject            | 完整渠道 CRUD、限制维护编辑器未标完成           |
+| RATE-06                 | PARTIAL     | 地址/邮编/件数/重量/尺寸/FBA 受控工作流请求；真实映射服务端 options/lines/total；reject     | 渠道展示名、成本字段及 FBA 报价上下文待契约扩展 |
+| RATE-07                 | PARTIAL     | 客户端按 quote/option/version 绑定解释，切渠道/输入立即失效；accept reject                  | 服务端解释契约尚无 optionId/quoteVersion        |
+| ORD-01/02               | PARTIAL     | 标准/FBA 草稿、包裹/品名编辑、save/copy/validate/submit ports；校验 items/remediation       | FBA/结构化品名字段待订单契约扩展                |
+| ORD-03/04               | PARTIAL     | CSV BOM/引号/正重量校验，异步 commit 结果、危险 rollback 确认/reject                        | 文件上传、任务轮询、错误报告下载未标完成        |
+| ORD-05                  | PARTIAL     | 包裹重量/尺寸/品名状态与唯一 ID；详情按 scope/字段策略渲染                                  | 生产 WaybillDetail 投影待契约扩展               |
+| ORD-06                  | PARTIAL     | label job 异步队列与版本头                                                                  | 报关/保险/附件编辑器未标完成                    |
+| ORD-07                  | PARTIAL     | submit 与 renumber typed adapter                                                            | 改号 UI 尚未标完成                              |
+| ORD-08                  | PARTIAL     | 标签/提交/取消按每票实际版本 allSettled，逐项 partial/reject；split/merge adapters          | 服务端 batch item-result 契约、拆合单 UI 待完成 |
 
 三个 feature package 的公开状态均为 `partial`，避免把目录 fixture 或仅存在 adapter 误报为整项 P0 完成。
 
 ## 真实交互、端口与错误处理
 
 - Ops composition 显式注入 `OpsOrdersPorts`；Storybook 使用同一强类型 memory ports，生产可替换为 OpenAPI adapters。
-- 主数据保存、价卡发布、刷新报价、加载解释、接受报价、保存/提交报价、订单保存/校验/复制/提交、导入创建/校验/提交/回滚、详情读取、标签、批量提交和取消都 `await` typed port。
-- 每个异步页面命令都有 pending 禁重入、成功反馈、reject 提示和重试/内容保留；版本化命令携带 `If-Match`，创建/变更携带 `Idempotency-Key`。
-- Drawer 只渲染所选 `get(waybillId)` 返回的 `WaybillDetail`，并在 scope 不匹配时拒绝显示；德国运单断言不会出现深圳客户联系人。
-- 报价从受控重量构造请求。DHL 在 123.50 kg 保持 canonical `CNY 5,320.00`；改为 200 kg 后重算为 `CNY 8,537.83`。UPS 的成本、毛利和解释随所选 option 快照切换。
+- 主数据保存、价卡发布、报价 create/explain/accept/save/submit、订单 save/validate/copy/submit、导入 create/validate/commit/rollback、详情读取、标签、批量提交和取消都 `await` typed port；本轮为真实 P0 命令补充 resolve/reject/partial 测试。
+- 版本化命令携带 `If-Match`，创建/变更携带 `Idempotency-Key`。异步 commit 只显示服务端 job 状态，不再把本地 CSV 行数伪装成服务端创建结果。
+- Drawer 只渲染所选 `get(waybillId)` 返回的详情，并统一应用 scope 与字段策略；只读场景的客户、编码、联系人和手机号脱敏，复制/导出类未接入命令保持 disabled。
+- 报价由地址、邮编、件数、重量、长宽高和 FBA 上下文构造工作流请求；材积重和总价随刷新快照更新。OpenAPI adapter 直接映射服务端 options/lines/total，缺响应即 fail closed。
+- 受契约阻塞的 Waybill 详情、批量 item result、报价 option/version 解释和 reauthenticate request 已记录在 `docs/03-delivery/contract-proposals/orders-auth-quote.md`，没有修改共享 contracts。
+- 高级筛选、保存视图、服务端刷新/分页/列配置、复制/改号/拆合单编辑器、问题件登记、品名文件导入等未接端口的可见控件均 disabled 并带“待集成/待契约扩展”原因，不再产生本地伪成功。
 
 ## RED → GREEN 记录
 
-独立评审后先添加并运行失败回归测试，确认以下旧行为被捕获：端口 props 被忽略、保存后无行、reject 无提示、只读误作禁止读取、报价不响应 200 kg、UPS 仍显示 DHL 解释/成本、Drawer 串用联系人、导入只改本地 step、缺少 session/renumber/split/merge 调用。实现后结果如下：
+二轮复审后先添加并运行失败回归测试，确认以下旧行为被捕获：session id 被丢弃、服务端报价被本地金额覆盖、尺寸/FBA 不进入请求、切渠道/输入后保留旧解释、只读 Drawer 泄露明文、标签/提交部分成功被整批 catch 掩盖、取消版本写死、导入回滚无确认、服务端提交数量被本地行数替代、详情/批量契约缺字段时伪成功。实现后结果如下：
 
 | Gate                                  | Fresh 结果                                                                         |
 | ------------------------------------- | ---------------------------------------------------------------------------------- |
 | Identity Vitest                       | 2 files / 11 tests passed                                                          |
-| Rates Vitest                          | 2 files / 14 tests passed                                                          |
-| Waybills Vitest                       | 3 files / 25 tests passed                                                          |
+| Rates Vitest                          | 2 files / 20 tests passed                                                          |
+| Waybills Vitest                       | 3 files / 43 tests passed                                                          |
 | Ops composition Vitest                | 1 file / 4 tests passed                                                            |
+| Vitest total                          | 8 files / 78 tests passed                                                          |
 | F1A Playwright collection             | 1 file / 4 tests collected（不再是 0）                                             |
 | F1A Playwright Chromium               | 4/4 passed；含真实交互与 axe                                                       |
 | axe                                   | DenseWaybillList、OrderQuote、PermissionSimulation 均无 serious/critical violation |
@@ -84,10 +87,10 @@ node_modules/.bin/playwright test --config tests/e2e/ops-orders.playwright.confi
 基准：`docs/01-design/concepts/01-order-quote.png`
 
 1. 左侧高密度下单表单、右侧固定报价与限制面板保持一致。
-2. 标准/FBA、地址、包裹、品名与清关分组均保留真实表单状态。
+2. 标准/FBA、地址、邮编、件数、重量和长宽高均进入受控工作流；当前报价契约不支持的 HS/申报/清关控件明确 disabled。
 3. 多渠道单选清楚区分推荐、可用和限制，不使用卡片墙或多个实心主命令。
-4. 费用逐行相加严格等于总计，并按当前计费重和渠道实时更新成本/毛利。
-5. “查看解释”和“接受报价”读取当前 option/version 的不可变快照；底部唯一主命令为“提交预报”。
+4. memory fixture 的费用逐行相加等于总计；生产 adapter 直接消费服务端 lines/total，未返回的成本不伪造。
+5. “查看解释”和“接受报价”只作用于当前 option/version；切渠道或改输入立即清空旧解释，脏输入先刷新再操作。
 
 ## 主线集成待办（不属于本工作树所有权）
 

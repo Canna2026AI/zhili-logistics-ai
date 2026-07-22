@@ -47,6 +47,7 @@ describe('identity session', () => {
     await expect(
       adapter.login({ account: 'zhangwei', password: 'password' })
     ).resolves.toMatchObject({
+      id: 'session-1',
       tenantId: 'tenant-zhili',
     });
     expect(POST).toHaveBeenCalledWith('/auth/password/sessions', {
@@ -58,6 +59,7 @@ describe('identity session', () => {
     const POST = vi.fn().mockResolvedValue({
       data: {
         data: {
+          id: '01JY8Z8F6ME4F0Y9QH2X6D4R7A',
           subjectId: 'usr-zhang',
           tenantId: 'tenant-zhili',
           expiresAt: '2026-07-22T20:00:00+08:00',
@@ -69,6 +71,7 @@ describe('identity session', () => {
     const adapter = createSessionApi({ POST, DELETE } as never);
     await adapter.refresh();
     await adapter.reauthenticate({
+      id: '01JY8Z8F6ME4F0Y9QH2X6D4R7A',
       subjectId: 'usr-zhang',
       tenantId: 'tenant-zhili',
       expiresAt: '2026-07-22T20:00:00+08:00',
@@ -77,7 +80,13 @@ describe('identity session', () => {
     await adapter.logout();
     expect(POST).toHaveBeenCalledWith('/auth/sessions:refresh');
     expect(POST).toHaveBeenCalledWith('/auth/sessions/current:reauthenticate', {
-      body: expect.objectContaining({ subjectId: 'usr-zhang' }),
+      body: {
+        id: '01JY8Z8F6ME4F0Y9QH2X6D4R7A',
+        subjectId: 'usr-zhang',
+        tenantId: 'tenant-zhili',
+        expiresAt: '2026-07-22T20:00:00+08:00',
+        permissionsVersion: 8,
+      },
     });
     expect(DELETE).toHaveBeenCalledWith('/auth/sessions/current');
   });

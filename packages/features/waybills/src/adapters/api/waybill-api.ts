@@ -1,6 +1,54 @@
 import type { ZhiliApiClient } from '@zhili/api-client';
 import { waybillDetailFixtures, type WaybillDetail } from '../../waybill/model/waybill';
 
+const detailStringFields = [
+  'id',
+  'waybillNo',
+  'masterNo',
+  'customer',
+  'customerCode',
+  'contactName',
+  'contactPhone',
+  'route',
+  'service',
+  'transport',
+  'forecastWeightKg',
+  'actualWeightKg',
+  'volumeM3',
+  'createdAt',
+  'state',
+  'branch',
+] as const;
+
+function isWaybillDetail(value: unknown): value is WaybillDetail {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    detailStringFields.every((field) => typeof record[field] === 'string') &&
+    typeof record.pieces === 'number' &&
+    typeof record.version === 'number' &&
+    Array.isArray(record.timeline) &&
+    record.timeline.every((item) => typeof item === 'string')
+  );
+}
+
+function isWaybillBatchResult(value: unknown): value is WaybillBatchResult {
+  if (typeof value !== 'object' || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    Array.isArray(record.succeeded) &&
+    record.succeeded.every((id) => typeof id === 'string') &&
+    Array.isArray(record.failed) &&
+    record.failed.every(
+      (failure) =>
+        typeof failure === 'object' &&
+        failure !== null &&
+        typeof (failure as Record<string, unknown>).id === 'string' &&
+        typeof (failure as Record<string, unknown>).reason === 'string'
+    )
+  );
+}
+
 export interface WaybillCommandResult {
   version: number;
   message?: string;
@@ -66,29 +114,9 @@ export function createWaybillApi(
         params: { path: { waybillId } },
       });
       if (response.error) throw response.error;
-      const remote = response.data?.data;
-      if (!remote) throw new Error('WAYBILL_RESPONSE_EMPTY');
-      return {
-        id: remote.id,
-        waybillNo: remote.waybillNo,
-        masterNo: '—',
-        customer: '受保护客户',
-        customerCode: '—',
-        contactName: '—',
-        contactPhone: '—',
-        route: '—',
-        service: '—',
-        transport: '—',
-        pieces: 0,
-        forecastWeightKg: '0.00',
-        actualWeightKg: '0.00',
-        volumeM3: '0.00',
-        createdAt: '—',
-        state: '待收货',
-        version: remote.version,
-        branch: '当前授权范围',
-        timeline: [],
-      };
+      const remote: unknown = response.data?.data;
+      if (!isWaybillDetail(remote)) throw new Error('WAYBILL_DETAIL_CONTRACT_INCOMPLETE');
+      return remote;
     },
     async submit(waybillId, version) {
       const response = await client.POST('/waybills/{waybillId}:submit', {
@@ -111,9 +139,9 @@ export function createWaybillApi(
         body: { ids, command, reason, version },
       });
       if (response.error) throw response.error;
-      const data = response.data?.data as
-        { succeeded?: string[]; failed?: { id: string; reason: string }[] } | undefined;
-      return { succeeded: data?.succeeded ?? ids, failed: data?.failed ?? [] };
+      const data: unknown = response.data?.data;
+      if (!isWaybillBatchResult(data)) throw new Error('WAYBILL_BATCH_RESULT_CONTRACT_INCOMPLETE');
+      return data;
     },
     async renumber(waybillId, version, waybillNo) {
       const response = await client.POST('/waybills/{waybillId}:renumber', {

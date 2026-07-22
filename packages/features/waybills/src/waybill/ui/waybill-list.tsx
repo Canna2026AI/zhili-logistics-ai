@@ -14,11 +14,13 @@ import {
   type WaybillPort,
 } from '../../adapters/api/waybill-api';
 import {
+  applyWaybillFieldPolicy,
   filterWaybills,
   waybillFixtures,
   waybillStateCounts,
   type WaybillListItem,
   type WaybillDetail,
+  type WaybillFieldPolicy,
   type WaybillStateFilter,
 } from '../model/waybill';
 import './waybill-list.css';
@@ -31,6 +33,7 @@ export interface WaybillListProps {
   port?: WaybillPort;
   readOnly?: boolean;
   dataScope?: string;
+  fieldPolicy?: WaybillFieldPolicy;
 }
 
 const tone = (state: WaybillListItem['state']) =>
@@ -48,6 +51,7 @@ export function WaybillList({
   port = memoryWaybillPort,
   readOnly = false,
   dataScope = '全租户',
+  fieldPolicy,
 }: WaybillListProps) {
   const [filter, setFilter] = useState<WaybillStateFilter>('全部运单');
   const [query, setQuery] = useState('');
@@ -55,6 +59,7 @@ export function WaybillList({
   const [opened, setOpened] = useState<WaybillListItem | null>(null);
   const [detail, setDetail] = useState<WaybillDetail | null>(null);
   const [detailState, setDetailState] = useState<'idle' | 'loading' | 'failed'>('idle');
+  const [detailTab, setDetailTab] = useState<'overview' | 'timeline'>('overview');
   const [batchOpen, setBatchOpen] = useState(false);
   const [dangerOpen, setDangerOpen] = useState(false);
   const [reason, setReason] = useState('');
@@ -74,9 +79,21 @@ export function WaybillList({
   );
 
   const selectedRows = waybillFixtures.filter((item) => selected.includes(item.id));
+  const effectiveFieldPolicy: WaybillFieldPolicy =
+    fieldPolicy ??
+    (readOnly
+      ? {
+          customer: 'MASK',
+          customerCode: 'MASK',
+          contactName: 'MASK',
+          contactPhone: 'MASK',
+        }
+      : {});
+  const visibleDetail = detail ? applyWaybillFieldPolicy(detail, effectiveFieldPolicy) : null;
 
   const openDetail = async (row: WaybillListItem) => {
     setOpened(row);
+    setDetailTab('overview');
     setDetail(null);
     setDetailState('loading');
     try {
@@ -96,39 +113,76 @@ export function WaybillList({
     try {
       await operation();
     } catch {
-      setCommandError('命令执行失败；可能是权限或版本冲突，数据未改变。');
+      setCommandError('命令执行失败；结果未知，请刷新后核对权限、版本与逐项状态。');
     } finally {
       setPending(false);
     }
   };
 
+  const failureReason = (reason: unknown) =>
+    reason instanceof Error && reason.message ? reason.message : '命令被服务端拒绝';
+
+  const runPerWaybill = async (
+    operation: (row: WaybillListItem) => Promise<unknown>
+  ): Promise<WaybillBatchResult> => {
+    const settled = await Promise.allSettled(
+      selectedRows.map(async (row) => ({ row, value: await operation(row) }))
+    );
+    return settled.reduce<WaybillBatchResult>(
+      (result, item, index) => {
+        const row = selectedRows[index]!;
+        if (item.status === 'fulfilled') result.succeeded.push(row.id);
+        else result.failed.push({ id: row.id, reason: failureReason(item.reason) });
+        return result;
+      },
+      { succeeded: [], failed: [] }
+    );
+  };
+
+  const finishPerWaybill = (result: WaybillBatchResult, successMessage: string) => {
+    setBatchResult(result);
+    setBatchOpen(false);
+    if (result.failed.length === 0) setCommandMessage(successMessage);
+  };
+
   const createLabels = () =>
     runCommand(async () => {
-      await Promise.all(
-        selectedRows.map((row) => port.createLabel(row.id, row.version, '100X150'))
-      );
-      setBatchOpen(false);
-      setCommandMessage(`已创建 ${selectedRows.length} 个不可变标签任务。`);
+      const result = await runPerWaybill((row) => port.createLabel(row.id, row.version, '100X150'));
+      finishPerWaybill(result, `已创建 ${result.succeeded.length} 个不可变标签任务。`);
     });
 
   const submitSelected = () =>
     runCommand(async () => {
-      await Promise.all(selectedRows.map((row) => port.submit(row.id, row.version)));
-      setBatchOpen(false);
-      setCommandMessage(`已提交 ${selectedRows.length} 票预报。`);
+      const result = await runPerWaybill((row) => port.submit(row.id, row.version));
+      finishPerWaybill(result, `已提交 ${result.succeeded.length} 票预报。`);
     });
 
   const cancelSelected = () =>
     runCommand(async () => {
-      const result = await port.batch(
-        selectedRows.map((row) => row.id),
-        'CANCEL',
-        Math.max(...selectedRows.map((row) => row.version)),
-        reason.trim()
+      const settled = await Promise.allSettled(
+        selectedRows.map(async (row) => ({
+          row,
+          result: await port.batch([row.id], 'CANCEL', row.version, reason.trim()),
+        }))
+      );
+      const result = settled.reduce<WaybillBatchResult>(
+        (outcome, item, index) => {
+          const row = selectedRows[index]!;
+          if (item.status === 'rejected') {
+            outcome.failed.push({ id: row.id, reason: failureReason(item.reason) });
+          } else {
+            outcome.succeeded.push(...item.value.result.succeeded);
+            outcome.failed.push(...item.value.result.failed);
+          }
+          return outcome;
+        },
+        { succeeded: [], failed: [] }
       );
       setBatchResult(result);
       setDangerOpen(false);
       setReason('');
+      if (result.failed.length === 0)
+        setCommandMessage(`已取消 ${result.succeeded.length} 票运单。`);
     });
 
   if (state === 'loading')
@@ -202,15 +256,15 @@ export function WaybillList({
           </button>
           <button
             aria-label={`复制 ${row.waybillNo}`}
-            disabled={readOnly}
-            onClick={() => setCommandMessage(`${row.waybillNo} 已复制为独立草稿。`)}
+            disabled
+            title="待集成：运单复制端口尚未接入"
           >
             复制
           </button>
           <button
             aria-label={`${row.waybillNo} 更多操作`}
-            disabled={readOnly}
-            onClick={() => setCommandMessage(`${row.waybillNo}：可改号、拆单或合单。`)}
+            disabled
+            title="待集成：改号、拆单与合单编辑器尚未接入"
           >
             更多
           </button>
@@ -224,7 +278,7 @@ export function WaybillList({
       <header className="waybill-list__title">
         <div>
           <h1 id="waybill-list-title">运单管理</h1>
-          <p>服务端分页与筛选 · 当前数据时点 2026-07-22 09:32</p>
+          <p>本地验收数据 · 服务端分页与高级查询待接入 · 数据时点 2026-07-22 09:32</p>
         </div>
       </header>
       {state === 'partial' || batchResult?.failed.length ? (
@@ -233,11 +287,16 @@ export function WaybillList({
             批量执行：成功 {batchResult?.succeeded.length ?? 2}，失败{' '}
             {batchResult?.failed.length ?? 1}
           </strong>
-          <span>
-            {batchResult?.failed[0]
-              ? `${waybillFixtures.find((item) => item.id === batchResult.failed[0]!.id)?.waybillNo ?? batchResult.failed[0].id}：${batchResult.failed[0].reason}`
-              : 'S2505120007：状态不允许；问题件关闭后可重试。'}
-          </span>
+          {batchResult?.failed.length ? (
+            batchResult.failed.map((failure) => (
+              <span key={failure.id}>
+                {waybillFixtures.find((item) => item.id === failure.id)?.waybillNo ?? failure.id}：
+                {failure.reason}
+              </span>
+            ))
+          ) : (
+            <span>S2505120007：状态不允许；问题件关闭后可重试。</span>
+          )}
         </div>
       ) : null}
       {commandMessage ? <div role="status">{commandMessage}</div> : null}
@@ -268,10 +327,10 @@ export function WaybillList({
           >
             批量操作（{selected.length}）
           </Button>
-          <Button size="compact" variant="secondary">
+          <Button size="compact" variant="secondary" disabled title="待集成：高级查询端口尚未接入">
             高级筛选
           </Button>
-          <Button size="compact" variant="secondary" disabled={readOnly}>
+          <Button size="compact" variant="secondary" disabled title="待集成：保存视图端口尚未接入">
             保存视图
           </Button>
         </div>
@@ -284,14 +343,17 @@ export function WaybillList({
           />
         </label>
         <div>
-          <Button size="compact" variant="quiet">
+          <Button size="compact" variant="quiet" disabled title="待集成：列表刷新端口尚未接入">
             刷新
           </Button>
-          <Button size="compact" variant="secondary">
+          <Button size="compact" variant="secondary" disabled title="待集成：列配置端口尚未接入">
             列管理
           </Button>
         </div>
       </div>
+      <p className="waybill-integration-note">
+        高级筛选、保存视图、刷新、列管理、复制和扩展命令待服务端查询与命令端口接入。
+      </p>
       <DataTable
         ariaLabel="运单列表"
         columns={columns}
@@ -304,11 +366,19 @@ export function WaybillList({
       <footer className="waybill-pagination">
         <strong>共 1,248 条</strong>
         <span>20 条/页</span>
-        <button aria-current="page">1</button>
-        <button>2</button>
-        <button>3</button>
+        <button aria-current="page" disabled>
+          1
+        </button>
+        <button disabled title="待集成：服务端分页端口尚未接入">
+          2
+        </button>
+        <button disabled title="待集成：服务端分页端口尚未接入">
+          3
+        </button>
         <span>…</span>
-        <button>63</button>
+        <button disabled title="待集成：服务端分页端口尚未接入">
+          63
+        </button>
       </footer>
       <Drawer
         open={Boolean(opened)}
@@ -334,17 +404,10 @@ export function WaybillList({
         }
         footer={
           <>
-            <Button
-              variant="secondary"
-              disabled={readOnly || !detail}
-              onClick={() => setCommandMessage(`${detail?.waybillNo ?? ''} 已登记问题件。`)}
-            >
+            <Button variant="secondary" disabled title="待集成：问题件登记端口尚未接入">
               问题件登记
             </Button>
-            <Button
-              disabled={!detail}
-              onClick={() => setCommandMessage(`${detail?.waybillNo ?? ''} 轨迹已刷新。`)}
-            >
+            <Button disabled={!visibleDetail} onClick={() => setDetailTab('timeline')}>
               查看轨迹
             </Button>
           </>
@@ -360,54 +423,75 @@ export function WaybillList({
             详情加载失败或超出当前数据范围；未显示任何客户信息。
           </div>
         ) : null}
-        {detail ? (
+        {visibleDetail ? (
           <div className="waybill-drawer">
             <nav aria-label="运单详情页签">
-              <button data-active>概览</button>
-              <button>轨迹</button>
-              <button>货物</button>
-              <button>费用</button>
-              <button>单证</button>
-              <button>备注</button>
-            </nav>
-            <h3>基本信息</h3>
-            <dl>
-              <dt>运输方式</dt>
-              <dd>{detail.transport}</dd>
-              <dt>路线</dt>
-              <dd>{detail.route}</dd>
-              <dt>服务</dt>
-              <dd>{detail.service}</dd>
-              <dt>件数</dt>
-              <dd>{detail.pieces}</dd>
-              <dt>预报重量</dt>
-              <dd>{detail.forecastWeightKg} kg</dd>
-              <dt>实际 / 计费重量</dt>
-              <dd>{detail.actualWeightKg} kg</dd>
-              <dt>体积</dt>
-              <dd>{detail.volumeM3} m³</dd>
-              <dt>创建时间</dt>
-              <dd>{detail.createdAt}</dd>
-            </dl>
-            <h3>客户信息</h3>
-            <dl>
-              <dt>客户名称</dt>
-              <dd>{detail.customer}</dd>
-              <dt>客户编码</dt>
-              <dd>{detail.customerCode}</dd>
-              <dt>联系人</dt>
-              <dd>{detail.contactName}</dd>
-              <dt>联系电话</dt>
-              <dd>{detail.contactPhone}</dd>
-            </dl>
-            <h3>当前节点</h3>
-            <ol className="waybill-timeline">
-              {detail.timeline.map((item, index) => (
-                <li key={item} data-current={index === detail.timeline.length - 1 || undefined}>
-                  {item}
-                </li>
+              <button
+                data-active={detailTab === 'overview' || undefined}
+                onClick={() => setDetailTab('overview')}
+              >
+                概览
+              </button>
+              <button
+                data-active={detailTab === 'timeline' || undefined}
+                onClick={() => setDetailTab('timeline')}
+              >
+                轨迹
+              </button>
+              {['货物', '费用', '单证', '备注'].map((label) => (
+                <button key={label} disabled title={`待集成：${label}详情投影尚未接入`}>
+                  {label}
+                </button>
               ))}
-            </ol>
+            </nav>
+            {detailTab === 'overview' ? (
+              <>
+                <h3>基本信息</h3>
+                <dl>
+                  <dt>运输方式</dt>
+                  <dd>{visibleDetail.transport}</dd>
+                  <dt>路线</dt>
+                  <dd>{visibleDetail.route}</dd>
+                  <dt>服务</dt>
+                  <dd>{visibleDetail.service}</dd>
+                  <dt>件数</dt>
+                  <dd>{visibleDetail.pieces}</dd>
+                  <dt>预报重量</dt>
+                  <dd>{visibleDetail.forecastWeightKg} kg</dd>
+                  <dt>实际 / 计费重量</dt>
+                  <dd>{visibleDetail.actualWeightKg} kg</dd>
+                  <dt>体积</dt>
+                  <dd>{visibleDetail.volumeM3} m³</dd>
+                  <dt>创建时间</dt>
+                  <dd>{visibleDetail.createdAt}</dd>
+                </dl>
+                <h3>客户信息</h3>
+                <dl>
+                  <dt>客户名称</dt>
+                  <dd>{visibleDetail.customer}</dd>
+                  <dt>客户编码</dt>
+                  <dd>{visibleDetail.customerCode}</dd>
+                  <dt>联系人</dt>
+                  <dd>{visibleDetail.contactName}</dd>
+                  <dt>联系电话</dt>
+                  <dd>{visibleDetail.contactPhone}</dd>
+                </dl>
+              </>
+            ) : (
+              <>
+                <h3>轨迹</h3>
+                <ol className="waybill-timeline">
+                  {visibleDetail.timeline.map((item, index) => (
+                    <li
+                      key={item}
+                      data-current={index === visibleDetail.timeline.length - 1 || undefined}
+                    >
+                      {item}
+                    </li>
+                  ))}
+                </ol>
+              </>
+            )}
           </div>
         ) : null}
       </Drawer>
@@ -457,7 +541,11 @@ export function WaybillList({
       >
         <div className="waybill-danger">
           <strong>将取消 {selected.length} 票运单，并保留关联记录</strong>
-          <span>版本 v7；若服务器版本变化，本命令会拒绝并要求刷新。</span>
+          <span>
+            资源版本：
+            {selectedRows.map((row) => `${row.waybillNo} v${row.version}`).join('；')}
+            ；若服务器版本变化， 对应运单会逐项拒绝并要求刷新。
+          </span>
           <span>审计：waybill.batch-command / 当前租户 / 操作人张伟</span>
         </div>
         <Input
