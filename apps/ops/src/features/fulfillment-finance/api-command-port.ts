@@ -297,7 +297,7 @@ export function createApiFulfillmentFinanceCommandPort(
       const header: Record<string, string> = {};
       if (route.method === 'POST') header['Idempotency-Key'] = command.idempotencyKey;
       if (command.expectedVersion !== undefined) {
-        header['If-Match'] = String(command.expectedVersion);
+        header['If-Match'] = `"${command.expectedVersion}"`;
       }
 
       const result =

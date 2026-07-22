@@ -94,6 +94,7 @@ export interface FulfillmentFinanceWorkbenchProps {
   initialSection?: FulfillmentSection;
   initialViewState?: WorkbenchViewState;
   commandPort: FulfillmentFinanceCommandPort;
+  onSectionChange?: (section: FulfillmentSection) => void;
 }
 
 type RunCommand = (
@@ -1818,6 +1819,7 @@ export function FulfillmentFinanceWorkbench({
   initialSection = 'warehouse',
   initialViewState = 'normal',
   commandPort,
+  onSectionChange,
 }: FulfillmentFinanceWorkbenchProps) {
   const [section, setSection] = useState<FulfillmentSection>(initialSection);
   const [viewState, setViewState] = useState<WorkbenchViewState>(initialViewState);
@@ -1869,6 +1871,7 @@ export function FulfillmentFinanceWorkbench({
             onClick={() => {
               setSection(item.id);
               setFeedback(null);
+              onSectionChange?.(item.id);
             }}
           >
             <MiniIcon path={item.path} />

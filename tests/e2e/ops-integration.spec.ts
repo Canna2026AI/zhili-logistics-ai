@@ -15,4 +15,12 @@ test('运营总入口在订单、履约与财务之间保持真实路由', async
   await page.getByRole('link', { name: '履约与财务' }).click();
   await expect(page.getByRole('heading', { name: '收货扫描' })).toBeVisible();
   await expect(page).toHaveURL(/\/operations\/fulfillment-finance\/warehouse\?mock=1$/);
+
+  await page.getByRole('button', { name: /干线尾程/ }).click();
+  await expect(page.getByRole('heading', { name: '干线与尾程履约' })).toBeVisible();
+  await expect(page).toHaveURL(/\/operations\/fulfillment-finance\/linehaul\?mock=1$/);
+
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: '收货扫描' })).toBeVisible();
+  await expect(page).toHaveURL(/\/operations\/fulfillment-finance\/warehouse\?mock=1$/);
 });

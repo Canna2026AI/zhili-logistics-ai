@@ -23,6 +23,14 @@ describe('integrated operations application', () => {
     expect(screen.getByRole('heading', { name: '收货扫描' })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/operations/fulfillment-finance/warehouse');
 
+    fireEvent.click(screen.getByRole('button', { name: /干线尾程/ }));
+    expect(screen.getByRole('heading', { name: '干线与尾程履约' })).toBeInTheDocument();
+    expect(window.location.pathname).toBe('/operations/fulfillment-finance/linehaul');
+
+    window.history.pushState({}, '', '/operations/fulfillment-finance/warehouse?mock=1');
+    fireEvent.popState(window);
+    expect(screen.getByRole('heading', { name: '收货扫描' })).toBeInTheDocument();
+
     fireEvent.click(screen.getByRole('link', { name: '订单与报价' }));
     expect(screen.getByRole('heading', { level: 1, name: '运营工作台' })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/operations/orders');

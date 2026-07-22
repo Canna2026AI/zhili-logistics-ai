@@ -119,6 +119,7 @@ export function App({ ordersPorts, fulfillmentCommandPort }: AppProps = {}) {
           key={area.section}
           initialSection={area.section}
           commandPort={fulfillmentCommandPort}
+          onSectionChange={(section) => navigate({ id: 'fulfillment', section })}
         />
       )}
     </div>

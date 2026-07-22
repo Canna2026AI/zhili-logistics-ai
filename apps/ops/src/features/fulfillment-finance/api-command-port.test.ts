@@ -75,7 +75,7 @@ describe('API fulfillment finance command port', () => {
     });
 
     expect(request?.url).toBe('https://api.zhili.test/v1/finance/charges/CHG-S2505120004:unreview');
-    expect(request?.headers.get('If-Match')).toBe('11');
+    expect(request?.headers.get('If-Match')).toBe('"11"');
     expect(request?.headers.get('Idempotency-Key')).toBe('unreviewCharge:CHG-S2505120004:v11');
     await expect(request?.json()).resolves.toMatchObject({
       reason: '承运商补传尾程费用',
