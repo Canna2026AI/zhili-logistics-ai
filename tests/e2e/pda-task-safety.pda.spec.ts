@@ -35,6 +35,7 @@ test('clicking the second same-type task transitions only its exact production r
             'pda.use',
             'pda.sync',
             'pda.conflict.resolve',
+            'pda.takeover.export',
             'lastmile.delivery.execute',
             'lastmile.pod.write',
           ],
@@ -69,10 +70,11 @@ test('clicking the second same-type task transitions only its exact production r
       return;
     }
     if (path.includes('/last-mile/delivery-tasks/') && path.endsWith(':transition')) {
+      const body = request.postDataJSON() as Record<string, unknown>;
       transitions.push({
         url: request.url(),
         ifMatch: request.headers()['if-match'],
-        body: request.postDataJSON() as Record<string, unknown>,
+        body,
       });
       if (!path.endsWith(`/last-mile/delivery-tasks/${secondTaskId}:transition`)) {
         await reply(
@@ -83,7 +85,18 @@ test('clicking the second same-type task transitions only its exact production r
         return;
       }
       await reply(route, {
-        data: { resourceId: secondTaskId, status: 'SUCCEEDED', version: 10 },
+        data: {
+          deviceEventId: body.deviceEventId,
+          disposition: 'APPLIED',
+          deliveryTask: {
+            id: secondTaskId,
+            taskNo: 'LM-SECOND',
+            status: 'OUT_FOR_DELIVERY',
+            waybillCount: 1,
+            version: 10,
+          },
+          claimedMediaRefs: [],
+        },
         meta,
       });
       return;
@@ -113,15 +126,11 @@ test('clicking the second same-type task transitions only its exact production r
   );
   expect(transitions[0]!.ifMatch).toBe('"9"');
   expect(transitions[0]!.body).toMatchObject({
-    id: secondTaskId,
-    status: 'OUT_FOR_DELIVERY',
-    fromStatus: 'LOADED',
-    version: 9,
+    deviceEventId: expect.stringMatching(/^01J/),
+    targetStatus: 'OUT_FOR_DELIVERY',
+    mediaRefs: [],
     scanEvidence: {
-      deliveryTaskCode: 'LM-SECOND',
-      checkpoint: 'OUT_FOR_DELIVERY',
       scannedCode: 'LM-SECOND',
-      mediaRefs: [],
     },
   });
   await expect(page.getByTestId('selected-task')).toContainText('OUT_FOR_DELIVERY · v10');

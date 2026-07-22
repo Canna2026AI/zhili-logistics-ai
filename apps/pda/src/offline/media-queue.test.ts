@@ -47,18 +47,25 @@ describe('MediaQueue', () => {
     expect(queue.snapshot()).toHaveLength(205);
   });
 
-  it('tracks retry and progress, retaining failed media for later upload', async () => {
+  it('retries failures but never reuploads a server-accepted reservation', async () => {
     const store = new MemoryQueueStore();
     const queue = new MediaQueue(store);
     await queue.enqueue(context, '01JY8Z8F6ME4F0Y9QH2X6D4R7', new Blob(['photo']), 'image/jpeg');
     const upload = vi
       .fn()
       .mockRejectedValueOnce(new Error('network'))
-      .mockResolvedValueOnce({ status: 'READY' });
+      .mockResolvedValueOnce({ status: 'UPLOADED' });
 
     await queue.uploadPending(upload);
     expect(queue.snapshot()[0]).toMatchObject({ status: 'RETRY', attempts: 1, progress: 0 });
     await queue.uploadPending(upload);
-    expect(queue.snapshot()[0]).toMatchObject({ status: 'UPLOADED', attempts: 2, progress: 100 });
+    expect(queue.snapshot()[0]).toMatchObject({
+      status: 'PROCESSING',
+      remoteStatus: 'UPLOADED',
+      attempts: 2,
+      progress: 70,
+    });
+    await queue.uploadPending(upload);
+    expect(upload).toHaveBeenCalledTimes(2);
   });
 });

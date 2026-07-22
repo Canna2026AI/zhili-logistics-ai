@@ -25,7 +25,7 @@ export function OfflinePanel({
   busy: boolean;
   message?: string;
   onSync: () => Promise<void>;
-  onExport: () => Promise<void>;
+  onExport: (reason: string) => Promise<void>;
   onConflict: (eventId: string) => Promise<void>;
   onRetry: (eventId: string) => Promise<void>;
   canSync: boolean;
@@ -34,7 +34,10 @@ export function OfflinePanel({
   onRetryMedia: (mediaId: string) => Promise<void>;
   onDeleteWork: (eventId: string) => Promise<void>;
 }) {
-  const uploaded = media.filter((item) => item.remoteStatus === 'READY').length;
+  const [takeoverReason, setTakeoverReason] = useState('');
+  const reserved = media.filter((item) =>
+    ['UPLOADED', 'SCANNING', 'READY'].includes(item.remoteStatus ?? '')
+  ).length;
   return (
     <section className="pda-page" aria-labelledby="offline-title">
       <div className="pda-page-heading">
@@ -51,9 +54,9 @@ export function OfflinePanel({
         </div>
         <div>
           <strong>
-            {uploaded}/{media.length}
+            {reserved}/{media.length}
           </strong>
-          <span>媒体 READY</span>
+          <span>媒体已预留</span>
         </div>
       </div>
       {message && (
@@ -74,16 +77,27 @@ export function OfflinePanel({
         <Button
           size="large"
           variant="secondary"
-          disabled={!exportAvailable}
-          onClick={() => void onExport()}
+          disabled={!exportAvailable || Array.from(takeoverReason.trim()).length < 5}
+          onClick={() => void onExport(takeoverReason)}
         >
           <Download aria-hidden="true" />
           导出接管
         </Button>
       </div>
-      {!exportAvailable && (
+      {events.length > 0 && (
+        <label className="pda-reason">
+          管理员接管原因
+          <textarea
+            value={takeoverReason}
+            minLength={5}
+            placeholder="例如：设备损坏，由当班主管接管"
+            onChange={(event) => setTakeoverReason(event.target.value)}
+          />
+        </label>
+      )}
+      {events.length > 0 && !exportAvailable && (
         <div className="pda-message pda-message--warning" role="status">
-          接管导出 PARTIAL：缺少服务器管理员授权/再认证契约，已 fail closed，禁止生成明文包。
+          接管导出需要在线状态与 pda.takeover.export 权限；条件不满足时不会生成或清理任何数据。
         </div>
       )}
       <div className="pda-queue-list">
@@ -129,8 +143,8 @@ export function OfflinePanel({
                   <strong>为什么：</strong>
                   {event.errorMessage ?? '状态或字段不符合契约'}
                   <br />
-                  <strong>如何修复：</strong>核对任务状态后重试；接管导出契约完成前保持 fail
-                  closed。
+                  <strong>如何修复：</strong>核对任务状态后重试；如需接管，必须联网并使用独立
+                  pda.takeover.export 权限，失败不会清理本地数据。
                   <br />
                   <strong>谁能处理：</strong>仓库主管 / pda.sync
                 </p>
@@ -142,7 +156,7 @@ export function OfflinePanel({
       </div>
       {!canSync && (
         <div className="pda-message pda-message--danger" role="alert">
-          缺少 pda.sync 权限，仅允许查看；管理员接管导出尚未开放。
+          缺少 pda.sync 权限，仅允许查看；管理员接管需要独立的 pda.takeover.export 权限。
         </div>
       )}
       {media.length > 0 && (

@@ -21,6 +21,7 @@ import { ScannerScreen } from './scanner/scanner-screen';
 import { OfflinePanel } from './offline/offline-panel';
 import { ConflictPanel } from './conflicts/conflict-panel';
 import { MyScreen } from './device-session/my-screen';
+import { DeviceTakeoverService } from './device-session/takeover-service';
 
 type Tab = 'tasks' | 'scan' | 'offline' | 'my' | 'conflict';
 
@@ -63,6 +64,10 @@ export function App({
   const media = useMemo(() => new MediaQueue(store), [store]);
   const guard = useMemo(() => new SessionGuard(queue), [queue]);
   const syncService = useMemo(() => new PdaSyncService(queue, media, port), [queue, media, port]);
+  const takeoverService = useMemo(
+    () => new DeviceTakeoverService(queue, media, port),
+    [queue, media, port]
+  );
 
   const [phase, setPhase] = useState<'loading' | 'login' | 'ready'>('loading');
   const [session, setSession] = useState<LocalDeviceSession>();
@@ -214,7 +219,7 @@ export function App({
   const synchronize = async () => {
     if (!session || !online) return;
     if (!session.permissions.includes('pda.sync')) {
-      setSyncMessage('缺少 pda.sync 权限，仅允许查看；管理员接管导出尚未开放。');
+      setSyncMessage('缺少 pda.sync 权限，仅允许查看；管理员接管需要独立权限。');
       return;
     }
     setBusy(true);
@@ -223,7 +228,7 @@ export function App({
       guard.assertAllowed('SYNC');
       const result = await syncService.synchronize(session);
       setSyncMessage(
-        `同步完成：应用 ${result.applied}，已处理 ${result.duplicate}，冲突 ${result.conflict}，拒绝 ${result.rejected}，媒体 READY ${result.mediaUploaded}。`
+        `同步完成：应用 ${result.applied}，已处理 ${result.duplicate}，冲突 ${result.conflict}，拒绝 ${result.rejected}，媒体已预留 ${result.mediaReserved}。`
       );
       changed();
     } catch (caught) {
@@ -237,11 +242,28 @@ export function App({
     }
   };
 
-  const exportQueue = async () => {
+  const exportQueue = async (reason: string) => {
+    if (!session || !online) {
+      setSyncMessage('管理员接管需要联网取得服务器短期授权，本地数据保持不变。');
+      return;
+    }
+    setBusy(true);
+    setSyncMessage(undefined);
     try {
-      await guard.exportForAdminTakeover();
+      guard.assertAllowed('EXPORT');
+      const receipt = await takeoverService.exportAndClear(session, reason);
+      setSyncMessage(
+        `接管导出已验证：${receipt.exportId}。本地事件与媒体已原子清理，可以重新认证换仓。`
+      );
+      changed();
     } catch (caught) {
-      setSyncMessage(caught instanceof Error ? caught.message : '接管导出已被安全策略阻止。');
+      if (apiStatus(caught) === 401) {
+        await guard.invalidate('API 401 during takeover export');
+        setError(explain(caught));
+        setPhase('login');
+      } else setSyncMessage(explain(caught));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -298,7 +320,7 @@ export function App({
             重新认证原绑定
           </Button>
           <p className="pda-form-note">
-            管理员接管因缺少服务器授权契约保持 PARTIAL，当前禁止明文导出。
+            请重新认证本地事件所属的原绑定；随后可使用服务器授权的加密管理员接管流程。
           </p>
         </section>
       </main>
@@ -306,7 +328,9 @@ export function App({
   }
 
   const expired = guard.isExpired();
-  const headerMediaReady = mediaItems.filter((item) => item.remoteStatus === 'READY').length;
+  const headerMediaReserved = mediaItems.filter((item) =>
+    ['UPLOADED', 'SCANNING', 'READY'].includes(item.remoteStatus ?? '')
+  ).length;
   return (
     <main className="pda-app" data-revision={revision}>
       <header className="pda-topbar">
@@ -322,7 +346,7 @@ export function App({
             {online ? '在线' : '离线'} · 待同步{' '}
             <b data-testid="pending-count">{snapshot.events.length}</b>/200
             <br />
-            媒体 {headerMediaReady}/{mediaItems.length}
+            媒体 {headerMediaReserved}/{mediaItems.length}
           </span>
         </div>
       </header>
@@ -400,7 +424,12 @@ export function App({
             canResolveConflict={session.permissions.includes('pda.conflict.resolve')}
             onSync={synchronize}
             onExport={exportQueue}
-            exportAvailable={false}
+            exportAvailable={
+              online &&
+              !busy &&
+              snapshot.events.length > 0 &&
+              session.permissions.includes('pda.takeover.export')
+            }
             onRetryMedia={async (mediaId) => {
               guard.assertAllowed('SYNC');
               await media.uploadRefs(session, [mediaId], (item) =>
@@ -456,7 +485,12 @@ export function App({
               setError(undefined);
             }}
             onExport={exportQueue}
-            exportAvailable={false}
+            exportAvailable={
+              online &&
+              !busy &&
+              snapshot.events.length > 0 &&
+              session.permissions.includes('pda.takeover.export')
+            }
           />
         )}
       </div>

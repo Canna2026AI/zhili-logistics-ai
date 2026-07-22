@@ -43,7 +43,7 @@ describe('SessionGuard', () => {
     expect(() => guard.assertAllowed('NEW_BUSINESS_EVENT')).toThrow(SessionExpiredError);
   });
 
-  it('blocks binding changes and keeps export fail closed while unsynced data exists', async () => {
+  it('blocks binding changes while unsynced data exists', async () => {
     const queue = new OfflineQueue(new MemoryQueueStore());
     await queue.restore();
     await queue.enqueue(session, {
@@ -59,7 +59,6 @@ describe('SessionGuard', () => {
     await expect(
       guard.changeBinding({ ...session, warehouseId: '01JWAREHOUSE00000000000002' })
     ).rejects.toBeInstanceOf(UnsafeBindingChangeError);
-    await expect(guard.exportForAdminTakeover()).rejects.toThrow('禁止导出');
     await expect(
       guard.changeBinding({ ...session, warehouseId: '01JWAREHOUSE00000000000002' })
     ).rejects.toBeInstanceOf(UnsafeBindingChangeError);

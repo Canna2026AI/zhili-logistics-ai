@@ -100,8 +100,7 @@ export class MediaQueue {
     ) => Promise<{ status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED' }>
   ) {
     for (const item of this.items.filter(
-      (candidate) =>
-        select(candidate) && ['PENDING', 'RETRY', 'PROCESSING'].includes(candidate.status)
+      (candidate) => select(candidate) && ['PENDING', 'RETRY'].includes(candidate.status)
     )) {
       item.status = 'UPLOADING';
       item.progress = 10;
@@ -133,12 +132,6 @@ export class MediaQueue {
     const mismatch = this.items.find((item) => !sameContext(item.context, context));
     if (mismatch)
       throw new Error(`本地媒体 ${mismatch.mediaId} 与当前设备会话不匹配，已停止同步。`);
-  }
-
-  areReady(mediaRefs: string[]) {
-    return mediaRefs.every(
-      (mediaId) => this.items.find((item) => item.mediaId === mediaId)?.remoteStatus === 'READY'
-    );
   }
 
   areReserved(mediaRefs: string[]) {

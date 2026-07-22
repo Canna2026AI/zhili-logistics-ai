@@ -66,8 +66,12 @@ export class PdaSyncService {
     }
     return {
       ...total,
-      mediaUploaded: mediaResult.filter((item) => item.status === 'UPLOADED').length,
-      mediaPending: mediaResult.filter((item) => item.status !== 'UPLOADED').length,
+      mediaReserved: mediaResult.filter((item) =>
+        ['UPLOADED', 'SCANNING', 'READY'].includes(item.remoteStatus ?? '')
+      ).length,
+      mediaPending: mediaResult.filter(
+        (item) => !['UPLOADED', 'SCANNING', 'READY'].includes(item.remoteStatus ?? '')
+      ).length,
     };
   }
 

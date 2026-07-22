@@ -64,6 +64,7 @@ function initialActionForTask(task: DeviceTask | undefined, permissions: readonl
 function canonicalDeliveryStatus(value: string): DeliveryStatus {
   if (
     value === 'PLANNED' ||
+    value === 'PALLETIZED' ||
     value === 'LOADED' ||
     value === 'OUT_FOR_DELIVERY' ||
     value === 'COMPLETED' ||
@@ -74,10 +75,33 @@ function canonicalDeliveryStatus(value: string): DeliveryStatus {
 }
 
 function transitionStatus(action: DeviceTaskAction): DeliveryStatus {
+  if (action === 'LAST_MILE_PALLETIZE') return 'PALLETIZED';
   if (action === 'LAST_MILE_LOAD') return 'LOADED';
   if (action === 'LAST_MILE_DELIVER') return 'OUT_FOR_DELIVERY';
   if (action === 'LAST_MILE_EXCEPTION') return 'EXCEPTION';
   throw new Error(`动作 ${action} 不是尾程状态迁移动作，已停止执行。`);
+}
+
+function deliveryScanEvidence(
+  action: DeviceTaskAction,
+  scannedCode: string,
+  payload: Record<string, unknown>
+) {
+  const palletId = typeof payload.palletCode === 'string' ? payload.palletCode : undefined;
+  const vehicleId = typeof payload.vehicleCode === 'string' ? payload.vehicleCode : undefined;
+  return {
+    scannedCode,
+    palletId: action === 'LAST_MILE_PALLETIZE' ? palletId : undefined,
+    vehicleId: action === 'LAST_MILE_LOAD' ? vehicleId : undefined,
+    exceptionCode:
+      action === 'LAST_MILE_EXCEPTION' && typeof payload.exceptionCode === 'string'
+        ? payload.exceptionCode
+        : undefined,
+    note:
+      action === 'LAST_MILE_EXCEPTION' && typeof payload.note === 'string'
+        ? payload.note
+        : undefined,
+  };
 }
 
 export function ScannerScreen({
@@ -151,6 +175,7 @@ export function ScannerScreen({
       }
 
       const deliveryAction = [
+        'LAST_MILE_PALLETIZE',
         'LAST_MILE_LOAD',
         'LAST_MILE_DELIVER',
         'LAST_MILE_EXCEPTION',
@@ -187,27 +212,33 @@ export function ScannerScreen({
               `pda:media:${item.mediaId}:${item.contentHash}`
             )
           );
-          if (action === 'LAST_MILE_EXCEPTION' && !media.areReady(mediaRefs))
-            throw new Error('异常证据尚未 READY，状态未推进，媒体已保留待补传。');
+          if (!media.areReserved(mediaRefs))
+            throw new Error('媒体预留尚未被服务器接受，状态未推进，证据已保留待补传。');
         }
         const service = new LastMileService(port, {
           taskId: deliveryTask.id,
           status: canonicalDeliveryStatus(deliveryTask.status),
           version: deliveryTask.version,
         });
-        const updated = await service.transition(transitionStatus(action), {
-          ...payload,
-          scannedCode: entityRef,
-          mediaRefs,
+        const receipt = await service.transition(
+          outcome.envelope.eventId,
+          transitionStatus(action),
+          deliveryScanEvidence(action, entityRef, payload),
+          mediaRefs
+        );
+        await queue.confirmClaimedWork({
+          eventId: receipt.deviceEventId,
+          disposition: receipt.disposition,
+          claimedMediaRefs: receipt.claimedMediaRefs,
+          serverVersion: receipt.deliveryTask.version,
+          operation: 'DELIVERY_TRANSITION',
         });
-        onTaskUpdated(updated.taskId, updated.status, updated.version);
-        await queue.applySyncResults([
-          {
-            eventId: outcome.envelope.eventId,
-            disposition: 'APPLIED',
-            serverVersion: updated.version,
-          },
-        ]);
+        await media.restore();
+        onTaskUpdated(
+          receipt.deliveryTask.id,
+          receipt.deliveryTask.status,
+          receipt.deliveryTask.version
+        );
         setTone('success');
         setMessage(
           `${entityRef} · 服务端已确认 ${DEVICE_TASK_ACTIONS.find((item) => item.id === action)?.label}`
@@ -228,17 +259,18 @@ export function ScannerScreen({
         const item = media
           .snapshot(session)
           .find((candidate) => candidate.mediaId === mediaRefs[0]);
-        if (!item || item.remoteStatus !== 'READY')
+        if (!item || !media.areReserved(mediaRefs))
           throw new Error(
-            `POD 证据尚未 READY（${item?.remoteStatus ?? item?.status ?? 'MISSING'}），已保留待补传。`
+            `POD 证据预留尚未被服务器接受（${item?.remoteStatus ?? item?.status ?? 'MISSING'}），已保留待补传。`
           );
         const service = new LastMileService(port, {
           taskId: deliveryTask.id,
           status: canonicalDeliveryStatus(deliveryTask.status),
           version: deliveryTask.version,
         });
-        await service.capturePod(
+        const receipt = await service.capturePod(
           {
+            deviceEventId: outcome.envelope.eventId,
             recipientName: values.recipientName,
             signedAt: isoDateTime(values.signedAt),
             latitude: values.latitude ? Number(values.latitude) : undefined,
@@ -246,17 +278,26 @@ export function ScannerScreen({
             evidenceRefs: mediaRefs,
             note: values.note,
           },
-          [{ mediaId: item.mediaId, status: item.remoteStatus }]
+          mediaRefs.map((mediaId) => {
+            const evidence = media
+              .snapshot(session)
+              .find((candidate) => candidate.mediaId === mediaId);
+            return { mediaId, status: evidence?.remoteStatus ?? evidence?.status ?? 'MISSING' };
+          })
         );
-        const updated = service.snapshot();
-        onTaskUpdated(updated.taskId, updated.status, updated.version);
-        await queue.applySyncResults([
-          {
-            eventId: outcome.envelope.eventId,
-            disposition: 'APPLIED',
-            serverVersion: updated.version,
-          },
-        ]);
+        await queue.confirmClaimedWork({
+          eventId: receipt.deviceEventId,
+          disposition: receipt.disposition,
+          claimedMediaRefs: receipt.claimedMediaRefs,
+          serverVersion: receipt.deliveryTask.version,
+          operation: 'PROOF_OF_DELIVERY',
+        });
+        await media.restore();
+        onTaskUpdated(
+          receipt.deliveryTask.id,
+          receipt.deliveryTask.status,
+          receipt.deliveryTask.version
+        );
         setTone('success');
         setMessage(`${entityRef} · POD 已由服务端创建不可变版本`);
       } else {
@@ -368,7 +409,7 @@ export function ScannerScreen({
               return (
                 <option key={item.id} value={item.id} disabled={Boolean(reason)}>
                   {item.label}
-                  {reason ? `（${item.id === 'LAST_MILE_PALLETIZE' ? '契约待扩展' : reason}）` : ''}
+                  {reason ? `（${reason}）` : ''}
                 </option>
               );
             })}
@@ -438,6 +479,7 @@ export function ScannerScreen({
           'CONTAINERIZE',
           'DISPATCH',
           'LAST_MILE_INTAKE',
+          'LAST_MILE_PALLETIZE',
           'LAST_MILE_LOAD',
         ].includes(action) && (
           <label>
@@ -455,9 +497,11 @@ export function ScannerScreen({
                         ? '出库作业码'
                         : action === 'LAST_MILE_INTAKE'
                           ? '站点码'
-                          : action === 'LAST_MILE_LOAD'
-                            ? '车辆码'
-                            : '目标容器 / 作业码'}
+                          : action === 'LAST_MILE_PALLETIZE'
+                            ? '托盘码'
+                            : action === 'LAST_MILE_LOAD'
+                              ? '车辆码'
+                              : '目标容器 / 作业码'}
             <input
               value={values.operationCode ?? ''}
               onChange={(event) => update('operationCode', event.target.value)}

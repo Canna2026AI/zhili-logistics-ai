@@ -22,13 +22,6 @@ export class UnsafeBindingChangeError extends Error {
   }
 }
 
-export class AdminTakeoverUnavailableError extends Error {
-  constructor() {
-    super('管理员接管尚缺少服务器授权与重新认证契约；为避免明文泄露，当前版本禁止导出。');
-    this.name = 'AdminTakeoverUnavailableError';
-  }
-}
-
 type SessionAction = 'NEW_BUSINESS_EVENT' | 'EXPORT' | 'SYNC' | 'REAUTHENTICATE';
 
 export class SessionGuard {
@@ -81,15 +74,6 @@ export class SessionGuard {
       invalidReason: reason,
     };
     await this.queue.setMeta('device-session', this.session);
-  }
-
-  async exportForAdminTakeover() {
-    await this.queue.setMeta('last-admin-export-intent', {
-      requestedAt: this.now().toISOString(),
-      pendingCount: this.queue.snapshot().events.length,
-      status: 'BLOCKED_MISSING_SERVER_AUTHORIZATION_CONTRACT',
-    });
-    throw new AdminTakeoverUnavailableError();
   }
 
   async changeBinding(next: LocalDeviceSession, _takeoverToken?: string) {

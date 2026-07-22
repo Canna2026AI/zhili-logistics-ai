@@ -140,7 +140,6 @@ export const DEVICE_TASK_ACTIONS = [
     allowedTaskTypes: ['LAST_MILE_DELIVERY'],
     allowedStatuses: ['PLANNED'],
     requiredFields: ['scannedCode', 'operationCode'],
-    unavailableReason: '契约待扩展，当前禁止提交',
   },
   {
     id: 'LAST_MILE_LOAD',
@@ -148,7 +147,7 @@ export const DEVICE_TASK_ACTIONS = [
     group: '尾程',
     requiredPermission: 'lastmile.delivery.execute',
     allowedTaskTypes: ['LAST_MILE_DELIVERY'],
-    allowedStatuses: ['PLANNED'],
+    allowedStatuses: ['PALLETIZED'],
     requiredFields: ['scannedCode', 'operationCode'],
   },
   {
@@ -166,7 +165,7 @@ export const DEVICE_TASK_ACTIONS = [
     group: '尾程',
     requiredPermission: 'lastmile.delivery.execute',
     allowedTaskTypes: ['LAST_MILE_DELIVERY'],
-    allowedStatuses: ['PLANNED', 'LOADED', 'OUT_FOR_DELIVERY'],
+    allowedStatuses: ['PLANNED', 'PALLETIZED', 'LOADED', 'OUT_FOR_DELIVERY'],
     requiredFields: ['scannedCode', 'exceptionCode', 'note', 'media'],
   },
   {
@@ -309,7 +308,10 @@ export function buildTaskPayload(
       stationCode: requiredText(values, 'operationCode', '站点码'),
     };
   if (action === 'LAST_MILE_PALLETIZE')
-    throw new TaskActionValidationError('尾程打托契约待扩展，当前禁止提交，本地队列未写入。');
+    return {
+      deliveryTaskCode: scannedCode,
+      palletCode: requiredText(values, 'operationCode', '托盘码'),
+    };
   if (action === 'LAST_MILE_LOAD')
     return {
       deliveryTaskCode: scannedCode,
@@ -377,9 +379,8 @@ export function actionUnavailableReason(
   action: DeviceTaskAction,
   task: DeviceTask | undefined,
   permissions: readonly string[]
-) {
+): string | undefined {
   const definition = getTaskActionDefinition(action);
-  if ('unavailableReason' in definition) return definition.unavailableReason;
   if (!permissions.includes(definition.requiredPermission))
     return `缺少 ${definition.requiredPermission} 权限`;
   if (task && !(definition.allowedTaskTypes as readonly DeviceTaskType[]).includes(task.type))
@@ -395,8 +396,6 @@ export function assertTaskActionAllowed(
   permissions: readonly string[]
 ) {
   const definition = getTaskActionDefinition(action);
-  if ('unavailableReason' in definition)
-    throw new TaskActionValidationError(`${definition.unavailableReason}，本地队列未写入。`);
   if (!(definition.allowedTaskTypes as readonly DeviceTaskType[]).includes(task.type))
     throw new TaskActionValidationError(
       `${definition.label} 不适用于任务类型 ${task.type}，本地队列未写入。`

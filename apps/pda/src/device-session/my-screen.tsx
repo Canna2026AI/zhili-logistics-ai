@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Button } from '@zhili/ui';
 import type { LocalDeviceSession } from '../session/session-guard';
 
@@ -13,9 +14,10 @@ export function MyScreen({
   expired: boolean;
   pendingCount: number;
   onReauth: () => void;
-  onExport: () => Promise<void>;
+  onExport: (reason: string) => Promise<void>;
   exportAvailable: boolean;
 }) {
+  const [takeoverReason, setTakeoverReason] = useState('');
   return (
     <section className="pda-page" aria-labelledby="my-title">
       <div className="pda-page-heading">
@@ -45,19 +47,30 @@ export function MyScreen({
         <Button size="large" onClick={onReauth}>
           重新认证
         </Button>
+        {pendingCount > 0 && (
+          <label className="pda-reason">
+            管理员接管原因
+            <textarea
+              value={takeoverReason}
+              minLength={5}
+              placeholder="例如：设备损坏，由当班主管接管"
+              onChange={(event) => setTakeoverReason(event.target.value)}
+            />
+          </label>
+        )}
         <Button
           size="large"
           variant="secondary"
-          disabled={!exportAvailable}
-          onClick={() => void onExport()}
+          disabled={!exportAvailable || Array.from(takeoverReason.trim()).length < 5}
+          onClick={() => void onExport(takeoverReason)}
         >
           导出并由管理员接管
         </Button>
       </div>
       {pendingCount > 0 && (
         <div className="pda-message pda-message--warning">
-          管理员接管尚缺服务器授权/再认证契约，当前保持 fail
-          closed，不生成明文导出且不会清库换仓（PARTIAL）。
+          接管包将使用服务器短期 RSA 公钥和本机 AES-256-GCM 加密上传；只有 VERIFIED
+          回执与作用域、双哈希完全一致时才清理本地密文并允许换仓。
         </div>
       )}
     </section>

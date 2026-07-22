@@ -143,13 +143,13 @@ describe('PDA task action schemas', () => {
     }
   );
 
-  it('keeps LAST_MILE_PALLETIZE fail closed until the contract is extended', () => {
-    expect(() =>
+  it('builds the canonical LAST_MILE_PALLETIZE intent', () => {
+    expect(
       buildTaskPayload('LAST_MILE_PALLETIZE', {
         scannedCode: 'LM-1',
         operationCode: 'PALLET-9',
       })
-    ).toThrow(/契约待扩展/);
+    ).toEqual({ deliveryTaskCode: 'LM-1', palletCode: 'PALLET-9' });
   });
 
   it('rejects zero pick quantity and malformed POD time instead of normalizing placeholders', () => {

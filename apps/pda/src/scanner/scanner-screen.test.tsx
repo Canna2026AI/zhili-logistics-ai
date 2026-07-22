@@ -3,12 +3,12 @@ import 'fake-indexeddb/auto';
 import '@testing-library/jest-dom/vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEVICE_TASK_ACTIONS, type DeviceTaskAction } from '../domain/task-actions';
 import type { DeviceTask } from '../domain/types';
 import { MediaQueue } from '../offline/media-queue';
 import { OfflineQueue } from '../offline/offline-queue';
-import { IndexedDbQueueStore, type QueueCodec } from '../offline/queue-store';
+import { IndexedDbQueueStore, MemoryQueueStore, type QueueCodec } from '../offline/queue-store';
 import { MemoryPdaPort } from '../ports/memory-pda-port';
 import type { LocalDeviceSession } from '../session/session-guard';
 import { ScannerScreen } from './scanner-screen';
@@ -102,4 +102,132 @@ describe('ScannerScreen action safety', () => {
       });
     }
   );
+
+  it('submits PALLETIZED with the exact device event and clears only its authoritative receipt', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const selectedTask: DeviceTask = {
+      id: '01JPDATASK0000000000000002',
+      type: 'LAST_MILE_DELIVERY',
+      reference: 'LM-PALLET',
+      status: 'PLANNED',
+      priority: 'HIGH',
+      version: 7,
+    };
+    const port = new MemoryPdaPort();
+    const transition = vi.spyOn(port, 'updateDeliveryTaskStatus');
+    const onTaskUpdated = vi.fn();
+    render(
+      <ScannerScreen
+        session={session}
+        queue={queue}
+        media={media}
+        port={port}
+        online
+        tasks={[selectedTask]}
+        selectedTask={selectedTask}
+        initialCode={selectedTask.reference}
+        assertBusinessAllowed={() => undefined}
+        onChanged={() => undefined}
+        onTaskUpdated={onTaskUpdated}
+        onUnauthorized={async () => undefined}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('作业动作'), {
+      target: { value: 'LAST_MILE_PALLETIZE' },
+    });
+    await userEvent.type(screen.getByLabelText('托盘码'), 'PALLET-9');
+    await userEvent.click(screen.getByRole('button', { name: '确认作业' }));
+
+    await screen.findByText(/服务端已确认 尾程打托/);
+    const body = transition.mock.calls[0]![3];
+    expect(body).toMatchObject({
+      deviceEventId: expect.stringMatching(/^01J/),
+      targetStatus: 'PALLETIZED',
+      mediaRefs: [],
+      scanEvidence: { scannedCode: 'LM-PALLET', palletId: 'PALLET-9' },
+    });
+    expect(onTaskUpdated).toHaveBeenCalledWith(selectedTask.id, 'PALLETIZED', 8);
+    expect(queue.snapshot().events).toEqual([]);
+  });
+
+  it('uses the POD authoritative version and atomically deletes the claimed evidence', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const selectedTask: DeviceTask = {
+      id: '01JPDATASK0000000000000002',
+      type: 'LAST_MILE_DELIVERY',
+      reference: 'LM-POD',
+      status: 'OUT_FOR_DELIVERY',
+      priority: 'HIGH',
+      version: 8,
+    };
+    const port = new MemoryPdaPort();
+    const capture = vi
+      .spyOn(port, 'captureProofOfDelivery')
+      .mockImplementation(async (deliveryTaskId, _etag, _key, body) => ({
+        deviceEventId: body.deviceEventId,
+        disposition: 'APPLIED',
+        deliveryTask: {
+          id: deliveryTaskId,
+          taskNo: 'LM-POD',
+          status: 'COMPLETED',
+          waybillCount: 1,
+          version: 63,
+        },
+        proofOfDelivery: {
+          id: '01JPOD0000000000000000001',
+          deliveryTaskId,
+          versionNo: 4,
+          recipientName: body.recipientName,
+          signedAt: body.signedAt,
+          evidenceRefs: body.evidenceRefs,
+        },
+        claimedMediaRefs: body.evidenceRefs,
+      }));
+    const onTaskUpdated = vi.fn();
+    render(
+      <ScannerScreen
+        session={session}
+        queue={queue}
+        media={media}
+        port={port}
+        online
+        tasks={[selectedTask]}
+        selectedTask={selectedTask}
+        initialCode={selectedTask.reference}
+        assertBusinessAllowed={() => undefined}
+        onChanged={() => undefined}
+        onTaskUpdated={onTaskUpdated}
+        onUnauthorized={async () => undefined}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('作业动作'), { target: { value: 'CAPTURE_POD' } });
+    await userEvent.type(screen.getByLabelText('签收姓名'), '陈女士');
+    fireEvent.change(screen.getByLabelText('签收时间'), {
+      target: { value: '2026-07-22T10:00' },
+    });
+    await userEvent.upload(
+      screen.getByLabelText('拍照或选择图片'),
+      new File(['pod-photo'], 'pod.jpg', { type: 'image/jpeg' })
+    );
+    await userEvent.click(screen.getByRole('button', { name: '确认作业' }));
+
+    await screen.findByText(/POD 已由服务端创建不可变版本/);
+    expect(capture.mock.calls[0]![3]).toMatchObject({
+      deviceEventId: expect.stringMatching(/^01J/),
+      recipientName: '陈女士',
+      evidenceRefs: [expect.stringMatching(/^media-/)],
+    });
+    expect(onTaskUpdated).toHaveBeenCalledWith(selectedTask.id, 'COMPLETED', 63);
+    expect(queue.snapshot().events).toEqual([]);
+    expect(media.snapshot()).toEqual([]);
+    expect(await store.getMedia()).toEqual([]);
+  });
 });

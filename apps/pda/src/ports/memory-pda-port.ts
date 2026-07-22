@@ -49,14 +49,22 @@ export class MemoryPdaPort implements PdaPort {
   async getDeviceTasks(_deviceId: string) {
     void _deviceId;
     return [
-      {
-        id: '01JPDATASK0000000000000001',
+      ...[
+        'S2505120004',
+        'OK-1',
+        'CONFLICT-KEEP',
+        'CONFLICT-MANUAL',
+        'CONFLICT-REAPPLY',
+        'REJECT-1',
+        'MEDIA-SCAN-1',
+      ].map((reference, index) => ({
+        id: `01JPDAMOCK${String(index + 1).padStart(16, '0')}`,
         type: 'RECEIVE' as const,
-        reference: 'S2505120004',
+        reference,
         status: 'READY',
         priority: 'URGENT' as const,
         version: 7,
-      },
+      })),
       {
         id: '01JPDATASK0000000000000002',
         type: 'LAST_MILE_DELIVERY' as const,

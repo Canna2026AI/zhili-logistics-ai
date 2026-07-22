@@ -256,7 +256,7 @@ export class OfflineQueue {
   }
 
   async exportQueue() {
-    throw new Error('明文队列导出已禁用；等待服务器管理员授权与加密接管包契约。');
+    throw new Error('明文队列导出永久禁用；请使用服务器授权的加密管理员接管流程。');
   }
 
   async clear() {

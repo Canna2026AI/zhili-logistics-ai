@@ -205,7 +205,7 @@ describe('OfflineQueue', () => {
       })
     ).rejects.toBeInstanceOf(QueueCapacityError);
     expect(queue.snapshot().events).toHaveLength(200);
-    await expect(queue.exportQueue()).rejects.toThrow('明文队列导出已禁用');
+    await expect(queue.exportQueue()).rejects.toThrow('明文队列导出永久禁用');
   });
 
   it('processes APPLIED, DUPLICATE, CONFLICT and REJECTED results per event', async () => {
