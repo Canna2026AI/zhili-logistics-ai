@@ -93,6 +93,7 @@ export function BillingFlow({
     status: string;
     version: number;
   } | null>(null);
+  const [receiptVersion, setReceiptVersion] = useState(1);
   const current = meta[step];
 
   const pay = async () => {
@@ -139,7 +140,7 @@ export function BillingFlow({
     try {
       await customerPort.allocateReceipt(
         '01JRECEIPT0000000000000001',
-        1,
+        receiptVersion,
         '01JSTATEMENT00000000000001',
         '600.00'
       );
@@ -149,6 +150,22 @@ export function BillingFlow({
       const message = error instanceof Error ? error.message : '核销失败。';
       notify(message);
       if (/409|冲突|版本|STALE/i.test(message)) setStep('conflict');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const refreshAllocation = async () => {
+    setBusy(true);
+    try {
+      const refreshed = await customerPort.refreshReceiptAllocation(
+        '01JRECEIPT0000000000000001',
+        receiptVersion
+      );
+      setReceiptVersion(refreshed.version);
+      setStep('partial');
+      notify(`已刷新服务端核销版本 v${refreshed.version}，可安全重试。`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '刷新核销版本失败。');
     } finally {
       setBusy(false);
     }
@@ -232,7 +249,9 @@ export function BillingFlow({
             </>
           ) : null}
           {step === 'conflict' ? (
-            <Button onClick={() => setStep('partial')}>刷新数据</Button>
+            <Button disabled={busy} onClick={() => void refreshAllocation()}>
+              {busy ? '刷新中…' : '刷新数据'}
+            </Button>
           ) : null}
           {step === 'failed' ? <Button onClick={() => setStep('pay')}>重新支付</Button> : null}
           {step === 'success' ? <Button onClick={() => setStep('list')}>查看账单</Button> : null}

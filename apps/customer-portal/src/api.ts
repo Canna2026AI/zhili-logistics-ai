@@ -419,6 +419,19 @@ const mockCustomerCommandFetch = async (
       differences: [{ field: 'snapshotAt', local: '10:18', server: '10:21' }],
     };
   if (path === '/api/v1/portal/dashboard:refresh') return { version: 'v13', refreshedAt: '10:21' };
+  const refreshedReceipt = path.match(/^\/api\/v1\/portal\/receipts\/([^/]+):refresh$/);
+  if (refreshedReceipt)
+    return {
+      receiptId: refreshedReceipt[1],
+      version: 2,
+      differences: [
+        {
+          field: 'allocated',
+          local: '¥67,820.00',
+          server: '¥67,820.00',
+        },
+      ],
+    };
   if (path === '/api/v1/portal/notifications:retry-failed') {
     const itemIds = body.itemIds as string[];
     return { items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) };
@@ -663,6 +676,16 @@ export const customerPort = {
       body: { allocations: [{ statementId, amount: { amount, currency: 'CNY' } }] },
     });
     return ensure(response.data, response.error).data;
+  },
+  refreshReceiptAllocation(receiptId: string, localVersion: number) {
+    return customerCommand<
+      { localVersion: number },
+      {
+        receiptId: string;
+        version: number;
+        differences: VersionDifference[];
+      }
+    >(`/api/v1/portal/receipts/${receiptId}:refresh`, { localVersion });
   },
   async createImport(fileName: string) {
     const response = await client.POST('/imports', {

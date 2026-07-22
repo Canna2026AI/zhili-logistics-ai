@@ -81,6 +81,7 @@ describe('Figma Customer 关键工作流', () => {
     const createPayment = vi.spyOn(customerApi.customerPort, 'createPayment');
     const getPaymentOrder = vi.spyOn(customerApi.customerPort, 'getPaymentOrder');
     const allocateReceipt = vi.spyOn(customerApi.customerPort, 'allocateReceipt');
+    const refreshReceiptAllocation = vi.spyOn(customerApi.customerPort, 'refreshReceiptAllocation');
     const user = userEvent.setup();
     render(<App />);
 
@@ -102,11 +103,12 @@ describe('Figma Customer 关键工作流', () => {
     await user.click(screen.getByRole('button', { name: '模拟并发更新' }));
     expect(screen.getByRole('heading', { name: '账单已被其他操作员更新' })).toBeVisible();
     await user.click(screen.getByRole('button', { name: '刷新数据' }));
+    expect(refreshReceiptAllocation).toHaveBeenCalledWith('01JRECEIPT0000000000000001', 1);
     await user.click(screen.getByRole('button', { name: '分配剩余金额' }));
     expect(screen.getByRole('heading', { name: '账单已完成全额核销' })).toBeVisible();
     expect(allocateReceipt).toHaveBeenCalledWith(
       '01JRECEIPT0000000000000001',
-      1,
+      2,
       '01JSTATEMENT00000000000001',
       '600.00'
     );
