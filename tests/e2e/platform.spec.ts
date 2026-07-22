@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import axe from 'axe-core';
 
 test('平台端代入必须展示审计影响与原因', async ({ page }) => {
   await page.goto('/');
@@ -58,4 +59,77 @@ test('平台配置回写当前租户实体且运行快照可比较', async ({ pa
     page.locator('.platform-runtime-stats > div').filter({ hasText: '失败作业' })
   ).toContainText('0 / 384');
   await expect(page.getByRole('row', { name: /支付回调/ })).toContainText('健康：0 / 384 失败');
+});
+
+test('390px 紧凑导航覆盖六个页面并管理 aria、Escape 与焦点', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  const trigger = page.getByRole('button', { name: /平台导航/ });
+
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await trigger.click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  const firstDrawer = page.getByRole('dialog', { name: '平台导航菜单' });
+  await expect(firstDrawer).toBeVisible();
+  await expect(firstDrawer.getByRole('button', { name: '关闭' })).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(firstDrawer.getByRole('button', { name: '运行中心' })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(firstDrawer.getByRole('button', { name: '关闭' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await expect(trigger).toBeFocused();
+
+  for (const destination of [
+    '租户管理',
+    '套餐与模块',
+    '配额与用量',
+    '平台公告',
+    '代入与审计',
+    '运行中心',
+  ]) {
+    await trigger.click();
+    const drawer = page.getByRole('dialog', { name: '平台导航菜单' });
+    await drawer.getByRole('button', { name: destination }).click();
+    await expect(page.getByRole('heading', { name: destination })).toBeVisible();
+    await expect(drawer).not.toBeVisible();
+    await expect(trigger).toBeFocused();
+  }
+});
+
+test('平台全局搜索键盘打开规范租户、点击作业跳转并呈现真实零结果', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/');
+  const searchbox = page.getByRole('combobox', { name: '平台全局搜索' });
+
+  await searchbox.fill('上海智立');
+  await expect(
+    page.getByRole('option', { name: /上海智立科技有限公司.*租户.*zhili-sh/ })
+  ).toBeVisible();
+  await searchbox.press('ArrowDown');
+  await searchbox.press('Enter');
+  await expect(page.getByRole('dialog', { name: '租户详情' })).toContainText('zhili-sh');
+  await page.keyboard.press('Escape');
+
+  await searchbox.fill('支付回调');
+  await page.getByRole('option', { name: /支付回调.*运行作业.*运行中心/ }).click();
+  await expect(page.getByRole('heading', { name: '运行中心' })).toBeVisible();
+  await expect(page.getByRole('table', { name: '运行作业' })).toContainText('支付回调');
+
+  await searchbox.fill('绝对不存在的租户或作业');
+  await expect(page.getByRole('status')).toContainText(
+    '未找到与“绝对不存在的租户或作业”匹配的结果'
+  );
+
+  await page.addScriptTag({ content: axe.source });
+  const violations = await page.evaluate(async () => {
+    const runtime = (globalThis as typeof globalThis & { axe: typeof axe }).axe;
+    const result = await runtime.run(document, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] },
+    });
+    return result.violations.filter(
+      (violation) => violation.impact === 'critical' || violation.impact === 'serious'
+    );
+  });
+  expect(violations).toEqual([]);
 });

@@ -23,6 +23,15 @@ type Impersonation = {
   reason: string;
   expiresAt: number;
 };
+type SearchResult = {
+  id: string;
+  label: string;
+  type: '页面' | '租户' | '模块' | '公告' | '审计记录' | '运行作业';
+  context: string;
+  page: Page;
+  tenantId?: string;
+  keywords?: string;
+};
 
 const tenantSeed: Tenant[] = [
   {
@@ -133,6 +142,136 @@ const modules = [
   '客户门户',
   '自动化',
 ];
+const announcementSeed = ['2026 年 5 月例行维护通知'];
+const auditSearchRecords = [
+  {
+    id: 'audit-impersonation',
+    label: '以管理员身份代入',
+    context: '上海智立科技有限公司 · 协助排查订单同步问题',
+  },
+  {
+    id: 'audit-entitlement',
+    label: '授权变更',
+    context: '广州港捷供应链管理 · 开启模块「自动化」',
+  },
+];
+const runtimeServices = [
+  { id: 'runtime-payment', label: '支付回调' },
+  { id: 'runtime-ups', label: 'UPS 轨迹同步' },
+  { id: 'runtime-dhl', label: 'DHL 下单' },
+];
+
+function pageAvailable(page: Page, impersonating: boolean) {
+  return !impersonating || page === '代入与审计' || page === '运行中心';
+}
+
+function GlobalSearch({
+  results,
+  value,
+  onChange,
+  onSelect,
+}: {
+  results: SearchResult[];
+  value: string;
+  onChange: (value: string) => void;
+  onSelect: (result: SearchResult) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const hasQuery = Boolean(value.trim());
+  const expanded = open && hasQuery;
+  const select = (index: number) => {
+    const result = results[index];
+    if (!result) return;
+    onSelect(result);
+    setOpen(false);
+    setActiveIndex(-1);
+  };
+
+  return (
+    <form
+      className="platform-global-search"
+      role="search"
+      onSubmit={(event) => {
+        event.preventDefault();
+        select(activeIndex >= 0 ? activeIndex : 0);
+      }}
+    >
+      <input
+        type="search"
+        role="combobox"
+        aria-label="平台全局搜索"
+        aria-autocomplete="list"
+        aria-controls="platform-global-search-results"
+        aria-expanded={expanded}
+        aria-activedescendant={
+          expanded && activeIndex >= 0
+            ? `platform-search-result-${results[activeIndex]?.id}`
+            : undefined
+        }
+        placeholder="搜索租户、作业或审计记录"
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setOpen(true);
+          setActiveIndex(-1);
+        }}
+        onFocus={() => hasQuery && setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            if (!expanded) return;
+            event.preventDefault();
+            event.stopPropagation();
+            setOpen(false);
+            setActiveIndex(-1);
+          } else if (event.key === 'ArrowDown' && results.length) {
+            event.preventDefault();
+            setOpen(true);
+            setActiveIndex((current) => (current + 1) % results.length);
+          } else if (event.key === 'ArrowUp' && results.length) {
+            event.preventDefault();
+            setOpen(true);
+            setActiveIndex((current) => (current <= 0 ? results.length - 1 : current - 1));
+          } else if (event.key === 'Enter' && expanded) {
+            event.preventDefault();
+            select(activeIndex >= 0 ? activeIndex : 0);
+          }
+        }}
+      />
+      {expanded ? (
+        <div className="platform-search-popover">
+          {results.length ? (
+            <div id="platform-global-search-results" role="listbox" aria-label="平台全局搜索结果">
+              {results.map((result, index) => (
+                <button
+                  id={`platform-search-result-${result.id}`}
+                  key={result.id}
+                  type="button"
+                  role="option"
+                  aria-selected={activeIndex === index}
+                  aria-label={`${result.label}，${result.type}，${result.context}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => select(index)}
+                >
+                  <span>
+                    <strong>{result.label}</strong>
+                    <small>{result.context}</small>
+                  </span>
+                  <em>{result.type}</em>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p id="platform-global-search-results" role="status">
+              未找到与“{value.trim()}”匹配的结果
+            </p>
+          )}
+        </div>
+      ) : null}
+    </form>
+  );
+}
 
 function Header({
   title,
@@ -581,10 +720,10 @@ function AnnouncementsPage({ notify }: { notify: (text: string) => void }) {
   const [announcements, setAnnouncements] = useState<string[]>(() => {
     try {
       return JSON.parse(
-        localStorage.getItem('zhili.platform.announcements') ?? '["2026 年 5 月例行维护通知"]'
+        localStorage.getItem('zhili.platform.announcements') ?? JSON.stringify(announcementSeed)
       ) as string[];
     } catch {
-      return ['2026 年 5 月例行维护通知'];
+      return announcementSeed;
     }
   });
   return (
@@ -651,7 +790,7 @@ function AuditPage({ auditReason }: { auditReason: string }) {
   return (
     <>
       <Header title="代入与审计" description="代入时长、原因、操作对象和退出时间完整留痕。" />
-      <div className="platform-table-wrap">
+      <div className="platform-table-wrap" tabIndex={0} aria-label="审计记录可滚动区域">
         <table className="platform-table" aria-label="审计记录">
           <thead>
             <tr>
@@ -668,7 +807,7 @@ function AuditPage({ auditReason }: { auditReason: string }) {
               <td>2026-05-12 10:21</td>
               <td>张伟（admin）</td>
               <td>上海智立科技有限公司</td>
-              <td>以管理员身份代入（60 分钟）</td>
+              <td>{auditSearchRecords[0].label}（60 分钟）</td>
               <td>{auditReason || '协助排查订单同步问题'}</td>
               <td>
                 <StatusTag tone="success">已审计</StatusTag>
@@ -678,7 +817,7 @@ function AuditPage({ auditReason }: { auditReason: string }) {
               <td>2026-05-10 15:42</td>
               <td>系统</td>
               <td>广州港捷供应链管理</td>
-              <td>授权变更</td>
+              <td>{auditSearchRecords[1].label}</td>
               <td>开启模块「自动化」</td>
               <td>
                 <StatusTag tone="success">完成</StatusTag>
@@ -838,7 +977,7 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
               </div>
             ))}
           </section>
-          <div className="platform-table-wrap">
+          <div className="platform-table-wrap" tabIndex={0} aria-label="运行作业可滚动区域">
             <table className="platform-table" aria-label="运行作业">
               <thead>
                 <tr>
@@ -852,7 +991,7 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
               </thead>
               <tbody>
                 <tr>
-                  <td>支付回调</td>
+                  <td>{runtimeServices[0].label}</td>
                   <td>2026-05-12 10:21</td>
                   <td>{384 - failedItemIds.length}</td>
                   <td>{failedItemIds.length}</td>
@@ -868,7 +1007,7 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
                 {state === 'normal' ? (
                   <>
                     <tr>
-                      <td>UPS 轨迹同步</td>
+                      <td>{runtimeServices[1].label}</td>
                       <td>2026-05-12 10:20</td>
                       <td>1,248</td>
                       <td>0</td>
@@ -878,7 +1017,7 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
                       </td>
                     </tr>
                     <tr>
-                      <td>DHL 下单</td>
+                      <td>{runtimeServices[2].label}</td>
                       <td>2026-05-12 10:19</td>
                       <td>684</td>
                       <td>0</td>
@@ -902,6 +1041,8 @@ export function App() {
   const [page, setPage] = useState<Page>('租户管理');
   const [tenantRows, setTenantRows] = useState<Tenant[]>(readTenants);
   const [search, setSearch] = useState('');
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [detail, setDetail] = useState<Tenant | null>(null);
   const [impersonate, setImpersonate] = useState<Tenant | null>(null);
   const [reason, setReason] = useState('协助排查订单同步问题');
@@ -929,6 +1070,61 @@ export function App() {
       ),
     [search, tenantRows]
   );
+  const globalSearchResults = useMemo(() => {
+    const index: SearchResult[] = [
+      ...pages.map((item) => ({
+        id: `page-${item}`,
+        label: item,
+        type: '页面' as const,
+        context: '平台导航',
+        page: item,
+      })),
+      ...tenantRows.map((tenant) => ({
+        id: `tenant-${tenant.id}`,
+        label: tenant.name,
+        type: '租户' as const,
+        context: `${tenant.slug} · ${tenant.plan}`,
+        page: '租户管理' as const,
+        tenantId: tenant.id,
+        keywords: `${tenant.health} ${tenant.status}`,
+      })),
+      ...modules.map((module) => ({
+        id: `module-${module}`,
+        label: module,
+        type: '模块' as const,
+        context: '套餐与模块',
+        page: '套餐与模块' as const,
+      })),
+      ...announcementSeed.map((announcement, index) => ({
+        id: `announcement-${index}`,
+        label: announcement,
+        type: '公告' as const,
+        context: '平台公告',
+        page: '平台公告' as const,
+      })),
+      ...auditSearchRecords.map((record) => ({
+        ...record,
+        type: '审计记录' as const,
+        page: '代入与审计' as const,
+      })),
+      ...runtimeServices.map((service) => ({
+        ...service,
+        type: '运行作业' as const,
+        context: '运行中心',
+        page: '运行中心' as const,
+      })),
+    ];
+    const query = globalSearch.trim().toLocaleLowerCase('zh-CN');
+    if (!query) return [];
+    return index
+      .filter((result) => pageAvailable(result.page, Boolean(session)))
+      .filter((result) =>
+        `${result.label} ${result.type} ${result.context} ${result.keywords ?? ''}`
+          .toLocaleLowerCase('zh-CN')
+          .includes(query)
+      )
+      .slice(0, 8);
+  }, [globalSearch, session, tenantRows]);
   useEffect(() => {
     if (!session) return;
     const update = () => {
@@ -979,7 +1175,18 @@ export function App() {
       setToast(error instanceof Error ? error.message : '租户创建失败。');
     }
   };
-  const go = (next: Page) => setPage(next);
+  const go = (next: Page) => {
+    if (!pageAvailable(next, Boolean(session))) return;
+    setPage(next);
+  };
+  const navigateFromSearch = (result: SearchResult) => {
+    if (!pageAvailable(result.page, Boolean(session))) return;
+    go(result.page);
+    if (result.tenantId) {
+      const tenant = tenantRows.find((item) => item.id === result.tenantId);
+      if (tenant) setDetail(tenant);
+    }
+  };
   let content: ReactNode;
   if (page === '租户管理')
     content = (
@@ -1046,6 +1253,16 @@ export function App() {
         <div className="platform-brand">
           <span>智</span>智立科技物流AI系统
         </div>
+        <button
+          className="platform-mobile-nav-trigger"
+          type="button"
+          aria-label={mobileNavOpen ? '关闭平台导航' : '打开平台导航'}
+          aria-expanded={mobileNavOpen}
+          aria-haspopup="dialog"
+          onClick={() => setMobileNavOpen(true)}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
         <nav aria-label="平台导航">
           <h2>平台运营</h2>
           {pages.slice(0, 3).map((item) => (
@@ -1083,7 +1300,12 @@ export function App() {
           <span>
             平台总览 / <strong>{page}</strong>
           </span>
-          <input aria-label="平台全局搜索" placeholder="搜索租户、作业或审计记录" />
+          <GlobalSearch
+            value={globalSearch}
+            results={globalSearchResults}
+            onChange={setGlobalSearch}
+            onSelect={navigateFromSearch}
+          />
           <span>
             ？ ♧ <b>张</b>
           </span>
@@ -1128,6 +1350,25 @@ export function App() {
           </button>
         </div>
       ) : null}
+      <Drawer open={mobileNavOpen} title="平台导航菜单" onOpenChange={setMobileNavOpen}>
+        <nav className="platform-mobile-navigation" aria-label="紧凑平台导航">
+          {pages.map((item) => (
+            <button
+              key={item}
+              type="button"
+              disabled={!pageAvailable(item, Boolean(session))}
+              aria-current={page === item ? 'page' : undefined}
+              data-active={page === item || undefined}
+              onClick={() => {
+                go(item);
+                setMobileNavOpen(false);
+              }}
+            >
+              {item}
+            </button>
+          ))}
+        </nav>
+      </Drawer>
       <Drawer
         open={Boolean(detail)}
         title="租户详情"
