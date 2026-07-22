@@ -145,6 +145,132 @@ describe('PdaSyncService', () => {
     expect(port.uploadedMedia.has(item.mediaId)).toBe(true);
   });
 
+  it.each(['APPLIED', 'DUPLICATE'] as const)(
+    'refreshes and persists an authoritative delivery task before clearing an offline %s event',
+    async (disposition) => {
+      const store = new MemoryQueueStore();
+      const queue = new OfflineQueue(store);
+      const media = new MediaQueue(store);
+      await Promise.all([queue.restore(), media.restore()]);
+      const taskId = '01JPDATASK0000000000000002';
+      const event = await queue.enqueue(context, {
+        action: 'LAST_MILE_DELIVER',
+        entityRef: 'LM-OFFLINE',
+        payload: { taskId, deliveryTaskCode: 'LM-OFFLINE' },
+        mediaRefs: [],
+        baseVersion: 3,
+      });
+      const port = new MemoryPdaPort();
+      const order: string[] = [];
+      port.syncDeviceEvents = vi.fn().mockImplementation(async () => {
+        order.push('sync');
+        return [
+          {
+            eventId: event.envelope.eventId,
+            disposition,
+            claimedMediaRefs: [],
+            serverVersion: 4,
+          },
+        ];
+      });
+      const authoritative = [
+        {
+          id: taskId,
+          type: 'LAST_MILE_DELIVERY' as const,
+          reference: 'LM-OFFLINE',
+          status: 'OUT_FOR_DELIVERY',
+          priority: 'HIGH' as const,
+          version: 4,
+        },
+      ];
+      port.getDeviceTasks = vi.fn().mockImplementation(async () => {
+        order.push('tasks');
+        expect(queue.snapshot().events).toHaveLength(1);
+        return authoritative;
+      });
+
+      const result = await new PdaSyncService(queue, media, port).synchronize(syncContext);
+
+      expect(order).toEqual(['sync', 'tasks']);
+      expect(result.authoritativeTasks).toEqual(authoritative);
+      expect(await queue.getMeta('device-tasks')).toEqual(authoritative);
+      expect(queue.snapshot().events).toEqual([]);
+    }
+  );
+
+  it('retains an applied offline delivery event when the authoritative task refresh fails', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const event = await queue.enqueue(context, {
+      action: 'CAPTURE_POD',
+      entityRef: 'LM-OFFLINE-POD',
+      payload: { taskId: '01JPDATASK0000000000000002', recipientName: '陈女士' },
+      mediaRefs: [],
+      baseVersion: 8,
+    });
+    const port = new MemoryPdaPort();
+    port.syncDeviceEvents = vi.fn().mockResolvedValue([
+      {
+        eventId: event.envelope.eventId,
+        disposition: 'APPLIED',
+        claimedMediaRefs: [],
+        serverVersion: 9,
+      },
+    ]);
+    port.getDeviceTasks = vi.fn().mockRejectedValue(new Error('task refresh unavailable'));
+
+    await expect(new PdaSyncService(queue, media, port).synchronize(syncContext)).rejects.toThrow(
+      'task refresh unavailable'
+    );
+    expect(queue.snapshot().events).toHaveLength(1);
+  });
+
+  it.each([
+    ['reference', { reference: 'LM-WRONG', type: 'LAST_MILE_DELIVERY' as const }],
+    ['type', { reference: 'LM-SCOPED', type: 'RECEIVE' as const }],
+  ])(
+    'retains offline delivery work when authoritative task %s does not match scope',
+    async (_, mismatch) => {
+      const store = new MemoryQueueStore();
+      const queue = new OfflineQueue(store);
+      const media = new MediaQueue(store);
+      await Promise.all([queue.restore(), media.restore()]);
+      const taskId = '01JPDATASK0000000000000002';
+      const event = await queue.enqueue(context, {
+        action: 'LAST_MILE_DELIVER',
+        entityRef: 'LM-SCOPED',
+        payload: { taskId },
+        mediaRefs: [],
+        baseVersion: 3,
+      });
+      const port = new MemoryPdaPort();
+      port.syncDeviceEvents = vi.fn().mockResolvedValue([
+        {
+          eventId: event.envelope.eventId,
+          disposition: 'APPLIED',
+          claimedMediaRefs: [],
+          serverVersion: 4,
+        },
+      ]);
+      port.getDeviceTasks = vi.fn().mockResolvedValue([
+        {
+          id: taskId,
+          ...mismatch,
+          status: 'OUT_FOR_DELIVERY',
+          priority: 'HIGH',
+          version: 4,
+        },
+      ]);
+
+      await expect(new PdaSyncService(queue, media, port).synchronize(syncContext)).rejects.toThrow(
+        '权威任务快照'
+      );
+      expect(queue.snapshot().events).toHaveLength(1);
+    }
+  );
+
   it('syncs an uploaded reservation and waits for the event receipt to claim it READY', async () => {
     const store = new MemoryQueueStore();
     const queue = new OfflineQueue(store);
@@ -156,7 +282,7 @@ describe('PdaSyncService', () => {
       eventId: '01JEVENTMEDIA00000000000001',
       action: 'CAPTURE_POD',
       entityRef: 'LM1',
-      payload: {},
+      payload: { taskId: '01JPDATASK0000000000000002' },
       mediaRefs: [item.mediaId],
       mediaItems: [item],
       baseVersion: 1,
@@ -166,6 +292,16 @@ describe('PdaSyncService', () => {
       .fn()
       .mockResolvedValue({ mediaId: item.mediaId, status: 'SCANNING', objectRef: 'pda/photo' });
     const sync = vi.spyOn(port, 'syncDeviceEvents');
+    port.getDeviceTasks = vi.fn().mockResolvedValue([
+      {
+        id: '01JPDATASK0000000000000002',
+        type: 'LAST_MILE_DELIVERY',
+        reference: 'LM1',
+        status: 'COMPLETED',
+        priority: 'HIGH',
+        version: 2,
+      },
+    ]);
 
     await media.restore();
     await new PdaSyncService(queue, media, port).synchronize(syncContext);

@@ -77,6 +77,28 @@ describe('LastMileService', () => {
     expect(service.snapshot()).toMatchObject({ status: 'LOADED', version: 7 });
   });
 
+  it('rejects a forged non-success transition disposition at runtime', async () => {
+    const port = new MemoryPdaPort();
+    port.updateDeliveryTaskStatus = vi.fn().mockResolvedValue({
+      deviceEventId: eventId,
+      disposition: 'REJECTED' as never,
+      deliveryTask: {
+        id: taskId,
+        taskNo: 'LM250722001',
+        status: 'OUT_FOR_DELIVERY',
+        waybillCount: 1,
+        version: 8,
+      },
+      claimedMediaRefs: [],
+    });
+    const service = new LastMileService(port, { taskId, status: 'LOADED', version: 7 });
+
+    await expect(
+      service.transition(eventId, 'OUT_FOR_DELIVERY', { scannedCode: 'LM250722001' })
+    ).rejects.toThrow('回执');
+    expect(service.snapshot()).toMatchObject({ status: 'LOADED', version: 7 });
+  });
+
   it('uses the POD authoritative aggregate and never increments the version locally', async () => {
     const port = new MemoryPdaPort();
     const capture = vi.spyOn(port, 'captureProofOfDelivery').mockResolvedValue({

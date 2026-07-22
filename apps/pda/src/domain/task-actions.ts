@@ -418,23 +418,21 @@ export function resolveTaskForAction(
 ) {
   const normalizedReference = reference.trim();
   if (selectedTask) {
-    const current = tasks.find((candidate) => candidate.id === selectedTask.id);
-    if (!current || !taskMatchesSnapshot(current, selectedTask))
+    const matches = tasks.filter((candidate) => candidate.id === selectedTask.id);
+    const current = matches[0];
+    if (matches.length !== 1 || !current || !taskMatchesSnapshot(current, selectedTask))
       throw new TaskActionValidationError(
-        '选中任务的 id/reference/type/status/version 已变化，请返回任务首页刷新后重试。'
+        `选中任务 ID 不唯一或 id/reference/type/status/version 已变化（匹配 ${matches.length} 条），请返回任务首页刷新后重试。`
       );
     if (normalizedReference !== selectedTask.reference)
       throw new TaskActionValidationError('扫描码与选中任务 reference 不一致，本地队列未写入。');
     return current;
   }
 
-  const compatible = tasks.filter(
-    (candidate) =>
-      candidate.reference === normalizedReference && taskActionSupportsTask(action, candidate)
-  );
-  if (compatible.length !== 1)
+  const referenced = tasks.filter((candidate) => candidate.reference === normalizedReference);
+  if (referenced.length !== 1)
     throw new TaskActionValidationError(
-      `手工扫描没有唯一匹配的 scoped task（匹配 ${compatible.length} 条），本地队列未写入。`
+      `手工扫描没有唯一匹配的 scoped task（匹配 ${referenced.length} 条），本地队列未写入。`
     );
-  return compatible[0]!;
+  return referenced[0]!;
 }

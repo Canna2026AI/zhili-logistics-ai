@@ -17,6 +17,7 @@ export interface QueueStore {
   getMeta<T>(key: string): Promise<T | undefined>;
   setMeta<T>(key: string, value: T): Promise<void>;
   deleteWork(eventId: string, mediaIds: string[]): Promise<void>;
+  deleteWorkPackage(eventIds: string[], mediaIds: string[]): Promise<void>;
   appendEvent(
     create: (sequence: number) => QueuedEvent,
     dedupeKey: string,
@@ -102,6 +103,14 @@ export class MemoryQueueStore implements QueueStore {
   async deleteWork(eventId: string, mediaIds: string[]) {
     this.events.delete(eventId);
     this.eventDedupe.delete(eventId);
+    for (const mediaId of mediaIds) this.media.delete(mediaId);
+  }
+
+  async deleteWorkPackage(eventIds: string[], mediaIds: string[]) {
+    for (const eventId of eventIds) {
+      this.events.delete(eventId);
+      this.eventDedupe.delete(eventId);
+    }
     for (const mediaId of mediaIds) this.media.delete(mediaId);
   }
 
@@ -374,6 +383,16 @@ export class IndexedDbQueueStore implements QueueStore {
     const transaction = database.transaction(['events', 'media'], 'readwrite');
     await Promise.all([
       transaction.objectStore('events').delete(eventId),
+      ...mediaIds.map((mediaId) => transaction.objectStore('media').delete(mediaId)),
+    ]);
+    await transaction.done;
+  }
+
+  async deleteWorkPackage(eventIds: string[], mediaIds: string[]) {
+    const database = await this.database;
+    const transaction = database.transaction(['events', 'media'], 'readwrite');
+    await Promise.all([
+      ...eventIds.map((eventId) => transaction.objectStore('events').delete(eventId)),
       ...mediaIds.map((mediaId) => transaction.objectStore('media').delete(mediaId)),
     ]);
     await transaction.done;

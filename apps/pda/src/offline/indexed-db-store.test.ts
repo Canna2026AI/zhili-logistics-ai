@@ -155,6 +155,58 @@ describe('IndexedDbQueueStore', () => {
     }
   );
 
+  it('atomically clears only the takeover-authorized snapshot and preserves later work', async () => {
+    const store = new IndexedDbQueueStore('zhili-pda-test');
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const firstEventId = '01JTAKEOVERSNAPSHOT00000001';
+    const secondEventId = '01JAFTERAUTHORIZATION000001';
+    const firstMedia = await media.prepare(
+      context,
+      firstEventId,
+      new Blob(['authorized-photo']),
+      'image/jpeg',
+      'media-authorized'
+    );
+    const secondMedia = await media.prepare(
+      context,
+      secondEventId,
+      new Blob(['later-photo']),
+      'image/jpeg',
+      'media-later'
+    );
+    await queue.enqueue(context, {
+      eventId: firstEventId,
+      action: 'CAPTURE_POD',
+      entityRef: 'AUTHORIZED',
+      payload: {},
+      mediaRefs: [firstMedia.mediaId],
+      mediaItems: [firstMedia],
+      baseVersion: 1,
+    });
+    await queue.enqueue(context, {
+      eventId: secondEventId,
+      action: 'WAREHOUSE_RECEIVE',
+      entityRef: 'AFTER-AUTHORIZATION',
+      payload: {},
+      mediaRefs: [secondMedia.mediaId],
+      mediaItems: [secondMedia],
+      baseVersion: 1,
+    });
+
+    await queue.clearTakeoverPackage([firstEventId], [firstMedia.mediaId]);
+
+    expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([
+      secondEventId,
+    ]);
+    expect((await store.getMedia()).map((item) => item.mediaId)).toEqual([secondMedia.mediaId]);
+    const raw = await store.inspectEncryptedRecordsForTest();
+    expect(raw.events).toHaveLength(1);
+    expect(raw.media).toHaveLength(1);
+    store.close();
+  });
+
   it('stores encrypted records and uses a non-exportable WebCrypto key', async () => {
     const codec = await WebCryptoQueueCodec.generate();
     const store = new IndexedDbQueueStore('zhili-pda-test', codec);

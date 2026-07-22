@@ -1,13 +1,22 @@
 import type { OfflineQueue } from '../offline/offline-queue';
 import type { MediaQueue } from '../offline/media-queue';
 import type { PdaPort } from '../ports/pda-port';
-import type { ConflictResolution, DeviceContext, SyncResult } from '../domain/types';
+import type { ConflictResolution, DeviceContext, DeviceTask, SyncResult } from '../domain/types';
 import { PdaApiError } from '../ports/pda-port';
 
 type ActiveSyncContext = DeviceContext & { expiresAt: string; permissions: string[] };
 
 function key(...parts: Array<string | number>) {
   return `pda:${parts.join(':')}`;
+}
+
+function expectedDeliveryStatus(action: string) {
+  if (action === 'LAST_MILE_PALLETIZE') return 'PALLETIZED';
+  if (action === 'LAST_MILE_LOAD') return 'LOADED';
+  if (action === 'LAST_MILE_DELIVER') return 'OUT_FOR_DELIVERY';
+  if (action === 'LAST_MILE_EXCEPTION') return 'EXCEPTION';
+  if (action === 'CAPTURE_POD') return 'COMPLETED';
+  return undefined;
 }
 
 export class PdaSyncService {
@@ -50,6 +59,7 @@ export class PdaSyncService {
       .filter((event) => this.media.areReserved(event.envelope.mediaRefs))
       .sort((left, right) => left.envelope.localSequence - right.envelope.localSequence);
     const total = { applied: 0, duplicate: 0, conflict: 0, rejected: 0 };
+    let authoritativeTasks: DeviceTask[] | undefined;
     for (let index = 0; index < pending.length; index += 100) {
       const events = pending.slice(index, index + 100).map((event) => event.envelope);
       if (events.length === 0) continue;
@@ -57,6 +67,40 @@ export class PdaSyncService {
         events,
         key('sync', context.deviceId, ...events.map((event) => event.idempotencyKey))
       );
+      const succeeded = new Set(
+        results
+          .filter(
+            (result) => result.disposition === 'APPLIED' || result.disposition === 'DUPLICATE'
+          )
+          .map((result) => result.eventId)
+      );
+      const deliveryEvents = events.filter(
+        (event) => succeeded.has(event.eventId) && expectedDeliveryStatus(event.action)
+      );
+      if (deliveryEvents.length > 0) {
+        const refreshed = await this.port.getDeviceTasks(context.deviceId);
+        for (const event of deliveryEvents) {
+          const taskId = event.payload.taskId;
+          const matches = refreshed.filter((task) => task.id === taskId);
+          const task = matches[0];
+          const expected = expectedDeliveryStatus(event.action);
+          if (
+            typeof taskId !== 'string' ||
+            matches.length !== 1 ||
+            !task ||
+            task.reference !== event.entityRef ||
+            task.type !== 'LAST_MILE_DELIVERY' ||
+            task.status !== expected ||
+            task.version <= event.baseVersion
+          ) {
+            throw new Error(
+              `离线尾程事件 ${event.eventId} 未取得唯一且已推进的权威任务快照，已保留本地作业。`
+            );
+          }
+        }
+        await this.queue.setMeta('device-tasks', refreshed);
+        authoritativeTasks = refreshed;
+      }
       const batch = await this.queue.applySyncResults(results);
       await this.media.restore();
       total.applied += batch.applied;
@@ -66,6 +110,7 @@ export class PdaSyncService {
     }
     return {
       ...total,
+      authoritativeTasks,
       mediaReserved: mediaResult.filter((item) =>
         ['UPLOADED', 'SCANNING', 'READY'].includes(item.remoteStatus ?? '')
       ).length,

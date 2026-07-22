@@ -1083,12 +1083,36 @@ test('refreshes diff and preserves reason after conflict 409', async ({ page }) 
 
 test('does not advance delivery state when production transition rejects', async ({ page }) => {
   const ifMatches: string[] = [];
+  let stale = false;
   await installProductionApi(page, async (route, path) => {
+    if (stale && path.endsWith(`/devices/${deviceId}/tasks`)) {
+      await reply(route, {
+        data: [
+          {
+            id: '01JPDATASK0000000000000002',
+            type: 'LAST_MILE_DELIVERY',
+            reference: 'LM250722001',
+            status: 'OUT_FOR_DELIVERY',
+            priority: 'HIGH',
+            version: 4,
+          },
+        ],
+        meta,
+      });
+      return true;
+    }
     if (path.endsWith('/last-mile/delivery-tasks/01JPDATASK0000000000000002:transition')) {
       ifMatches.push(route.request().headers()['if-match'] ?? '');
+      stale = true;
       await reply(
         route,
-        { code: 'VERSION_CONFLICT', message: 'stale delivery', requestId: meta.requestId },
+        {
+          code: 'STALE_VERSION',
+          message: 'stale delivery',
+          requestId: 'req-delivery-409',
+          remediation: '复核最新派送状态',
+          details: [{ field: 'If-Match', reason: 'expected version 4' }],
+        },
         409
       );
       return true;
@@ -1118,15 +1142,16 @@ test('does not advance delivery state when production transition rejects', async
   await page.getByLabel('作业动作').selectOption('LAST_MILE_DELIVER');
   await page.getByLabel('扫描码 / 运单号').fill('LM250722001');
   await page.getByRole('button', { name: '确认作业' }).click();
-  await expect(page.getByRole('alert').filter({ hasText: 'stale delivery' })).toBeVisible();
+  const alert = page.getByRole('alert').filter({ hasText: 'stale delivery' });
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText('已刷新服务器任务快照');
+  await expect(alert).toContainText('复核最新派送状态');
+  await expect(alert).toContainText('expected version 4');
+  await expect(alert).toContainText('req-delivery-409');
   await expect(page.getByTestId('pending-count')).toHaveText('1');
   await page.getByRole('button', { name: '任务' }).click();
-  await expect(page.getByRole('button', { name: /LM250722001/ })).toContainText('LOADED');
-  await openScanner(page);
-  await page.getByLabel('作业动作').selectOption('LAST_MILE_DELIVER');
-  await page.getByLabel('扫描码 / 运单号').fill('LM250722001');
-  await page.getByRole('button', { name: '确认作业' }).click();
-  await expect(page.getByText(/已在本地队列，未重复写入/)).toBeVisible();
+  await page.getByRole('button', { name: /LM250722001/ }).click();
+  await expect(page.getByTestId('selected-task')).toContainText('OUT_FOR_DELIVERY · v4');
   expect(ifMatches).toEqual(['"3"']);
   await page.getByRole('button', { name: '离线' }).click();
   await page.getByRole('button', { name: '立即同步' }).click();

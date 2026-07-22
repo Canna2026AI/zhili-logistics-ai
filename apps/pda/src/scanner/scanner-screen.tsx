@@ -104,6 +104,27 @@ function deliveryScanEvidence(
   };
 }
 
+function commandError(error: unknown, refreshed: boolean) {
+  if (!(error instanceof Error)) return '扫描处理失败';
+  const envelope = error as Error & {
+    remediation?: string;
+    requestId?: string;
+    details?: Array<{ field?: string; reason: string }>;
+  };
+  const details = envelope.details
+    ?.map((detail) => `${detail.field ?? '详情'}：${detail.reason}`)
+    .join('；');
+  return [
+    error.message,
+    refreshed ? '已刷新服务器任务快照。' : undefined,
+    envelope.remediation ? `修复建议：${envelope.remediation}` : undefined,
+    details,
+    envelope.requestId ? `requestId：${envelope.requestId}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 export function ScannerScreen({
   session,
   queue,
@@ -116,6 +137,7 @@ export function ScannerScreen({
   assertBusinessAllowed,
   onChanged,
   onTaskUpdated,
+  onTasksRefreshed,
   onUnauthorized,
 }: {
   session: LocalDeviceSession;
@@ -128,7 +150,8 @@ export function ScannerScreen({
   initialCode: string;
   assertBusinessAllowed: () => void;
   onChanged: () => void;
-  onTaskUpdated: (taskId: string, status: string, version: number) => void;
+  onTaskUpdated: (taskId: string, status: string, version: number) => Promise<void>;
+  onTasksRefreshed: (tasks: DeviceTask[]) => Promise<void>;
   onUnauthorized: (error: unknown) => Promise<void>;
 }) {
   const [action, setAction] = useState<DeviceTaskAction>(() =>
@@ -226,6 +249,11 @@ export function ScannerScreen({
           deliveryScanEvidence(action, entityRef, payload),
           mediaRefs
         );
+        await onTaskUpdated(
+          receipt.deliveryTask.id,
+          receipt.deliveryTask.status,
+          receipt.deliveryTask.version
+        );
         await queue.confirmClaimedWork({
           eventId: receipt.deviceEventId,
           disposition: receipt.disposition,
@@ -234,11 +262,6 @@ export function ScannerScreen({
           operation: 'DELIVERY_TRANSITION',
         });
         await media.restore();
-        onTaskUpdated(
-          receipt.deliveryTask.id,
-          receipt.deliveryTask.status,
-          receipt.deliveryTask.version
-        );
         setTone('success');
         setMessage(
           `${entityRef} · 服务端已确认 ${DEVICE_TASK_ACTIONS.find((item) => item.id === action)?.label}`
@@ -285,6 +308,11 @@ export function ScannerScreen({
             return { mediaId, status: evidence?.remoteStatus ?? evidence?.status ?? 'MISSING' };
           })
         );
+        await onTaskUpdated(
+          receipt.deliveryTask.id,
+          receipt.deliveryTask.status,
+          receipt.deliveryTask.version
+        );
         await queue.confirmClaimedWork({
           eventId: receipt.deviceEventId,
           disposition: receipt.disposition,
@@ -293,11 +321,6 @@ export function ScannerScreen({
           operation: 'PROOF_OF_DELIVERY',
         });
         await media.restore();
-        onTaskUpdated(
-          receipt.deliveryTask.id,
-          receipt.deliveryTask.status,
-          receipt.deliveryTask.version
-        );
         setTone('success');
         setMessage(`${entityRef} · POD 已由服务端创建不可变版本`);
       } else {
@@ -309,8 +332,17 @@ export function ScannerScreen({
     } catch (error) {
       if (typeof error === 'object' && error && 'status' in error && Number(error.status) === 401)
         await onUnauthorized(error);
+      let refreshed = false;
+      if (typeof error === 'object' && error && 'status' in error && Number(error.status) === 409) {
+        try {
+          await onTasksRefreshed(await port.getDeviceTasks(session.deviceId));
+          refreshed = true;
+        } catch {
+          /* preserve the original command envelope and local work */
+        }
+      }
       setTone('danger');
-      setMessage(error instanceof Error ? error.message : '扫描处理失败');
+      setMessage(commandError(error, refreshed));
       onChanged();
     } finally {
       setBusy(false);

@@ -191,6 +191,9 @@ export class OfflineQueue {
   }
 
   async confirmClaimedWork(receipt: ClaimedWorkReceipt) {
+    if (!['APPLIED', 'DUPLICATE'].includes(receipt.disposition)) {
+      throw new Error('服务器回执 disposition 不是 APPLIED/DUPLICATE，禁止清理本地作业。');
+    }
     const event = this.events.find((candidate) => candidate.envelope.eventId === receipt.eventId);
     if (!event) throw new Error(`服务器回执对应的本地事件 ${receipt.eventId} 不存在，禁止清理。`);
     if (!exactlySameRefs(event.envelope.mediaRefs, receipt.claimedMediaRefs)) {
@@ -262,6 +265,14 @@ export class OfflineQueue {
   async clear() {
     await this.store.clearWork();
     this.events = [];
+  }
+
+  async clearTakeoverPackage(eventIds: string[], mediaIds: string[]) {
+    if (new Set(eventIds).size !== eventIds.length || new Set(mediaIds).size !== mediaIds.length) {
+      throw new Error('接管清理清单包含重复 ID，已保留全部本地数据。');
+    }
+    await this.store.deleteWorkPackage(eventIds, mediaIds);
+    this.events = await this.store.getEvents();
   }
 
   async deleteWork(eventId: string) {

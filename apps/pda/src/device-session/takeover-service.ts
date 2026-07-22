@@ -157,7 +157,10 @@ export class DeviceTakeoverService {
     }
 
     await this.queue.setMeta('last-takeover-export-receipt', receipt);
-    await this.queue.clear();
+    await this.queue.clearTakeoverPackage(
+      events.map((event) => event.envelope.eventId),
+      media.map((item) => item.mediaId)
+    );
     await this.media.restore();
     return receipt;
   }

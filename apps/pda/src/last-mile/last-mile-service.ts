@@ -72,6 +72,7 @@ export class LastMileService {
       }
     );
     if (
+      !['APPLIED', 'DUPLICATE'].includes(receipt.disposition) ||
       receipt.deviceEventId !== deviceEventId ||
       receipt.deliveryTask.id !== current.taskId ||
       receipt.deliveryTask.status !== nextStatus ||
@@ -110,6 +111,7 @@ export class LastMileService {
       input
     );
     if (
+      !['APPLIED', 'DUPLICATE'].includes(receipt.disposition) ||
       receipt.deviceEventId !== input.deviceEventId ||
       receipt.deliveryTask.id !== current.taskId ||
       receipt.deliveryTask.status !== 'COMPLETED' ||

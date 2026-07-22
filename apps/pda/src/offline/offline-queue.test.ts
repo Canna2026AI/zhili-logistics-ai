@@ -357,4 +357,28 @@ describe('OfflineQueue', () => {
     expect(await store.getEvents()).toHaveLength(1);
     expect(await store.getMedia()).toHaveLength(1);
   });
+
+  it('rejects a forged non-success disposition at runtime and retains local work', async () => {
+    const store = new MemoryQueueStore();
+    const queue = createQueue(store);
+    await queue.restore();
+    const event = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'RUNTIME-GUARD',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+
+    await expect(
+      queue.confirmClaimedWork({
+        eventId: event.envelope.eventId,
+        disposition: 'REJECTED' as never,
+        claimedMediaRefs: [],
+        serverVersion: 2,
+        operation: 'EVENT_SYNC',
+      })
+    ).rejects.toThrow('APPLIED/DUPLICATE');
+    expect(await store.getEvents()).toHaveLength(1);
+  });
 });

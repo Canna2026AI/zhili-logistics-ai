@@ -10,6 +10,7 @@ import { MediaQueue } from '../offline/media-queue';
 import { OfflineQueue } from '../offline/offline-queue';
 import { IndexedDbQueueStore, MemoryQueueStore, type QueueCodec } from '../offline/queue-store';
 import { MemoryPdaPort } from '../ports/memory-pda-port';
+import { PdaApiError } from '../ports/pda-port';
 import type { LocalDeviceSession } from '../session/session-guard';
 import { ScannerScreen } from './scanner-screen';
 
@@ -78,7 +79,8 @@ describe('ScannerScreen action safety', () => {
           initialCode={selectedTask.reference}
           assertBusinessAllowed={() => undefined}
           onChanged={() => undefined}
-          onTaskUpdated={() => undefined}
+          onTaskUpdated={async () => undefined}
+          onTasksRefreshed={async () => undefined}
           onUnauthorized={async () => undefined}
         />
       );
@@ -132,6 +134,7 @@ describe('ScannerScreen action safety', () => {
         assertBusinessAllowed={() => undefined}
         onChanged={() => undefined}
         onTaskUpdated={onTaskUpdated}
+        onTasksRefreshed={async () => undefined}
         onUnauthorized={async () => undefined}
       />
     );
@@ -204,6 +207,7 @@ describe('ScannerScreen action safety', () => {
         assertBusinessAllowed={() => undefined}
         onChanged={() => undefined}
         onTaskUpdated={onTaskUpdated}
+        onTasksRefreshed={async () => undefined}
         onUnauthorized={async () => undefined}
       />
     );
@@ -229,5 +233,75 @@ describe('ScannerScreen action safety', () => {
     expect(queue.snapshot().events).toEqual([]);
     expect(media.snapshot()).toEqual([]);
     expect(await store.getMedia()).toEqual([]);
+  });
+
+  it('refreshes tasks and preserves the complete error envelope when POD returns 409', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const selectedTask: DeviceTask = {
+      id: '01JPDATASK0000000000000002',
+      type: 'LAST_MILE_DELIVERY',
+      reference: 'LM-POD-409',
+      status: 'OUT_FOR_DELIVERY',
+      priority: 'HIGH',
+      version: 8,
+    };
+    const refreshed = [{ ...selectedTask, status: 'COMPLETED', version: 9 }];
+    const port = new MemoryPdaPort();
+    port.captureProofOfDelivery = vi
+      .fn()
+      .mockRejectedValue(
+        new PdaApiError(
+          'POD 版本冲突',
+          409,
+          'STALE_VERSION',
+          'req-pod-409',
+          '刷新任务后复核签收状态',
+          [{ field: 'If-Match', reason: 'expected version 9' }]
+        )
+      );
+    port.getDeviceTasks = vi.fn().mockResolvedValue(refreshed);
+    const onTaskUpdated = vi.fn();
+    const onTasksRefreshed = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ScannerScreen
+        session={session}
+        queue={queue}
+        media={media}
+        port={port}
+        online
+        tasks={[selectedTask]}
+        selectedTask={selectedTask}
+        initialCode={selectedTask.reference}
+        assertBusinessAllowed={() => undefined}
+        onChanged={() => undefined}
+        onTaskUpdated={onTaskUpdated}
+        onTasksRefreshed={onTasksRefreshed}
+        onUnauthorized={async () => undefined}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('作业动作'), { target: { value: 'CAPTURE_POD' } });
+    await userEvent.type(screen.getByLabelText('签收姓名'), '陈女士');
+    fireEvent.change(screen.getByLabelText('签收时间'), {
+      target: { value: '2026-07-22T10:00' },
+    });
+    await userEvent.upload(
+      screen.getByLabelText('拍照或选择图片'),
+      new File(['pod-photo'], 'pod.jpg', { type: 'image/jpeg' })
+    );
+    await userEvent.click(screen.getByRole('button', { name: '确认作业' }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('已刷新服务器任务快照');
+    expect(alert).toHaveTextContent('刷新任务后复核签收状态');
+    expect(alert).toHaveTextContent('expected version 9');
+    expect(alert).toHaveTextContent('req-pod-409');
+    expect(onTasksRefreshed).toHaveBeenCalledWith(refreshed);
+    expect(onTaskUpdated).not.toHaveBeenCalled();
+    expect(queue.snapshot().events).toHaveLength(1);
+    expect(media.snapshot()).toHaveLength(1);
   });
 });

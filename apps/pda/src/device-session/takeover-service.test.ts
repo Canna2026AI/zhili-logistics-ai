@@ -100,20 +100,30 @@ describe('DeviceTakeoverService', () => {
     );
     const upload = vi
       .spyOn(port, 'uploadEncryptedDeviceTakeoverExport')
-      .mockImplementation(async (deviceId, receivedAuthorizationId, _key, input) => ({
-        exportId: '01JTAKEOVEREXPORT0000000001',
-        authorizationId: receivedAuthorizationId,
-        deviceId,
-        scope,
-        manifestHash: input.manifestHash,
-        ciphertextHash: input.ciphertextHash,
-        eventCount: 1,
-        mediaCount: 1,
-        checksumAlgorithm: 'SHA-256',
-        status: 'VERIFIED',
-        receivedAt: '2026-07-22T12:00:00.000Z',
-        verifiedAt: '2026-07-22T12:00:01.000Z',
-      }));
+      .mockImplementation(async (deviceId, receivedAuthorizationId, _key, input) => {
+        await queue.enqueue(session, {
+          eventId: '01JCONCURRENT00000000000001',
+          action: 'WAREHOUSE_RECEIVE',
+          entityRef: 'AFTER-AUTHORIZATION',
+          payload: {},
+          mediaRefs: [],
+          baseVersion: 1,
+        });
+        return {
+          exportId: '01JTAKEOVEREXPORT0000000001',
+          authorizationId: receivedAuthorizationId,
+          deviceId,
+          scope,
+          manifestHash: input.manifestHash,
+          ciphertextHash: input.ciphertextHash,
+          eventCount: 1,
+          mediaCount: 1,
+          checksumAlgorithm: 'SHA-256',
+          status: 'VERIFIED',
+          receivedAt: '2026-07-22T12:00:00.000Z',
+          verifiedAt: '2026-07-22T12:00:01.000Z',
+        };
+      });
 
     const receipt = await new DeviceTakeoverService(queue, media, port).exportAndClear(
       session,
@@ -141,9 +151,13 @@ describe('DeviceTakeoverService', () => {
     expect(archive).toContain('CAPTURE_POD');
     expect(archive).toContain('cGhvdG8tc2VjcmV0');
     expect(input.ciphertext.type).toBe('application/octet-stream');
-    expect(queue.snapshot().events).toEqual([]);
+    expect(queue.snapshot().events.map((event) => event.envelope.entityRef)).toEqual([
+      'AFTER-AUTHORIZATION',
+    ]);
     expect(media.snapshot()).toEqual([]);
-    expect(await store.getEvents()).toEqual([]);
+    expect((await store.getEvents()).map((event) => event.envelope.entityRef)).toEqual([
+      'AFTER-AUTHORIZATION',
+    ]);
     expect(await store.getMedia()).toEqual([]);
     expect(await queue.getMeta('last-takeover-export-receipt')).toEqual(receipt);
   });

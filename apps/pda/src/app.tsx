@@ -89,6 +89,13 @@ export function App({
   const selectedConflict = snapshot.events.find(
     (event) => event.envelope.eventId === selectedConflictId
   );
+  const replaceTasks = async (next: DeviceTask[]) => {
+    await queue.setMeta('device-tasks', next);
+    setTasks(next);
+    setSelectedTask((current) =>
+      current ? next.find((task) => task.id === current.id) : undefined
+    );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -227,6 +234,12 @@ export function App({
     try {
       guard.assertAllowed('SYNC');
       const result = await syncService.synchronize(session);
+      if (result.authoritativeTasks) {
+        setTasks(result.authoritativeTasks);
+        setSelectedTask((current) =>
+          current ? result.authoritativeTasks?.find((task) => task.id === current.id) : undefined
+        );
+      }
       setSyncMessage(
         `同步完成：应用 ${result.applied}，已处理 ${result.duplicate}，冲突 ${result.conflict}，拒绝 ${result.rejected}，媒体已预留 ${result.mediaReserved}。`
       );
@@ -403,14 +416,12 @@ export function App({
               setError(explain(caught));
               setPhase('login');
             }}
-            onTaskUpdated={(taskId, status, version) => {
-              setTasks((current) =>
-                current.map((task) => (task.id === taskId ? { ...task, status, version } : task))
-              );
-              setSelectedTask((current) =>
-                current?.id === taskId ? { ...current, status, version } : current
+            onTaskUpdated={async (taskId, status, version) => {
+              await replaceTasks(
+                tasks.map((task) => (task.id === taskId ? { ...task, status, version } : task))
               );
             }}
+            onTasksRefreshed={replaceTasks}
           />
         )}
         {tab === 'offline' && (

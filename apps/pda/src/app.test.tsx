@@ -173,6 +173,31 @@ describe('PDA application', () => {
     );
   });
 
+  it('persists an authoritative online delivery status and version for offline restart', async () => {
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+    const store = new MemoryQueueStore();
+    const port = new MemoryPdaPort();
+    const first = render(<App store={store} port={port} />);
+    await bind();
+    await userEvent.click(screen.getByRole('button', { name: /LM250722001/ }));
+    await userEvent.selectOptions(screen.getByLabelText('作业动作'), 'LAST_MILE_DELIVER');
+    await userEvent.click(screen.getByRole('button', { name: '确认作业' }));
+    await screen.findByText(/服务端已确认 派送/);
+
+    const cached = await new OfflineQueue(store).getMeta<DeviceTask[]>('device-tasks');
+    expect(cached?.find((task) => task.reference === 'LM250722001')).toMatchObject({
+      status: 'OUT_FOR_DELIVERY',
+      version: 4,
+    });
+
+    first.unmount();
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: false });
+    render(<App store={store} port={port} />);
+    await screen.findByRole('heading', { name: '任务首页' });
+    await userEvent.click(screen.getByRole('button', { name: /LM250722001/ }));
+    expect(screen.getByTestId('selected-task')).toHaveTextContent('OUT_FOR_DELIVERY · v4');
+  });
+
   it('queues the complete second selected task snapshot instead of the first task of that type', async () => {
     const store = new MemoryQueueStore();
     const port = new MemoryPdaPort();

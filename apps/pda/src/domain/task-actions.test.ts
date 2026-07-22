@@ -224,6 +224,14 @@ describe('PDA task action schemas', () => {
         selected
       )
     ).toThrow(/已变化/);
+    expect(() =>
+      resolveTaskForAction(
+        [selected, { ...selected, reference: 'LM-DUPLICATE-ID' }],
+        'LAST_MILE_DELIVER',
+        'LM-SECOND',
+        selected
+      )
+    ).toThrow(/不唯一/);
   });
 
   it('fails closed when a manual reference has zero or multiple compatible scoped tasks', () => {
@@ -234,5 +242,12 @@ describe('PDA task action schemas', () => {
     expect(() =>
       resolveTaskForAction([task(), duplicate], 'WAREHOUSE_RECEIVE', 'S2505120004')
     ).toThrow(/没有唯一匹配/);
+    expect(() =>
+      resolveTaskForAction(
+        [task(), task({ id: '01JPDATASK0000000000000010', type: 'MOVE' })],
+        'WAREHOUSE_RECEIVE',
+        'S2505120004'
+      )
+    ).toThrow(/匹配 2 条/);
   });
 });
