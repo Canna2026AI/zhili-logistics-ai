@@ -3263,8 +3263,16 @@ export interface components {
     };
     DeviceSession: {
       deviceId: components['schemas']['Ulid'];
+      tenantId: components['schemas']['Ulid'];
       warehouseId: components['schemas']['Ulid'];
       subjectId: components['schemas']['Ulid'];
+      permissions: (
+        | 'pda.use'
+        | 'pda.sync'
+        | 'pda.conflict.resolve'
+        | 'lastmile.delivery.execute'
+        | 'lastmile.pod.write'
+      )[];
       /** Format: date-time */
       expiresAt: string;
     };
@@ -3280,6 +3288,7 @@ export interface components {
       status: string;
       /** @enum {string} */
       priority: 'LOW' | 'NORMAL' | 'HIGH' | 'URGENT';
+      version: number;
     };
     DeviceTaskListResponse: {
       data: components['schemas']['DeviceTask'][];
