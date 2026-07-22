@@ -3,8 +3,9 @@
 ## Status
 
 DONE for the contract-hardening scope, including the first independent review remediation, the R2
-I1 / I2 / M1 remediation and the R3 I1 / I2 remediation. Database migrations, repositories,
-services, controllers and visual form work were intentionally not modified by this branch.
+I1 / I2 / M1 remediation, the R3 I1 / I2 remediation and the R4 I1 remediation. Database migrations,
+repositories, services, controllers and visual form work were intentionally not modified by this
+branch.
 
 ## Commits
 
@@ -16,6 +17,8 @@ services, controllers and visual form work were intentionally not modified by th
 - R2 remediation implementation commit: `598d7d9d818d4e2fb8a8a52f54b1d7ecdb4ce68d`
 - R2 remediation report commit: `fb0a248eb81a126defbf95ac137c947b196a4ef5`
 - R3 remediation implementation commit: `e5c846ea2cecea5ddc39960433e5295c32375fe9`
+- R3 remediation report commit: `91c5ff07180c60926f993b660d203568cc008bcc`
+- R4 remediation implementation commit: `430ea90ed0899eccbf4c07781045f1a9baba7662`
 - This report is committed separately so it can name every immutable implementation commit.
 
 ## Independent review remediation
@@ -50,6 +53,12 @@ services, controllers and visual form work were intentionally not modified by th
   strong header. Quote acceptance and address UPDATE derive the next version from a validated strong
   If-Match; missing, weak, malformed, zero or non-numeric preconditions fail closed with 412. Payment
   and import creation omit ETag because their OpenAPI success responses do not declare one.
+- The canonical error-code domain now includes `PRECONDITION_REQUIRED` and
+  `PRECONDITION_INVALID`, while `PreconditionProblemCode` remains narrowed to exactly those two plus
+  `STALE_VERSION`. The actual fully dereferenced `PreconditionFailed` schema accepts all three codes,
+  rejects unrelated codes, and the generated TypeScript response intersection is inhabitable for
+  every valid 412 body. Customer mocks now return schema-valid missing, malformed and stale-version
+  envelopes.
 
 ## Delivered contract surface
 
@@ -107,6 +116,15 @@ R3 tests were written before the implementation and produced the intended failur
   including quote version 7 to 8, all declared ETags, five required strong-If-Match routes and the
   CREATE upsert prohibition. Mocks: 2 failed / 6 total for the two missing name projections.
 
+R4 tests were written before the implementation and produced the intended failures:
+
+- Contracts: 1 failed / 32 total because the actual fully dereferenced `PreconditionFailed` schema
+  rejected `PRECONDITION_REQUIRED`; contract typecheck also failed because the generated response
+  intersection excluded both missing- and malformed-precondition codes.
+- Customer portal: 6 failed / 17 focused API tests because the five missing/malformed `If-Match`
+  envelopes failed schema validation and the stale strong `If-Match` mock returned success instead
+  of a `STALE_VERSION` 412.
+
 ### GREEN
 
 The following fresh gates passed after implementation:
@@ -119,7 +137,7 @@ pnpm contracts:generate:check
 generated api.d.ts matches the staged OpenAPI source
 
 pnpm --filter @zhili/contracts test
-31/31 tests passed
+32/32 tests passed
 
 pnpm format:check
 all files matched Prettier formatting
@@ -141,7 +159,7 @@ passed
 ```
 
 Focused affected-module verification also passed: identity/master data 11/11, rates/routing 21/21,
-waybills 47/47, customer portal 50/50, PDA 137/137, platform 19/19, website 11/11 and mocks 6/6.
+waybills 47/47, customer portal 51/51, PDA 137/137, platform 19/19, website 11/11 and mocks 6/6.
 The repository-wide gates passed with 24/24 lint tasks, 24/24 typecheck tasks, 35/35 test tasks and
 20/20 build tasks. Platform tests still print pre-existing React `act(...)` warnings while passing;
 Storybook also prints its pre-existing large-chunk advisory while building successfully.
