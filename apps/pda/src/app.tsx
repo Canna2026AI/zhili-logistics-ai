@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ChevronLeft, ClipboardList, Cloud, CloudOff, ScanLine, UserRound, WifiOff } from 'lucide-react';
+import {
+  ChevronLeft,
+  ClipboardList,
+  Cloud,
+  CloudOff,
+  ScanLine,
+  UserRound,
+  WifiOff,
+} from 'lucide-react';
 import { createZhiliClient } from '@zhili/api-client';
 import { Button } from '@zhili/ui';
 import type { DeviceTask } from './domain/types';
@@ -156,9 +164,7 @@ export function App({
         try {
           const finalized = await takeoverService.retryPendingFinalize(restored);
           if (finalized) {
-            setSyncMessage(
-              `已恢复接管本地提交：${finalized.exportId}。未重复上传密文。`
-            );
+            setSyncMessage(`已恢复接管本地提交：${finalized.exportId}。未重复上传密文。`);
           }
         } catch (caught) {
           setSyncMessage(explain(caught));
@@ -397,8 +403,8 @@ export function App({
         <div className="pda-network" role="status" aria-live="polite" data-online={online}>
           {online ? <Cloud aria-hidden="true" /> : <CloudOff aria-hidden="true" />}
           <span>
-            {online ? '在线' : '离线'} ·{' '}
-            <b data-testid="pending-count">{snapshot.events.length}</b>/200
+            {online ? '在线' : '离线'} · <b data-testid="pending-count">{snapshot.events.length}</b>
+            /200
             <br />
             媒体 {headerMediaReserved}/{mediaItems.length}
           </span>

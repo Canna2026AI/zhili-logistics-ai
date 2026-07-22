@@ -381,10 +381,11 @@ export class MemoryPdaPort implements PdaPort {
       ['wrapKey', 'unwrapKey']
     );
     const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
-    const authorizationId = `01JMOCKAUTH${crypto.randomUUID().replaceAll('-', '').slice(0, 15).toUpperCase()}`.slice(
-      0,
-      26
-    );
+    const authorizationId =
+      `01JMOCKAUTH${crypto.randomUUID().replaceAll('-', '').slice(0, 15).toUpperCase()}`.slice(
+        0,
+        26
+      );
     const expiresAt = new Date(Date.now() + 5 * 60_000).toISOString();
     this.takeoverAuthorizations.set(authorizationId, {
       deviceId,
@@ -492,7 +493,9 @@ export class MemoryPdaPort implements PdaPort {
       manifest.media.length === authorization.mediaCount;
     const eventScopesMatch = events.every((event) => {
       const envelope = isRecord(event) && isRecord(event.envelope) ? event.envelope : undefined;
-      return envelope ? sameScope(readScope(envelope) ?? ({} as TakeoverScope), authorization.scope) : false;
+      return envelope
+        ? sameScope(readScope(envelope) ?? ({} as TakeoverScope), authorization.scope)
+        : false;
     });
     const mediaScopesMatch = media.every((item) => {
       if (!isRecord(item)) return false;
@@ -512,10 +515,11 @@ export class MemoryPdaPort implements PdaPort {
     }
     this.takeoverAuthorizations.delete(authorizationId);
     return {
-      exportId: `01JMOCKEXPORT${crypto.randomUUID().replaceAll('-', '').slice(0, 13).toUpperCase()}`.slice(
-        0,
-        26
-      ),
+      exportId:
+        `01JMOCKEXPORT${crypto.randomUUID().replaceAll('-', '').slice(0, 13).toUpperCase()}`.slice(
+          0,
+          26
+        ),
       authorizationId,
       deviceId,
       scope: authorization.scope,

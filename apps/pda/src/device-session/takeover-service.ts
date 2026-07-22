@@ -91,9 +91,7 @@ export class DeviceTakeoverService {
   ) {}
 
   async retryPendingFinalize(session: LocalDeviceSession) {
-    const pending = await this.queue.getMeta<PendingTakeoverFinalize>(
-      'pending-takeover-finalize'
-    );
+    const pending = await this.queue.getMeta<PendingTakeoverFinalize>('pending-takeover-finalize');
     if (!pending) return undefined;
     if (
       pending.receipt.status !== 'VERIFIED' ||
@@ -105,11 +103,7 @@ export class DeviceTakeoverService {
     }
     assertExactScope(pending.receipt.scope, session);
     this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
-    await this.queue.finalizeTakeoverPackage(
-      pending.receipt,
-      pending.eventIds,
-      pending.mediaIds
-    );
+    await this.queue.finalizeTakeoverPackage(pending.receipt, pending.eventIds, pending.mediaIds);
     await this.media.restore();
     this.onProgress?.('VERIFIED');
     return pending.receipt;
@@ -180,11 +174,11 @@ export class DeviceTakeoverService {
         throw new Error('管理员接管密文超过服务器授权上限，已保留全部数据。');
       }
       const publicKey = await crypto.subtle.importKey(
-      'jwk',
-      authorization.publicKeyJwk as JsonWebKey,
-      { name: 'RSA-OAEP', hash: 'SHA-256' },
-      false,
-      ['wrapKey']
+        'jwk',
+        authorization.publicKeyJwk as JsonWebKey,
+        { name: 'RSA-OAEP', hash: 'SHA-256' },
+        false,
+        ['wrapKey']
       );
       const wrappedKey = await crypto.subtle.wrapKey('raw', aesKey, publicKey, {
         name: 'RSA-OAEP',

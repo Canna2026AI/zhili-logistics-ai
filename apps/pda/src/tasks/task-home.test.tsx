@@ -63,13 +63,7 @@ describe('TaskHome', () => {
 
   it('renders the live network and queue state instead of a fixed demo status', () => {
     render(
-      <TaskHome
-        session={session}
-        tasks={[]}
-        onScan={vi.fn()}
-        online={false}
-        pendingCount={17}
-      />
+      <TaskHome session={session} tasks={[]} onScan={vi.fn()} online={false} pendingCount={17} />
     );
 
     expect(screen.getByText('离线 · 队列 17/200')).toBeVisible();
@@ -95,12 +89,7 @@ describe('TaskHome', () => {
 
   it('omits an invalid persisted sync timestamp instead of crashing the task home', () => {
     render(
-      <TaskHome
-        session={session}
-        tasks={[]}
-        onScan={vi.fn()}
-        lastSyncedAt="corrupt-local-meta"
-      />
+      <TaskHome session={session} tasks={[]} onScan={vi.fn()} lastSyncedAt="corrupt-local-meta" />
     );
 
     expect(screen.getByRole('heading', { name: '任务首页' })).toBeVisible();
@@ -109,9 +98,7 @@ describe('TaskHome', () => {
 
   it('shows task-derived workflow titles and distinct copy for all 19 actions', async () => {
     const tasks = await new MemoryPdaPort().getDeviceTasks(session.deviceId);
-    const { container } = render(
-      <TaskHome session={session} tasks={tasks} onScan={vi.fn()} />
-    );
+    const { container } = render(<TaskHome session={session} tasks={tasks} onScan={vi.fn()} />);
 
     for (const action of DEVICE_TASK_ACTIONS) {
       expect(container).toHaveTextContent(action.label);

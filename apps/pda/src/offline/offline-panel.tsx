@@ -57,8 +57,15 @@ export function OfflinePanel({
         <span>{events.length}/200</span>
       </div>
       {warning && (
-        <div className={`pda-offline-state ${full ? 'pda-offline-state--danger' : ''}`} role="alert">
-          <strong>{full ? '已阻止新业务扫描' : `容量 ${events.length}/200 · 剩余 ${200 - events.length} 条`}</strong>
+        <div
+          className={`pda-offline-state ${full ? 'pda-offline-state--danger' : ''}`}
+          role="alert"
+        >
+          <strong>
+            {full
+              ? '已阻止新业务扫描'
+              : `容量 ${events.length}/200 · 剩余 ${200 - events.length} 条`}
+          </strong>
           <span>
             {full
               ? '只允许同步、处理冲突或使用服务器授权的管理员加密接管。'
@@ -70,7 +77,8 @@ export function OfflinePanel({
         <div className="pda-flow-alert pda-restart-recovery" role="status">
           <strong>本地队列已恢复</strong>
           <span>
-            已恢复 {events.length} 个事件 · {media.length} 个媒体；租户、用户、设备与仓库作用域已复核。
+            已恢复 {events.length} 个事件 · {media.length}{' '}
+            个媒体；租户、用户、设备与仓库作用域已复核。
           </span>
         </div>
       )}

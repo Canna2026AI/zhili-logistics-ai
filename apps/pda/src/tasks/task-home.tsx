@@ -71,7 +71,11 @@ export function TaskHome({
           待收货 {receives} · 待上架 {putaways} · 尾程 {lastMile}
         </strong>
         <span>
-          {[online ? '在线' : '离线', lastSync ? `上次同步 ${lastSync}` : undefined, `队列 ${pendingCount}/200`]
+          {[
+            online ? '在线' : '离线',
+            lastSync ? `上次同步 ${lastSync}` : undefined,
+            `队列 ${pendingCount}/200`,
+          ]
             .filter(Boolean)
             .join(' · ')}
         </span>
@@ -108,32 +112,34 @@ export function TaskHome({
             </Button>
           </div>
           <div className="pda-task-list" aria-label="全部任务">
-          {tasks.map((task) => {
-            const presentation = presentTask(task);
-            return (
-            <button key={task.id} className="pda-task-row" onClick={() => onScan(task)}>
-              <span className="pda-task-icon">
-                {task.type === 'LAST_MILE_DELIVERY' ? (
-                  <Truck />
-                ) : task.type === 'MOVE' ? (
-                  <MapPin />
-                ) : (
-                  <Box />
-                )}
-              </span>
-              <span>
-                <strong>任务 {task.reference}</strong>
-                <small>
-                  {typeLabel[task.type]} · {task.status}
-                </small>
-                {presentation.actions.length > 0 && (
-                  <small>{presentation.actions.map((action) => action.label).join(' · ')}</small>
-                )}
-              </span>
-              <em data-priority={task.priority}>{task.priority}</em>
-            </button>
-            );
-          })}
+            {tasks.map((task) => {
+              const presentation = presentTask(task);
+              return (
+                <button key={task.id} className="pda-task-row" onClick={() => onScan(task)}>
+                  <span className="pda-task-icon">
+                    {task.type === 'LAST_MILE_DELIVERY' ? (
+                      <Truck />
+                    ) : task.type === 'MOVE' ? (
+                      <MapPin />
+                    ) : (
+                      <Box />
+                    )}
+                  </span>
+                  <span>
+                    <strong>任务 {task.reference}</strong>
+                    <small>
+                      {typeLabel[task.type]} · {task.status}
+                    </small>
+                    {presentation.actions.length > 0 && (
+                      <small>
+                        {presentation.actions.map((action) => action.label).join(' · ')}
+                      </small>
+                    )}
+                  </span>
+                  <em data-priority={task.priority}>{task.priority}</em>
+                </button>
+              );
+            })}
           </div>
         </>
       ) : (

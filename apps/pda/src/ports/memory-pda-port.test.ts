@@ -19,9 +19,7 @@ function base64(bytes: Uint8Array) {
 
 async function sha256Hex(bytes: Uint8Array) {
   const digest = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes));
-  return [...new Uint8Array(digest)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 async function createEncryptedTakeover(options?: { tamperManifest?: boolean }) {
@@ -58,16 +56,12 @@ async function createEncryptedTakeover(options?: { tamperManifest?: boolean }) {
     media: [],
   };
   const manifestHash = await sha256Hex(new TextEncoder().encode(canonical(manifest)));
-  const authorization = await port.authorizeDeviceTakeoverExport(
-    deviceId,
-    'takeover-auth-crypto',
-    {
-      reason: '设备损坏，由主管接管',
-      manifestHash,
-      eventCount: 1,
-      mediaCount: 0,
-    }
-  );
+  const authorization = await port.authorizeDeviceTakeoverExport(deviceId, 'takeover-auth-crypto', {
+    reason: '设备损坏，由主管接管',
+    manifestHash,
+    eventCount: 1,
+    mediaCount: 0,
+  });
   const publicKey = await crypto.subtle.importKey(
     'jwk',
     authorization.publicKeyJwk as JsonWebKey,
@@ -80,9 +74,7 @@ async function createEncryptedTakeover(options?: { tamperManifest?: boolean }) {
     'decrypt',
   ]);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const archiveManifest = options?.tamperManifest
-    ? { ...manifest, eventCount: 2 }
-    : manifest;
+  const archiveManifest = options?.tamperManifest ? { ...manifest, eventCount: 2 } : manifest;
   const archive = {
     manifest: archiveManifest,
     events: [

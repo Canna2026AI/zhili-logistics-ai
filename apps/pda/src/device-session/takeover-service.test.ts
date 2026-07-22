@@ -224,10 +224,7 @@ describe('DeviceTakeoverService', () => {
     );
 
     await expect(
-      new DeviceTakeoverService(queue, media, port).exportAndClear(
-        session,
-        '设备损坏，由主管接管'
-      )
+      new DeviceTakeoverService(queue, media, port).exportAndClear(session, '设备损坏，由主管接管')
     ).rejects.toThrow('browser closed');
 
     const restartedQueue = new OfflineQueue(store);
