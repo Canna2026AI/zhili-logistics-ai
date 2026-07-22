@@ -100,6 +100,14 @@ describe("OpenAPI UI-foundation gate", () => {
     expect(contract).toContain("STALE_VERSION");
   });
 
+  it("lets PDA clients fetch a conflict snapshot and its own strong ETag before resolution", () => {
+    expect(contract).toContain("operationId: getDeviceConflict");
+    expect(contract).toContain("description: Strong ETag for the conflict resource version.");
+    expect(contract).toContain("required: [id, localEvent, serverVersion, serverState, differences, status, version]");
+    expect(contract).toContain("conflictVersion: {type: integer, minimum: 1}");
+    expect(contract).toContain("ConflictFieldDifference:");
+  });
+
   it("has generated TypeScript path types", () => {
     const generatedPath = resolve(packageRoot, "src/generated/api.d.ts");
     expect(existsSync(generatedPath)).toBe(true);
