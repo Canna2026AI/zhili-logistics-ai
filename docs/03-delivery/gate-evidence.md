@@ -2,14 +2,14 @@
 
 只有可复查证据齐全，门槛状态才可从 `OPEN` 改为 `PASSED`。不能只靠概念图或文字声明；必须同时提供机器可检验的规格、真实接口或自动测试。
 
-| Gate         | 状态        | Commit/版本              | 证据                                                                         | 未关闭例外                                                        |
-| ------------ | ----------- | ------------------------ | ---------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题 | 无                                                                |
-| 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过  | 无                                                                |
-| Figma 同步   | IN_PROGRESS | `Mn56UdJSFmLZSmvOZSLIoX` | Foundations、61 变量、11 样式、10 个核心组件集与 95 变体已有节点和截图证据   | 物流专用组件、五端页面、10 条 Flow、Code Connect 与独立复审待完成 |
-| 前端         | PASSED      | `063a90f`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、35 项 Playwright/axe 全部通过 | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                |
-| 后端         | OPEN        | —                        | 待 API、DB、Worker、RLS 和集成报告                                           | 前端门槛已通过；下一波从 Backend Foundation 开始                  |
-| 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                          | 前置门槛未通过                                                    |
+| Gate         | 状态        | Commit/版本              | 证据                                                                         | 未关闭例外                                                                         |
+| ------------ | ----------- | ------------------------ | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题 | 无                                                                                 |
+| 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过  | 无                                                                                 |
+| Figma 同步   | IN_PROGRESS | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、19 个五端画布和 19 个原型热点     | 物流专用组件、10 条 Flow 全分支、独立复审待完成；Code Connect 受方案与发布条件阻塞 |
+| 前端         | PASSED      | `24f04b4`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过 | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                                 |
+| 后端         | OPEN        | —                        | 待 API、DB、Worker、RLS 和集成报告                                           | 前端门槛已通过；下一波从 Backend Foundation 开始                                   |
+| 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                          | 前置门槛未通过                                                                     |
 
 ## UI 门槛与 B 方案决策
 
@@ -23,6 +23,8 @@ Figma 同步完成时仍需补齐以下证据：
 - AppShell、Drawer、按钮、图标、圆角、状态色与标准 fixture 一致性记录。
 - OpenAPI lint、TypeScript client 生成、MSW 契约和 flow-to-API 覆盖报告。
 - 独立设计评审无 Critical/Important 未关闭项；仓库内本地复审已满足，Figma 节点需另行复查。
+
+Code Connect 当前是明确的外部门槛：Pro 方案与未发布的本地组件不满足其 Organization/Enterprise + 已发布 Library 前置条件，状态为 `BLOCKED_EXTERNAL`，不会以静态文档或伪映射替代真实连接。
 
 ## 证据记录规则
 
@@ -78,3 +80,10 @@ Figma 同步完成时仍需补齐以下证据：
 - 合并 main 后重新执行 frozen install、Prettier、Markdownlint、18 包 lint/typecheck/build、27 个 Turbo test/build 任务，全部退出码 0。
 - `CI=1 pnpm e2e` 在 main 上为 35/35，通过五端桌面/移动、生产 PDA、PWA 离线和 axe；因此前端总门槛升级为 `PASSED`。
 - 详细证据：`docs/03-delivery/evidence/frontend-pda.md` 与 `docs/03-delivery/evidence/frontend-pda-authoritative-review.md`。Android 原生壳仍需 Android SDK/真机验证；Web/PWA 已通过，不把该平台外部条件冒充为完成。
+
+## 2026-07-22 前端响应式与搜索收口证据
+
+- Platform 390px 紧凑导航和全局搜索、Customer 390×844 抽屉导航和全局搜索分别经过独立复审；Customer 最终复审为 0 Critical / 0 Important，活动 option 在 10 项长列表中始终完整滚入可视区。
+- Customer 删除不可恢复的假报价，并覆盖 APG 虚拟焦点、Tab/Shift+Tab、Escape、外部点击、零结果、focus restore 与 forbidden 状态；Platform 覆盖实时公告与代入审计搜索索引。
+- 合入 main 后执行 frozen install、Prettier、Markdownlint、18 包 lint/typecheck/build 和 27 个 Turbo test/build 任务，全部退出码 0。
+- 合并后 Playwright 为 41/41，通过 Ops、Customer、PDA、Platform、Website 与共享 axe；Customer Vitest 33/33、Platform Vitest 17/17。
