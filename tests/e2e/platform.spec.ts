@@ -103,13 +103,31 @@ test('平台全局搜索键盘打开规范租户、点击作业跳转并呈现�
   const searchbox = page.getByRole('combobox', { name: '平台全局搜索' });
 
   await searchbox.fill('上海智立');
-  await expect(
-    page.getByRole('option', { name: /上海智立科技有限公司.*租户.*zhili-sh/ })
-  ).toBeVisible();
+  const tenantOption = page.getByRole('option', {
+    name: /上海智立科技有限公司.*租户.*zhili-sh/,
+  });
+  await expect(tenantOption).toBeVisible();
+  await expect(tenantOption).toHaveAttribute('tabindex', '-1');
+
+  await searchbox.press('Tab');
+  await expect(page.getByRole('button', { name: '新建租户' }).first()).toBeFocused();
+  await expect(page.locator('body')).not.toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(searchbox).toBeFocused();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: /平台导航/ })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(searchbox).toBeFocused();
+  await expect(tenantOption).toBeVisible();
+  await searchbox.press('Escape');
+  await expect(searchbox).toBeFocused();
+  await expect(tenantOption).not.toBeVisible();
+
   await searchbox.press('ArrowDown');
   await searchbox.press('Enter');
   await expect(page.getByRole('dialog', { name: '租户详情' })).toContainText('zhili-sh');
   await page.keyboard.press('Escape');
+  await expect(searchbox).toBeFocused();
 
   await searchbox.fill('支付回调');
   await page.getByRole('option', { name: /支付回调.*运行作业.*运行中心/ }).click();
@@ -132,4 +150,37 @@ test('平台全局搜索键盘打开规范租户、点击作业跳转并呈现�
     );
   });
   expect(violations).toEqual([]);
+});
+
+test('平台全局搜索实时跟随已发布公告和退出后的代入审计记录', async ({ page }) => {
+  await page.goto('/');
+  const searchbox = page.getByRole('combobox', { name: '平台全局搜索' });
+
+  await page.getByRole('button', { name: '平台公告' }).click();
+  await page.getByLabel('公告标题').fill('紧急港区升级通知');
+  await page.getByRole('button', { name: '发布公告' }).click();
+  await expect(page.getByText('紧急港区升级通知')).toBeVisible();
+  await searchbox.fill('紧急港区升级通知');
+  await expect(
+    page.getByRole('option', { name: /紧急港区升级通知.*公告.*平台公告/ })
+  ).toBeVisible();
+
+  await searchbox.fill('租户管理');
+  await page.getByRole('option', { name: /租户管理.*页面.*平台导航/ }).click();
+  await page.getByRole('button', { name: '代入 上海智立科技有限公司' }).click();
+  await page.getByLabel('代入原因').fill('核查自定义审计原因XYZ');
+  await page.getByRole('button', { name: '以管理员身份进入' }).click();
+  await expect(page.locator('.platform-session')).toContainText('核查自定义审计原因XYZ');
+  await page.getByRole('button', { name: '立即退出' }).click();
+  await expect(page.getByRole('button', { name: '立即退出' })).not.toBeVisible();
+  await page.getByRole('button', { name: '代入与审计' }).click();
+  await expect(page.getByRole('table', { name: '审计记录' })).toContainText(
+    '核查自定义审计原因XYZ'
+  );
+  await searchbox.fill('核查自定义审计原因XYZ');
+  await expect(
+    page.getByRole('option', {
+      name: /以管理员身份代入.*审计记录.*核查自定义审计原因XYZ/,
+    })
+  ).toBeVisible();
 });

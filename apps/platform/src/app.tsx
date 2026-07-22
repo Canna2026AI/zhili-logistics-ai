@@ -23,6 +23,15 @@ type Impersonation = {
   reason: string;
   expiresAt: number;
 };
+type AuditRecord = {
+  id: string;
+  time: string;
+  actor: string;
+  tenant: string;
+  action: string;
+  reason: string;
+  result: string;
+};
 type SearchResult = {
   id: string;
   label: string;
@@ -143,16 +152,24 @@ const modules = [
   '自动化',
 ];
 const announcementSeed = ['2026 年 5 月例行维护通知'];
-const auditSearchRecords = [
+const auditSeed: AuditRecord[] = [
   {
     id: 'audit-impersonation',
-    label: '以管理员身份代入',
-    context: '上海智立科技有限公司 · 协助排查订单同步问题',
+    time: '2026-05-12 10:21',
+    actor: '张伟（admin）',
+    tenant: '上海智立科技有限公司',
+    action: '以管理员身份代入（60 分钟）',
+    reason: '协助排查订单同步问题',
+    result: '已审计',
   },
   {
     id: 'audit-entitlement',
-    label: '授权变更',
-    context: '广州港捷供应链管理 · 开启模块「自动化」',
+    time: '2026-05-10 15:42',
+    actor: '系统',
+    tenant: '广州港捷供应链管理',
+    action: '授权变更',
+    reason: '开启模块「自动化」',
+    result: '完成',
   },
 ];
 const runtimeServices = [
@@ -160,6 +177,15 @@ const runtimeServices = [
   { id: 'runtime-ups', label: 'UPS 轨迹同步' },
   { id: 'runtime-dhl', label: 'DHL 下单' },
 ];
+const readAnnouncements = () => {
+  try {
+    return JSON.parse(
+      localStorage.getItem('zhili.platform.announcements') ?? JSON.stringify(announcementSeed)
+    ) as string[];
+  } catch {
+    return announcementSeed;
+  }
+};
 
 function pageAvailable(page: Page, impersonating: boolean) {
   return !impersonating || page === '代入与审计' || page === '运行中心';
@@ -249,6 +275,7 @@ function GlobalSearch({
                   key={result.id}
                   type="button"
                   role="option"
+                  tabIndex={-1}
                   aria-selected={activeIndex === index}
                   aria-label={`${result.label}，${result.type}，${result.context}`}
                   onMouseDown={(event) => event.preventDefault()}
@@ -715,17 +742,16 @@ function UsagePage({
   );
 }
 
-function AnnouncementsPage({ notify }: { notify: (text: string) => void }) {
+function AnnouncementsPage({
+  announcements,
+  addAnnouncement,
+  notify,
+}: {
+  announcements: string[];
+  addAnnouncement: (announcement: string) => void;
+  notify: (text: string) => void;
+}) {
   const [title, setTitle] = useState('');
-  const [announcements, setAnnouncements] = useState<string[]>(() => {
-    try {
-      return JSON.parse(
-        localStorage.getItem('zhili.platform.announcements') ?? JSON.stringify(announcementSeed)
-      ) as string[];
-    } catch {
-      return announcementSeed;
-    }
-  });
   return (
     <>
       <Header title="平台公告" description="面向全部或指定租户发布维护、升级与合规通知。" />
@@ -739,11 +765,7 @@ function AnnouncementsPage({ notify }: { notify: (text: string) => void }) {
             void platformPort
               .publishAnnouncement(next)
               .then(() => {
-                setAnnouncements((items) => {
-                  const updated = [next, ...items];
-                  localStorage.setItem('zhili.platform.announcements', JSON.stringify(updated));
-                  return updated;
-                });
+                addAnnouncement(next);
                 setTitle('');
                 notify('平台公告已发布。');
               })
@@ -786,7 +808,7 @@ function AnnouncementsPage({ notify }: { notify: (text: string) => void }) {
   );
 }
 
-function AuditPage({ auditReason }: { auditReason: string }) {
+function AuditPage({ records }: { records: AuditRecord[] }) {
   return (
     <>
       <Header title="代入与审计" description="代入时长、原因、操作对象和退出时间完整留痕。" />
@@ -803,26 +825,18 @@ function AuditPage({ auditReason }: { auditReason: string }) {
             </tr>
           </thead>
           <tbody>
-            <tr>
-              <td>2026-05-12 10:21</td>
-              <td>张伟（admin）</td>
-              <td>上海智立科技有限公司</td>
-              <td>{auditSearchRecords[0].label}（60 分钟）</td>
-              <td>{auditReason || '协助排查订单同步问题'}</td>
-              <td>
-                <StatusTag tone="success">已审计</StatusTag>
-              </td>
-            </tr>
-            <tr>
-              <td>2026-05-10 15:42</td>
-              <td>系统</td>
-              <td>广州港捷供应链管理</td>
-              <td>{auditSearchRecords[1].label}</td>
-              <td>开启模块「自动化」</td>
-              <td>
-                <StatusTag tone="success">完成</StatusTag>
-              </td>
-            </tr>
+            {records.map((record) => (
+              <tr key={record.id}>
+                <td>{record.time}</td>
+                <td>{record.actor}</td>
+                <td>{record.tenant}</td>
+                <td>{record.action}</td>
+                <td>{record.reason}</td>
+                <td>
+                  <StatusTag tone="success">{record.result}</StatusTag>
+                </td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -1047,6 +1061,7 @@ export function App() {
   const [impersonate, setImpersonate] = useState<Tenant | null>(null);
   const [reason, setReason] = useState('协助排查订单同步问题');
   const [auditReason, setAuditReason] = useState('');
+  const [announcements, setAnnouncements] = useState<string[]>(readAnnouncements);
   const [toast, setToast] = useState('');
   const [session, setSession] = useState<Impersonation | null>(readSession);
   const [remainingSeconds, setRemainingSeconds] = useState(0);
@@ -1059,6 +1074,10 @@ export function App() {
     () => localStorage.setItem('zhili.platform.tenants', JSON.stringify(tenantRows)),
     [tenantRows]
   );
+  useEffect(
+    () => localStorage.setItem('zhili.platform.announcements', JSON.stringify(announcements)),
+    [announcements]
+  );
   useEffect(() => {
     if (session) localStorage.setItem('zhili.platform.impersonation', JSON.stringify(session));
     else localStorage.removeItem('zhili.platform.impersonation');
@@ -1069,6 +1088,16 @@ export function App() {
         `${tenant.name}${tenant.slug}`.toLowerCase().includes(search.toLowerCase())
       ),
     [search, tenantRows]
+  );
+  const auditRecords = useMemo<AuditRecord[]>(
+    () => [
+      {
+        ...auditSeed[0],
+        reason: auditReason || auditSeed[0].reason,
+      },
+      auditSeed[1],
+    ],
+    [auditReason]
   );
   const globalSearchResults = useMemo(() => {
     const index: SearchResult[] = [
@@ -1095,15 +1124,17 @@ export function App() {
         context: '套餐与模块',
         page: '套餐与模块' as const,
       })),
-      ...announcementSeed.map((announcement, index) => ({
+      ...announcements.map((announcement, index) => ({
         id: `announcement-${index}`,
         label: announcement,
         type: '公告' as const,
         context: '平台公告',
         page: '平台公告' as const,
       })),
-      ...auditSearchRecords.map((record) => ({
-        ...record,
+      ...auditRecords.map((record) => ({
+        id: record.id,
+        label: record.action,
+        context: `${record.tenant} · ${record.reason}`,
         type: '审计记录' as const,
         page: '代入与审计' as const,
       })),
@@ -1124,7 +1155,7 @@ export function App() {
           .includes(query)
       )
       .slice(0, 8);
-  }, [globalSearch, session, tenantRows]);
+  }, [announcements, auditRecords, globalSearch, session, tenantRows]);
   useEffect(() => {
     if (!session) return;
     const update = () => {
@@ -1243,8 +1274,17 @@ export function App() {
         }}
       />
     );
-  else if (page === '平台公告') content = <AnnouncementsPage notify={setToast} />;
-  else if (page === '代入与审计') content = <AuditPage auditReason={auditReason} />;
+  else if (page === '平台公告')
+    content = (
+      <AnnouncementsPage
+        announcements={announcements}
+        addAnnouncement={(announcement) =>
+          setAnnouncements((current) => [announcement, ...current])
+        }
+        notify={setToast}
+      />
+    );
+  else if (page === '代入与审计') content = <AuditPage records={auditRecords} />;
   else content = <RuntimePage readOnly={Boolean(session)} />;
 
   return (
