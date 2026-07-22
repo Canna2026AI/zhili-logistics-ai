@@ -717,6 +717,32 @@ paths:
           $ref: '#/components/responses/PayloadTooLarge'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /device-conflicts/{conflictId}:
+    get:
+      tags: [Devices]
+      operationId: getDeviceConflict
+      summary: Get an offline synchronization conflict and current field differences
+      x-feature-id: PDA-03
+      x-permission: pda.conflict.resolve
+      parameters:
+        - $ref: '#/components/parameters/ConflictId'
+      responses:
+        '200':
+          description: Conflict snapshot used to make a resolution decision.
+          headers:
+            ETag:
+              description: Strong ETag for the conflict resource version.
+              schema:
+                type: string
+                examples: ['"1"']
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceConflictResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
   /device-conflicts/{conflictId}:resolve:
     post:
       tags: [Devices]
@@ -5273,6 +5299,7 @@ components:
         disposition: {type: string, enum: [APPLIED, DUPLICATE, CONFLICT, REJECTED]}
         serverVersion: {type: integer}
         conflictId: {oneOf: [{$ref: '#/components/schemas/Ulid'}, {type: 'null'}]}
+        conflictVersion: {type: integer, minimum: 1}
         error: {oneOf: [{$ref: '#/components/schemas/ErrorEnvelope'}, {type: 'null'}]}
     SyncDeviceEventsResponse:
       type: object
@@ -5291,13 +5318,29 @@ components:
         reason: {type: string, minLength: 5}
     DeviceConflict:
       type: object
-      required: [id, localEvent, serverVersion, status, version]
+      required: [id, localEvent, serverVersion, serverState, differences, status, version]
       properties:
         id: {$ref: '#/components/schemas/Ulid'}
         localEvent: {$ref: '#/components/schemas/DeviceEventEnvelope'}
         serverVersion: {type: integer}
+        serverState:
+          type: object
+          additionalProperties: true
+          description: Current policy-filtered server projection for the affected entity.
+        differences:
+          type: array
+          items: {$ref: '#/components/schemas/ConflictFieldDifference'}
         status: {type: string, enum: [OPEN, RESOLVED]}
         version: {type: integer, minimum: 1}
+    ConflictFieldDifference:
+      type: object
+      additionalProperties: false
+      required: [field, localValue, serverValue, impact]
+      properties:
+        field: {type: string}
+        localValue: {type: string, description: Stable display value from the local event.}
+        serverValue: {type: string, description: Stable display value from the server projection.}
+        impact: {type: string}
     DeviceConflictResponse:
       type: object
       required: [data, meta]

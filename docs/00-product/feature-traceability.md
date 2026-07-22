@@ -47,7 +47,7 @@ Owner 缩写：`ROOT` 为集成/契约，`UI` 为令牌与共享组件，`FO` �
 | WH-08 | P0 | 浏览器/本地代理打印、队列、重打和幂等 | OPS-PRINT-JOBS | F04 | `createPrintJob` / `reprintDocument` | PrintJob | `document.print` | DOC-E2E-08 | FW/BW | `scope-decisions.md` / PLANNED |
 | PDA-01 | P0 | PDA 登录、设备与仓库绑定、扫码广播/相机 | PDA-HOME | F09 | `bindDevice` / `getDeviceTasks` | DeviceSession | `pda.use` | PDA-DEVICE-01 | FD/BI | `page-matrix.md` / PLANNED |
 | PDA-02 | P0 | 离线事件持久化、重启恢复、去重和批量同步 | PDA-OFFLINE | F09 | `syncDeviceEvents` | DeviceEventEnvelope | `pda.sync` | F09-RESTART | FD/BW | `interaction-state-matrix.md` / PLANNED |
-| PDA-03 | P0 | 媒体补传、冲突详情和逐条解决 | PDA-CONFLICT | F09 | `uploadDeviceMedia` / `resolveDeviceConflict` | DeviceConflict | `pda.conflict.resolve` | F09-CONFLICT | FD/BW | `interaction-state-matrix.md` / PLANNED |
+| PDA-03 | P0 | 媒体补传、冲突详情和逐条解决 | PDA-CONFLICT | F09 | `uploadDeviceMedia` / `getDeviceConflict` / `resolveDeviceConflict` | DeviceConflict | `pda.conflict.resolve` | F09-CONFLICT | FD/BW | `interaction-state-matrix.md` / PLANNED |
 | LINE-01 | P0 | 创建订舱、班次与提货计划 | OPS-BOOKING | F04 | `createBooking` | Booking | `linehaul.booking.create` | LINE-E2E-01 | FW/BW | `page-matrix.md` / PLANNED |
 | LINE-02 | P0 | 提单主从关系与运单归集 | OPS-BOL | F04 | `createBillOfLading` | BillOfLading | `linehaul.bol.write` | F04-NORMAL | FW/BW | `interaction-state-matrix.md` / PLANNED |
 | LINE-03 | P0 | 报关、集包、卡板和装柜兼容检查 | OPS-LOAD-UNIT | F04 | `validateLoadCompatibility` | CompatibilityResult | `linehaul.load.validate` | F04-FAILED-INCOMPATIBLE | FW/BW | `interaction-state-matrix.md` / PLANNED |

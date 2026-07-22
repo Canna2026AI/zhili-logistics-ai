@@ -446,6 +446,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/device-conflicts/{conflictId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get an offline synchronization conflict and current field differences */
+    get: operations['getDeviceConflict'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/device-conflicts/{conflictId}:resolve': {
     parameters: {
       query?: never;
@@ -3315,6 +3332,7 @@ export interface components {
       disposition: 'APPLIED' | 'DUPLICATE' | 'CONFLICT' | 'REJECTED';
       serverVersion?: number;
       conflictId?: components['schemas']['Ulid'] | null;
+      conflictVersion?: number;
       error?: components['schemas']['ErrorEnvelope'] | null;
     };
     SyncDeviceEventsResponse: {
@@ -3330,9 +3348,22 @@ export interface components {
       id: components['schemas']['Ulid'];
       localEvent: components['schemas']['DeviceEventEnvelope'];
       serverVersion: number;
+      /** @description Current policy-filtered server projection for the affected entity. */
+      serverState: {
+        [key: string]: unknown;
+      };
+      differences: components['schemas']['ConflictFieldDifference'][];
       /** @enum {string} */
       status: 'OPEN' | 'RESOLVED';
       version: number;
+    };
+    ConflictFieldDifference: {
+      field: string;
+      /** @description Stable display value from the local event. */
+      localValue: string;
+      /** @description Stable display value from the server projection. */
+      serverValue: string;
+      impact: string;
     };
     DeviceConflictResponse: {
       data: components['schemas']['DeviceConflict'];
@@ -5056,6 +5087,32 @@ export interface operations {
       };
       413: components['responses']['PayloadTooLarge'];
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  getDeviceConflict: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        conflictId: components['parameters']['ConflictId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Conflict snapshot used to make a resolution decision. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the conflict resource version. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeviceConflictResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
     };
   };
   resolveDeviceConflict: {
