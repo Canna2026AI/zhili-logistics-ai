@@ -91,6 +91,14 @@
 | Prettier          | `pnpm format:check`，全部匹配                           |
 | Diff              | `git diff --check` 通过                                 |
 
+## 独立审查闭环
+
+- 审查范围：`91434a8..c55f92e`；代码 HEAD `bab6f4a`，证据 HEAD `c55f92e`。
+- 既有综合审查的 5 Critical / 7 Important 已通过精确任务绑定、原始 deviceEventId、权威回执、PALLETIZED、动作 schema、权限门禁、加密接管和生产 E2E 全部闭环。
+- 本轮首审发现 3 Critical / 3 Important：离线尾程权威门禁、运行时 disposition、接管快照竞态、409 保真、0/多任务匹配及任务缓存恢复，均由 `13d755e` 修复。
+- 二轮审查发现混合批次隔离、任务缓存持久化门禁及 partial-error UI 恢复问题，均由 `bab6f4a` 修复。
+- 最终独立结论：**PASS — 0 Critical / 0 Important / 0 Minor**；完整可版本化报告见 `docs/03-delivery/evidence/frontend-pda-authoritative-review.md`。
+
 复现命令：
 
 ```bash
