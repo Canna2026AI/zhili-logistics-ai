@@ -87,20 +87,24 @@ export const platformMockFetch: typeof fetch = async (input) => {
       201,
       1
     );
-  if (path.endsWith('/platform/impersonations'))
+  if (path.endsWith('/platform/impersonations')) {
+    const body = (await request
+      .clone()
+      .json()) as components['schemas']['StartImpersonationRequest'];
     return json(
       {
         data: {
           id: '01JIMPERSONATE000000000001',
-          tenantId: '01JTENANT0000000000000001',
+          tenantId: body.tenantId,
           actorId: '01JADMIN000000000000000001',
-          reason: '协助排查订单同步问题',
+          reason: body.reason,
           expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
         },
         meta,
       },
       201
     );
+  }
   if (path.endsWith('/platform/impersonations/current')) return new Response(null, { status: 204 });
   const tenantStatus = path.match(/\/platform\/tenants\/([^/]+):change-status$/);
   if (tenantStatus) {
@@ -147,6 +151,7 @@ export const platformMockFetch: typeof fetch = async (input) => {
 
 export type RuntimeDifference = { field: string; local: string; server: string };
 const revokedMockSessions = new Set<string>();
+const pendingPlatformCommandKeys = new Map<string, string>();
 
 /** App-local port for platform operations pending inclusion in shared OpenAPI. */
 const platformCommand = async <TResponse>(
@@ -171,6 +176,54 @@ const platformCommand = async <TResponse>(
     const itemIds = body.itemIds as string[];
     return { items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) } as TResponse;
   }
+  if (mock && path === '/api/v1/platform/access-policy-baselines:reload') {
+    const roleId = String(body.roleId);
+    const finance = roleId.endsWith('2');
+    return {
+      tenantId: String(body.tenantId),
+      tenantVersion: Number(body.tenantVersion) + 1,
+      role: {
+        id: roleId,
+        name: finance ? '财务管理员' : '运营管理员',
+        version: Number(body.roleVersion) + 1,
+        memberCount: finance ? 4 : 12,
+        statements: finance
+          ? [
+              { effect: 'ALLOW', resource: 'waybill', actions: ['read'], dataScope: 'TENANT' },
+              {
+                effect: 'ALLOW',
+                resource: 'billing',
+                actions: ['read', 'approve'],
+                dataScope: 'TENANT',
+              },
+            ]
+          : [
+              {
+                effect: 'ALLOW',
+                resource: 'waybill',
+                actions: ['read', 'write'],
+                dataScope: 'TENANT',
+              },
+              {
+                effect: 'ALLOW',
+                resource: 'warehouse',
+                actions: ['read', 'write', 'approve'],
+                dataScope: 'TENANT',
+              },
+              {
+                effect: 'ALLOW',
+                resource: 'billing',
+                actions: ['read', 'approve'],
+                dataScope: 'TENANT',
+              },
+            ],
+      },
+      subjects: [
+        { id: '01JUSER000000000000000001', name: '李明' },
+        { id: '01JUSER000000000000000002', name: '王芳' },
+      ],
+    } as TResponse;
+  }
   if (mock && path.startsWith('/api/v1/platform/operations/')) {
     if (path.endsWith('/release'))
       throw new PlatformApiError(403, 'FORBIDDEN', '缺少 platform.release.publish 权限');
@@ -180,12 +233,16 @@ const platformCommand = async <TResponse>(
       message: '服务端操作已完成',
     } as TResponse;
   }
+  const fingerprint = `${path}:${JSON.stringify(body)}`;
+  const idempotencyKey = pendingPlatformCommandKeys.get(fingerprint) ?? key();
+  pendingPlatformCommandKeys.set(fingerprint, idempotencyKey);
   const response = await fetch(path, {
     method: 'POST',
     credentials: 'include',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(body),
   });
+  pendingPlatformCommandKeys.delete(fingerprint);
   const payload =
     response.status === 204 ? undefined : await response.json().catch(() => undefined);
   if (!response.ok) {
@@ -260,6 +317,87 @@ function isTenant(value: unknown): value is TenantResource {
   );
 }
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function isRolePolicy(
+  value: unknown,
+  roleId: string
+): value is components['schemas']['RolePolicy'] {
+  return (
+    isRecord(value) &&
+    value.roleId === roleId &&
+    Array.isArray(value.statements) &&
+    isPositiveVersion(value.version)
+  );
+}
+
+function isPermissionPreview(
+  value: unknown,
+  userId: string
+): value is components['schemas']['PermissionPreview'] {
+  return (
+    isRecord(value) &&
+    value.userId === userId &&
+    Array.isArray(value.effectiveStatements) &&
+    isStringArray(value.differences)
+  );
+}
+
+function isFieldPolicyPreview(
+  value: unknown,
+  subjectId: string
+): value is components['schemas']['FieldPolicyPreview'] {
+  return (
+    isRecord(value) &&
+    value.subjectId === subjectId &&
+    Array.isArray(value.effectivePolicies) &&
+    isStringArray(value.differences)
+  );
+}
+
+function isPermissionSimulation(
+  value: unknown,
+  userId: string
+): value is components['schemas']['PermissionSimulation'] {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    value.userId === userId &&
+    typeof value.actorId === 'string' &&
+    typeof value.expiresAt === 'string' &&
+    Number.isFinite(Date.parse(value.expiresAt))
+  );
+}
+
+function isPermissionDecision(
+  value: unknown,
+  simulationId: string
+): value is components['schemas']['PermissionDecision'] {
+  return (
+    isRecord(value) &&
+    (value.simulationId === undefined || value.simulationId === simulationId) &&
+    typeof value.allowed === 'boolean' &&
+    isStringArray(value.trace)
+  );
+}
+
+function isImpersonationSession(
+  value: unknown,
+  tenantId: string
+): value is components['schemas']['ImpersonationSession'] {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    value.tenantId === tenantId &&
+    typeof value.actorId === 'string' &&
+    typeof value.reason === 'string' &&
+    typeof value.expiresAt === 'string' &&
+    Number.isFinite(Date.parse(value.expiresAt))
+  );
+}
+
 export function createPlatformApi(
   apiClient: Pick<ZhiliApiClient, 'POST' | 'PUT' | 'DELETE'>,
   createIdempotencyKey: () => string = () => `platform-${crypto.randomUUID()}`
@@ -288,13 +426,14 @@ export function createPlatformApi(
     async saveEntitlements(
       tenantId: string,
       version: number,
-      body: EntitlementRequest
+      body: EntitlementRequest,
+      idempotencyKey = createIdempotencyKey()
     ): Promise<number> {
       const response = await apiClient.PUT('/platform/tenants/{tenantId}/entitlements', {
         params: {
           path: { tenantId },
           header: {
-            'Idempotency-Key': createIdempotencyKey(),
+            'Idempotency-Key': idempotencyKey,
             'If-Match': `"${version}"`,
           },
         },
@@ -315,17 +454,20 @@ export function createPlatformApi(
     async updateRolePolicy(
       roleId: string,
       version: number,
-      body: components['schemas']['UpdateRolePolicyRequest']
+      body: components['schemas']['UpdateRolePolicyRequest'],
+      idempotencyKey = createIdempotencyKey()
     ) {
       const response = await apiClient.PUT('/iam/roles/{roleId}/policy', {
         params: {
           path: { roleId },
-          header: { 'Idempotency-Key': createIdempotencyKey(), 'If-Match': `"${version}"` },
+          header: { 'Idempotency-Key': idempotencyKey, 'If-Match': `"${version}"` },
         },
         body,
       });
       throwResponseError(response);
-      return ensure(response.data, response.error).data;
+      const data: unknown = ensure(response.data, response.error).data;
+      if (!isRolePolicy(data, roleId)) throw new Error('ROLE_POLICY_RESPONSE_MISMATCH');
+      return data;
     },
     async previewEffectivePermissions(
       userId: string,
@@ -336,22 +478,32 @@ export function createPlatformApi(
         body,
       });
       throwResponseError(response);
-      return ensure(response.data, response.error).data;
+      const data: unknown = ensure(response.data, response.error).data;
+      if (!isPermissionPreview(data, userId))
+        throw new Error('PERMISSION_PREVIEW_RESPONSE_MISMATCH');
+      return data;
     },
     async previewFieldPolicy(body: components['schemas']['PreviewFieldPolicyRequest']) {
       const response = await apiClient.POST('/iam/field-policy:preview', { body });
       throwResponseError(response);
-      return ensure(response.data, response.error).data;
+      const data: unknown = ensure(response.data, response.error).data;
+      if (!isFieldPolicyPreview(data, body.subjectId))
+        throw new Error('FIELD_POLICY_RESPONSE_MISMATCH');
+      return data;
     },
     async startPermissionSimulation(
-      body: components['schemas']['StartPermissionSimulationRequest']
+      body: components['schemas']['StartPermissionSimulationRequest'],
+      idempotencyKey = createIdempotencyKey()
     ) {
       const response = await apiClient.POST('/iam/permission-simulations', {
-        params: { header: { 'Idempotency-Key': createIdempotencyKey() } },
+        params: { header: { 'Idempotency-Key': idempotencyKey } },
         body,
       });
       throwResponseError(response);
-      return ensure(response.data, response.error).data;
+      const data: unknown = ensure(response.data, response.error).data;
+      if (!isPermissionSimulation(data, body.userId))
+        throw new Error('PERMISSION_SIMULATION_RESPONSE_MISMATCH');
+      return data;
     },
     async verifyPermissionSimulation(
       simulationId: string,
@@ -362,7 +514,10 @@ export function createPlatformApi(
         body,
       });
       throwResponseError(response);
-      return ensure(response.data, response.error).data;
+      const data: unknown = ensure(response.data, response.error).data;
+      if (!isPermissionDecision(data, simulationId))
+        throw new Error('PERMISSION_DECISION_RESPONSE_MISMATCH');
+      return data;
     },
     async endPermissionSimulation(simulationId: string) {
       const response = await apiClient.DELETE('/iam/permission-simulations/{simulationId}', {
@@ -406,13 +561,17 @@ export const platformPort = {
     });
     return { ...created, version };
   },
-  async startImpersonation(tenantId: string, reason: string) {
+  async startImpersonation(tenantId: string, reason: string, idempotencyKey = key()) {
     const client = runtimeClient();
     const response = await client.POST('/platform/impersonations', {
-      params: { header: { 'Idempotency-Key': key() } },
+      params: { header: { 'Idempotency-Key': idempotencyKey } },
       body: { tenantId, reason, durationMinutes: 60 },
     });
-    const created = ensure(response.data, response.error).data;
+    throwResponseError(response);
+    const created: unknown = ensure(response.data, response.error).data;
+    if (!isImpersonationSession(created, tenantId)) {
+      throw new Error('IMPERSONATION_RESPONSE_MISMATCH');
+    }
     revokedMockSessions.delete(created.id);
     return created;
   },
@@ -472,6 +631,43 @@ export const platformPort = {
   async publishAnnouncement(title: string) {
     await platformCommand('/api/v1/platform/announcements', { title, audience: 'ALL_TENANTS' });
   },
+  async reloadAccessPolicyBaseline(
+    tenantId: string,
+    tenantVersion: number,
+    roleId: string,
+    roleVersion: number,
+    userId: string
+  ) {
+    const value = await platformCommand<{
+      tenantId: string;
+      tenantVersion: number;
+      role: {
+        id: string;
+        name: string;
+        version: number;
+        memberCount: number;
+        statements: components['schemas']['PolicyStatement'][];
+      };
+      subjects: Array<{ id: string; name: string }>;
+    }>('/api/v1/platform/access-policy-baselines:reload', {
+      tenantId,
+      tenantVersion,
+      roleId,
+      roleVersion,
+      userId,
+    });
+    if (
+      value.tenantId !== tenantId ||
+      !isPositiveVersion(value.tenantVersion) ||
+      value.role.id !== roleId ||
+      !isPositiveVersion(value.role.version) ||
+      !Array.isArray(value.role.statements) ||
+      !value.subjects.some((subject) => subject.id === userId)
+    ) {
+      throw new Error('ACCESS_POLICY_BASELINE_RESPONSE_MISMATCH');
+    }
+    return value;
+  },
   compareRuntime(localVersion: string) {
     return platformCommand<{ serverVersion: string; differences: RuntimeDifference[] }>(
       '/api/v1/platform/runtime-snapshots:compare',
@@ -529,7 +725,17 @@ export const platformPort = {
         'IMPERSONATION_STATUS_FAILED',
         String((isRecord(payload) && payload.message) || '代入会话状态检查失败')
       );
-    return (isRecord(payload) && 'data' in payload ? payload.data : payload) as {
+    const data: unknown = isRecord(payload) && 'data' in payload ? payload.data : payload;
+    if (
+      !isRecord(data) ||
+      (data.sessionId !== undefined && data.sessionId !== sessionId) ||
+      !['ACTIVE', 'REVOKED', 'EXPIRED'].includes(String(data.status)) ||
+      !isPositiveVersion(data.permissionsVersion) ||
+      typeof data.eventId !== 'string'
+    ) {
+      throw new Error('IMPERSONATION_STATUS_RESPONSE_MISMATCH');
+    }
+    return data as {
       status: 'ACTIVE' | 'REVOKED' | 'EXPIRED';
       permissionsVersion: number;
       eventId: string;

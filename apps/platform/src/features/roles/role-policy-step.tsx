@@ -1,5 +1,9 @@
 import { Button } from '@zhili/ui';
-import type { AccessPolicyDraft, PolicyStatement } from '../policies/access-policy';
+import type {
+  AccessPolicyCatalog,
+  AccessPolicyDraft,
+  PolicyStatement,
+} from '../policies/access-policy';
 
 const resources = [
   ['waybill', '运单管理'],
@@ -23,6 +27,7 @@ export function RolePolicyStep({
   onClose,
   mockMode,
   busy,
+  catalog,
 }: {
   draft: AccessPolicyDraft;
   onChange: (draft: AccessPolicyDraft) => void;
@@ -33,6 +38,7 @@ export function RolePolicyStep({
   onClose: () => void;
   mockMode: boolean;
   busy: boolean;
+  catalog: AccessPolicyCatalog;
 }) {
   const toggle = (resource: string, action: string, allowed: boolean) => {
     const current = draft.statements.find((item) => item.resource === resource);
@@ -84,17 +90,29 @@ export function RolePolicyStep({
             <select
               aria-label="策略角色"
               value={draft.role.id}
-              onChange={(event) =>
+              onChange={(event) => {
+                const role = catalog.roles.find((item) => item.id === event.target.value);
+                if (!role) return;
                 onChange({
                   ...draft,
-                  role: event.target.value.endsWith('2')
-                    ? { id: event.target.value, name: '财务管理员', version: 7, memberCount: 4 }
-                    : { id: event.target.value, name: '运营管理员', version: 18, memberCount: 12 },
-                })
-              }
+                  role: {
+                    id: role.id,
+                    name: role.name,
+                    version: role.version,
+                    memberCount: role.memberCount,
+                  },
+                  statements: role.statements.map((statement) => ({
+                    ...statement,
+                    actions: [...statement.actions],
+                  })),
+                });
+              }}
             >
-              <option value="01JROLE000000000000000001">运营管理员</option>
-              <option value="01JROLE000000000000000002">财务管理员</option>
+              {catalog.roles.map((role) => (
+                <option key={role.id} value={role.id}>
+                  {role.name}
+                </option>
+              ))}
             </select>
           </label>
           <label>
@@ -102,17 +120,16 @@ export function RolePolicyStep({
             <select
               aria-label="模拟用户"
               value={draft.subject.id}
-              onChange={(event) =>
-                onChange({
-                  ...draft,
-                  subject: event.target.value.endsWith('2')
-                    ? { id: event.target.value, name: '王芳' }
-                    : { id: event.target.value, name: '李明' },
-                })
-              }
+              onChange={(event) => {
+                const subject = catalog.subjects.find((item) => item.id === event.target.value);
+                if (subject) onChange({ ...draft, subject });
+              }}
             >
-              <option value="01JUSER000000000000000001">李明</option>
-              <option value="01JUSER000000000000000002">王芳</option>
+              {catalog.subjects.map((subject) => (
+                <option key={subject.id} value={subject.id}>
+                  {subject.name}
+                </option>
+              ))}
             </select>
           </label>
           <span>作用域：当前租户</span>

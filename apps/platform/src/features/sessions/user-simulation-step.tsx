@@ -18,7 +18,7 @@ export function UserSimulationStep({
   simulationId: string;
   expiresAt: string;
   onFinish: () => void | Promise<void>;
-  onClose: () => void;
+  onClose: () => void | Promise<void>;
   saving?: boolean;
   error?: string;
 }) {
@@ -29,7 +29,7 @@ export function UserSimulationStep({
         <strong>
           正在以 {draft.subject.name} / {draft.role.name} 的视角模拟
         </strong>
-        <Button variant="secondary" disabled={saving} onClick={onClose}>
+        <Button variant="secondary" disabled={saving} onClick={() => void onClose()}>
           退出模拟
         </Button>
         <Button disabled={saving} onClick={() => void onFinish()}>

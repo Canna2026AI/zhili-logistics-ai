@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import * as apiModule from './api';
 
@@ -35,6 +36,159 @@ type PlatformApiFactory = (
 };
 
 describe('platform OpenAPI adapter', () => {
+  it('fails closed when typed IAM responses do not belong to the requested resource', async () => {
+    const createPlatformApi = (apiModule as unknown as { createPlatformApi?: PlatformApiFactory })
+      .createPlatformApi!;
+    const roleId = '01JROLE000000000000000001';
+    const userId = '01JUSER000000000000000001';
+    const simulationId = '01JSIMULATION0000000000001';
+    const api = createPlatformApi(
+      {
+        PUT: vi.fn().mockResolvedValue({
+          data: { data: { roleId: 'another-role', statements: [], version: 0 } },
+        }),
+        POST: vi
+          .fn()
+          .mockResolvedValueOnce({
+            data: { data: { userId: 'another-user', effectiveStatements: [], differences: [] } },
+          })
+          .mockResolvedValueOnce({
+            data: { data: { subjectId: 'another-user', effectivePolicies: [], differences: [] } },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              data: {
+                id: simulationId,
+                userId: 'another-user',
+                actorId: '01JADMIN000000000000000001',
+                expiresAt: '2099-12-31T23:59:59.000Z',
+              },
+            },
+          })
+          .mockResolvedValueOnce({
+            data: {
+              data: {
+                simulationId: 'another-simulation',
+                allowed: true,
+                trace: ['role'],
+              },
+            },
+          }),
+        DELETE: vi.fn(),
+      },
+      () => 'idem-identity'
+    );
+
+    await expect(
+      api.updateRolePolicy(roleId, 18, { statements: [], reason: '身份校验' })
+    ).rejects.toThrow('ROLE_POLICY_RESPONSE_MISMATCH');
+    await expect(api.previewEffectivePermissions(userId, {})).rejects.toThrow(
+      'PERMISSION_PREVIEW_RESPONSE_MISMATCH'
+    );
+    await expect(
+      api.previewFieldPolicy({ subjectId: userId, proposedPolicies: [] })
+    ).rejects.toThrow('FIELD_POLICY_RESPONSE_MISMATCH');
+    await expect(
+      api.startPermissionSimulation({ userId, reason: '身份校验', durationMinutes: 15 })
+    ).rejects.toThrow('PERMISSION_SIMULATION_RESPONSE_MISMATCH');
+    await expect(
+      api.verifyPermissionSimulation(simulationId, { resource: 'waybill', action: 'read' })
+    ).rejects.toThrow('PERMISSION_DECISION_RESPONSE_MISMATCH');
+  });
+
+  it('reuses an app-local command idempotency key after a lost response and rotates it after success', async () => {
+    window.history.replaceState({}, '', '/');
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: { operationId: 'OPS-1', status: 'SUCCEEDED', message: 'done' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: { operationId: 'OPS-2', status: 'SUCCEEDED', message: 'done again' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiModule.platformPort.executeOperation('系统健康')).rejects.toThrow(
+      'response lost'
+    );
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-1',
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-2',
+    });
+
+    const idempotencyKeys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get('Idempotency-Key')
+    );
+    expect(idempotencyKeys[0]).toBeTruthy();
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[2]).not.toBe(idempotencyKeys[1]);
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects a successful impersonation response for a different tenant', async () => {
+    window.history.replaceState({}, '', '/');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              id: '01JIMPERSONATE000000000001',
+              tenantId: '01JTENANT0000000000000099',
+              actorId: '01JADMIN000000000000000001',
+              reason: '排查',
+              expiresAt: '2099-12-31T23:59:59.000Z',
+            },
+          }),
+          { status: 201, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    );
+
+    await expect(
+      apiModule.platformPort.startImpersonation('01JTENANT0000000000000001', '排查')
+    ).rejects.toThrow('IMPERSONATION_RESPONSE_MISMATCH');
+    vi.unstubAllGlobals();
+  });
+
+  it('fails closed when an impersonation status receipt has the wrong session or version', async () => {
+    window.history.replaceState({}, '', '/');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            data: {
+              sessionId: 'another-session',
+              status: 'ACTIVE',
+              permissionsVersion: 0,
+              eventId: 'ACL-0',
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+    );
+
+    await expect(
+      apiModule.platformPort.checkImpersonation('01JIMPERSONATE000000000001', 19)
+    ).rejects.toThrow('IMPERSONATION_STATUS_RESPONSE_MISMATCH');
+    vi.unstubAllGlobals();
+  });
+
   it('derives status and entitlement mock ETags from non-default authoritative versions', async () => {
     const platformMockFetch = (apiModule as unknown as { platformMockFetch?: typeof fetch })
       .platformMockFetch;
