@@ -359,7 +359,22 @@ async function localCommand<TRequest extends Record<string, unknown>, TResponse>
   return (await mockCustomerCommandFetch(path, body)) as TResponse;
 }
 
-const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: customerMockFetch });
+export function resolveCustomerTransport(
+  search: string,
+  mode: string = import.meta.env.MODE
+): typeof fetch | undefined {
+  if (mode === 'test' || new URLSearchParams(search).get('mock') === '1') {
+    return customerMockFetch;
+  }
+  return undefined;
+}
+
+const runtimeSearch = typeof window === 'undefined' ? '' : window.location.search;
+const runtimeTransport = resolveCustomerTransport(runtimeSearch);
+const client = createZhiliClient({
+  baseUrl: import.meta.env.MODE === 'test' ? 'http://localhost/api/v1' : '/api/v1',
+  ...(runtimeTransport ? { fetch: runtimeTransport } : {}),
+});
 const key = () => `f1c-${crypto.randomUUID?.() ?? Date.now()}`;
 
 function ensure<T>(data: T | undefined, error: unknown): T {
