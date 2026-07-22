@@ -7,7 +7,7 @@
 | 文档         | PASSED           | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题 | 无                                                                   |
 | 本地 UI 设计 | PASSED           | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过  | 无                                                                   |
 | Figma 同步   | BLOCKED_EXTERNAL | `FJb5EAV0dx3WHZCN9zJaok` | Figma 文件和本地官方开发插件已创建                                           | Starter MCP 调用上限；变量、组件、页面和原型尚未写入，不阻塞代码实现 |
-| 前端         | IN_PROGRESS      | `UI0-v0.1`               | 五端入口、Storybook、MSW、Playwright 与 axe 基座通过                         | F1/F2 页面、完整视觉与 a11y 待实现；Figma 同步待补录                 |
+| 前端         | IN_PROGRESS      | `F1-c69f99b`             | F1 四端业务、生产 API ports、Storybook、22 项 Playwright/axe 全部通过        | PDA F2 离线/设备流程待实现；Figma 同步待补录                         |
 | 后端         | OPEN             | —                        | 待 API、DB、Worker、RLS 和集成报告                                           | 全前端门槛未通过，不得启动                                           |
 | 发布         | OPEN             | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                          | 前置门槛未通过                                                       |
 
@@ -58,3 +58,13 @@ Figma 同步完成时仍需补齐以下证据：
 - OpenAPI 强类型客户端默认携带 Cookie；MSW 覆盖正常、空、失败、无权限、过期和部分成功六类状态，响应由生成类型约束并与正式错误包裹一致。
 - 根测试共 6 个契约测试、2 个令牌测试、1 个 API 客户端测试、6 个 Mock 状态测试和 10 个 UI/a11y 测试；五端功能 Playwright 6/6、五端真实浏览器 axe 扫描 1/1 通过。
 - 浏览器截图对照与未关闭差异记录在 `docs/03-delivery/ui0-browser-fidelity.md`；这些差异属于 F1/F2，而不是 UI0 共享基座完成声明。
+
+## 2026-07-22 F1 前端门槛证据
+
+- F1 三个独立实现工作树已合入 `main`：运营订单与报价、运营履约与财务、客户/平台/官网；各自独立复审均为 0 Critical / 0 Important。
+- 运营总入口在提交 `c69f99b` 完成第二次独立复审：公开订单入口未注入 ports 时 fail closed，生产组合根默认使用 OpenAPI ports；内存端口只允许显式测试/预览注入。
+- 订单、仓库、干线、轨迹和财务路由同步 URL/history；直接深链与浏览器后退已由 Vitest 和 Playwright 覆盖。并发写命令使用双引号强 ETag `If-Match`。
+- 冻结依赖安装、OpenAPI 生成一致性、Prettier、18 个包 lint/typecheck/build、全仓 Vitest/Turbo 任务全部退出码 0；Ops 共 28/28 单测通过。
+- `CI=1 pnpm e2e` 共 22/22 通过，覆盖运营三套、客户、平台、官网桌面/移动、当前 PDA 基线与五端首屏 axe；F1 运营相关浏览器测试为 11/11。
+- 详细证据：`docs/03-delivery/evidence/frontend-ops-orders.md`、`frontend-ops-warehouse-finance.md`、`frontend-portals.md`；集成复审报告为 `/tmp/zhili-f1-integration-review.md`。
+- 前端总门槛仍为 `IN_PROGRESS`：PDA F2 的离线持久化、重启恢复、媒体补传、会话保护和冲突逐条解决尚未实现，不得提前启动后端波次。
