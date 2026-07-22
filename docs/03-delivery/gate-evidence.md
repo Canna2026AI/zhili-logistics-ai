@@ -7,8 +7,8 @@
 | 文档         | PASSED           | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题 | 无                                                                   |
 | 本地 UI 设计 | PASSED           | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过  | 无                                                                   |
 | Figma 同步   | BLOCKED_EXTERNAL | `FJb5EAV0dx3WHZCN9zJaok` | Figma 文件和本地官方开发插件已创建                                           | Starter MCP 调用上限；变量、组件、页面和原型尚未写入，不阻塞代码实现 |
-| 前端         | IN_PROGRESS      | `F1-c69f99b`             | F1 四端业务、生产 API ports、Storybook、22 项 Playwright/axe 全部通过        | PDA F2 离线/设备流程待实现；Figma 同步待补录                         |
-| 后端         | OPEN             | —                        | 待 API、DB、Worker、RLS 和集成报告                                           | 全前端门槛未通过，不得启动                                           |
+| 前端         | PASSED           | `063a90f`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、35 项 Playwright/axe 全部通过 | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                   |
+| 后端         | OPEN             | —                        | 待 API、DB、Worker、RLS 和集成报告                                           | 前端门槛已通过；下一波从 Backend Foundation 开始                     |
 | 发布         | OPEN             | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                          | 前置门槛未通过                                                       |
 
 ## UI 门槛与 B 方案决策
@@ -67,4 +67,14 @@ Figma 同步完成时仍需补齐以下证据：
 - 冻结依赖安装、OpenAPI 生成一致性、Prettier、18 个包 lint/typecheck/build、全仓 Vitest/Turbo 任务全部退出码 0；Ops 共 28/28 单测通过。
 - `CI=1 pnpm e2e` 共 22/22 通过，覆盖运营三套、客户、平台、官网桌面/移动、当前 PDA 基线与五端首屏 axe；F1 运营相关浏览器测试为 11/11。
 - 详细证据：`docs/03-delivery/evidence/frontend-ops-orders.md`、`frontend-ops-warehouse-finance.md`、`frontend-portals.md`；集成复审报告为 `/tmp/zhili-f1-integration-review.md`。
-- 前端总门槛仍为 `IN_PROGRESS`：PDA F2 的离线持久化、重启恢复、媒体补传、会话保护和冲突逐条解决尚未实现，不得提前启动后端波次。
+- F1 子门槛在此提交时仍不等于前端总门槛；总门槛由下节 PDA F2 与合并后全仓回归关闭。
+
+## 2026-07-22 F2 PDA 与前端总门槛证据
+
+- PDA 代码头为 `bab6f4a`，最终审查证据头为 `43b69a2`，合入 main 的提交为 `063a90f`。
+- 设备/仓库绑定、精确 scoped task、19 个动作 payload、离线 AES-GCM IndexedDB、200 项容量、100 项批次、媒体 reservation/claim、三类冲突解决、权威尾程/POD、两阶段 RSA-OAEP-256 + AES-256-GCM 管理员接管与 PWA 离线壳均已落地。
+- 独立审查记录在 `docs/03-delivery/evidence/frontend-pda-authoritative-review.md`：既有 5 Critical / 7 Important、本轮 3 Critical / 3 Important 和二轮 partial-sync 问题全部闭环，最终为 0 Critical / 0 Important / 0 Minor。
+- PDA Vitest 为 12 files / 137 tests；production PDA Playwright 为 14/14；契约为 13/13，生成零差异，Redocly 0 warning / 0 error。
+- 合并 main 后重新执行 frozen install、Prettier、Markdownlint、18 包 lint/typecheck/build、27 个 Turbo test/build 任务，全部退出码 0。
+- `CI=1 pnpm e2e` 在 main 上为 35/35，通过五端桌面/移动、生产 PDA、PWA 离线和 axe；因此前端总门槛升级为 `PASSED`。
+- 详细证据：`docs/03-delivery/evidence/frontend-pda.md` 与 `docs/03-delivery/evidence/frontend-pda-authoritative-review.md`。Android 原生壳仍需 Android SDK/真机验证；Web/PWA 已通过，不把该平台外部条件冒充为完成。
