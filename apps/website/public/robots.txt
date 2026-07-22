@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://canna2026ai.github.io/zhili-logistics-ai/sitemap.xml
