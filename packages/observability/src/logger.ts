@@ -26,10 +26,7 @@ const redactingSerializers = Object.fromEntries(
   SERIALIZED_KEYS.map((key) => [key, redactSerializer(key)])
 ) as Record<string, SerializerFn>;
 
-export function createLogger(
-  options: LoggerOptions = {},
-  destination?: DestinationStream
-): Logger {
+export function createLogger(options: LoggerOptions = {}, destination?: DestinationStream): Logger {
   const {
     formatters: suppliedFormatters,
     hooks: suppliedHooks,

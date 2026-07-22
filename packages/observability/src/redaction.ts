@@ -19,7 +19,8 @@ const CHINESE_MOBILE_PATTERN = /(?<!\d)(1[3-9]\d)\d{4}(\d{4})(?!\d)/g;
 const COOKIE_HEADER_PATTERN = /\b(cookie)\b\s*([:=])[^\r\n]*/gi;
 const SENSITIVE_MESSAGE_PATTERN =
   /\b(authorization|cookie|password|secret|token|api[ _-]?key|access[ _-]?key|session[ _-]?key|envelope[ _-]?master[ _-]?key)\b\s*([:=])(\s*)(?:Bearer\s+)?[^\s,;]+/gi;
-const ADDRESS_MESSAGE_PATTERN = /\b(address|addr|street|location)\b\s*([:=])\s*[^,;\n]+|地址\s*([:=])\s*[^,;\n]+/gi;
+const ADDRESS_MESSAGE_PATTERN =
+  /\b(address|addr|street|location)\b\s*([:=])\s*[^,;\n]+|地址\s*([:=])\s*[^,;\n]+/gi;
 
 export const redactedValue = '[REDACTED]';
 
@@ -27,7 +28,11 @@ export function redact<T>(value: T): T {
   return redactValue(value, undefined, new WeakMap<object, unknown>()) as T;
 }
 
-function redactValue(value: unknown, key: string | undefined, seen: WeakMap<object, unknown>): unknown {
+function redactValue(
+  value: unknown,
+  key: string | undefined,
+  seen: WeakMap<object, unknown>
+): unknown {
   if (key && isSensitiveKey(key)) {
     return redactedValue;
   }
