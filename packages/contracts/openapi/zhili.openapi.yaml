@@ -4544,8 +4544,8 @@ paths:
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /automations:simulate:
@@ -5068,8 +5068,8 @@ paths:
           $ref: '#/components/responses/CommandSucceeded'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
+        '412':
+          $ref: '#/components/responses/PreconditionFailed'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /public/legal-documents/{documentSlug}:
@@ -6247,14 +6247,14 @@ components:
     Waybill:
       type: object
       additionalProperties: false
-      required: [id, waybillNo, masterNo, customerCode, senderPhone, recipientPhone, consigneeAddress, route, service, transport, forecastWeightKg, actualWeightKg, volumeM3, pieces, createdAt, state, branch, timeline, allowedActions, version]
+      required: [id, waybillNo, masterNo, customerName, customerCode, contactName, senderPhone, recipientPhone, consigneeAddress, route, service, transport, forecastWeightKg, actualWeightKg, volumeM3, pieces, createdAt, state, branch, timeline, allowedActions, version]
       properties:
         id: {$ref: '#/components/schemas/Ulid'}
         waybillNo: {type: string, examples: [S2505120004]}
         masterNo: {type: [string, 'null']}
-        customerName: {type: string}
+        customerName: {$ref: '#/components/schemas/SecuredTextProjection'}
         customerCode: {$ref: '#/components/schemas/SecuredTextProjection'}
-        contactName: {type: [string, 'null']}
+        contactName: {$ref: '#/components/schemas/SecuredTextProjection'}
         senderPhone: {$ref: '#/components/schemas/SecuredTextProjection'}
         recipientPhone: {$ref: '#/components/schemas/SecuredTextProjection'}
         consigneeAddress: {$ref: '#/components/schemas/SecuredTextProjection'}

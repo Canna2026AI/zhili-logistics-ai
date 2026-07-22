@@ -5,7 +5,13 @@ const waybillProjection = {
   id: 'waybill-1',
   waybillNo: 'S2505120004',
   masterNo: 'HBL2505120004',
-  customerName: '深圳鑫源贸易有限公司',
+  customerName: {
+    access: 'READ',
+    rawValue: '深圳鑫源贸易有限公司',
+    displayValue: '深圳鑫源贸易有限公司',
+    copyAllowed: true,
+    exportAllowed: true,
+  },
   customerCode: {
     access: 'READ',
     rawValue: 'CUST00256',
@@ -13,7 +19,13 @@ const waybillProjection = {
     copyAllowed: true,
     exportAllowed: true,
   },
-  contactName: '王志强',
+  contactName: {
+    access: 'READ',
+    rawValue: '王志强',
+    displayValue: '王志强',
+    copyAllowed: true,
+    exportAllowed: true,
+  },
   senderPhone: {
     access: 'MASK',
     displayValue: '0755 **** 6600',
@@ -233,9 +245,14 @@ describe('waybill OpenAPI adapter', () => {
           id: 'waybill-1',
           waybillNo: 'S2505120004',
           masterNo: null,
-          customerName: '深圳鑫源贸易有限公司',
+          customerName: {
+            access: 'MASK',
+            displayValue: '深***公司',
+            copyAllowed: false,
+            exportAllowed: false,
+          },
           customerCode: { access: 'DENY', copyAllowed: false, exportAllowed: false },
-          contactName: '王志强',
+          contactName: { access: 'DENY', copyAllowed: false, exportAllowed: false },
           senderPhone: {
             access: 'MASK',
             displayValue: '0755 **** 6600',
@@ -266,14 +283,21 @@ describe('waybill OpenAPI adapter', () => {
       },
     });
     const detail = await createWaybillApi({ GET, POST: vi.fn() } as never).get('waybill-1');
-    expect(detail.customer).toBe('深圳鑫源贸易有限公司');
+    expect(detail.customer).toBe('深***公司');
     expect(detail.customerCode).toBe('');
+    expect(detail.contactName).toBe('');
     expect(detail.senderPhone).toBe('0755 **** 6600');
     expect(detail.recipientPhone).toBe('139 **** 8800');
     expect(detail.consigneeAddress).toBe('');
     expect(detail.fieldDecisions).toMatchObject({
+      customer: { access: 'MASK', copyAllowed: false, exportAllowed: false },
       customerCode: { access: 'DENY' },
+      contactName: { access: 'DENY', copyAllowed: false, exportAllowed: false },
       contactPhone: { access: 'MASK' },
+    });
+    expect(detail.securedFieldDecisions).toMatchObject({
+      customerName: { access: 'MASK' },
+      contactName: { access: 'DENY' },
     });
   });
 

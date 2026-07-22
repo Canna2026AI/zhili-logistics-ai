@@ -3581,9 +3581,9 @@ export interface components {
       /** @example S2505120004 */
       waybillNo: string;
       masterNo: string | null;
-      customerName?: string;
+      customerName: components['schemas']['SecuredTextProjection'];
       customerCode: components['schemas']['SecuredTextProjection'];
-      contactName?: string | null;
+      contactName: components['schemas']['SecuredTextProjection'];
       senderPhone: components['schemas']['SecuredTextProjection'];
       recipientPhone: components['schemas']['SecuredTextProjection'];
       consigneeAddress: components['schemas']['SecuredTextProjection'];
@@ -10215,7 +10215,7 @@ export interface operations {
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -10677,7 +10677,7 @@ export interface operations {
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };

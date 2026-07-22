@@ -16,6 +16,36 @@ const json = (body: unknown, status = 200, authoritativeVersion?: number) =>
     },
   });
 
+const preconditionProblem = (code: 'PRECONDITION_REQUIRED' | 'PRECONDITION_INVALID') =>
+  new Response(
+    JSON.stringify({
+      code,
+      message:
+        code === 'PRECONDITION_REQUIRED'
+          ? 'Missing required strong If-Match precondition.'
+          : 'If-Match must be a positive strong numeric ETag.',
+      details: [{ field: 'If-Match', reason: code }],
+      remediation: 'Refresh the resource and retry with its latest strong ETag.',
+      requestId: meta.requestId,
+    }),
+    { status: 412, headers: { 'content-type': 'application/problem+json' } }
+  );
+
+type StrongPrecondition = { ok: true; version: number } | { ok: false; response: Response };
+
+function readStrongIfMatch(request: Request): StrongPrecondition {
+  const ifMatch = request.headers.get('If-Match');
+  if (ifMatch === null) {
+    return { ok: false, response: preconditionProblem('PRECONDITION_REQUIRED') };
+  }
+  const match = ifMatch.match(/^"([1-9][0-9]*)"$/);
+  const version = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isSafeInteger(version) || version < 1 || version >= Number.MAX_SAFE_INTEGER) {
+    return { ok: false, response: preconditionProblem('PRECONDITION_INVALID') };
+  }
+  return { ok: true, version };
+}
+
 export type QuoteRequest = {
   origin: string;
   destinationPostalCode: string;
@@ -117,28 +147,36 @@ export const customerMockFetch: typeof fetch = async (input) => {
         },
         meta,
       },
-      201
+      201,
+      1
     );
   }
   const acceptedQuote = path.match(/\/quotes\/([^/]+):accept$/);
   if (acceptedQuote) {
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
     if (acceptedQuote[1]?.includes('GONE'))
       return json({ type: 'QUOTE_EXPIRED', title: 'Quote expired', status: 410 }, 410);
     const body = (await request.clone().json()) as { optionId: string };
-    return json({
-      data: {
-        id: acceptedQuote[1],
-        quoteNo: 'Q2505120042',
-        status: 'ACCEPTED',
-        options: [],
-        acceptedOptionId: body.optionId,
-        validUntil:
-          request.headers.get('X-Zhili-Mock-Valid-Until') ??
-          new Date(Date.now() + 8 * 60 * 60 * 1_000).toISOString(),
-        version: 2,
+    const quoteVersion = precondition.version + 1;
+    return json(
+      {
+        data: {
+          id: acceptedQuote[1],
+          quoteNo: 'Q2505120042',
+          status: 'ACCEPTED',
+          options: [],
+          acceptedOptionId: body.optionId,
+          validUntil:
+            request.headers.get('X-Zhili-Mock-Valid-Until') ??
+            new Date(Date.now() + 8 * 60 * 60 * 1_000).toISOString(),
+          version: quoteVersion,
+        },
+        meta,
       },
-      meta,
-    });
+      200,
+      quoteVersion
+    );
   }
   if (path.endsWith('/orders'))
     return json(
@@ -151,17 +189,19 @@ export const customerMockFetch: typeof fetch = async (input) => {
         },
         meta,
       },
-      201
+      201,
+      1
     );
   const acceptedQuoteLink = path.match(/\/orders\/([^/]+):link-accepted-quote$/);
   if (acceptedQuoteLink) {
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
     const body = (await request.clone().json()) as {
       quoteId: string;
       quoteOptionId: string;
       acceptedQuoteVersion: number;
     };
-    const currentVersion = Number(request.headers.get('If-Match')?.replaceAll('"', '') ?? 1);
-    const orderVersion = currentVersion + 1;
+    const orderVersion = precondition.version + 1;
     return json(
       {
         data: {
@@ -225,17 +265,56 @@ export const customerMockFetch: typeof fetch = async (input) => {
         },
         meta,
       },
-      201
+      201,
+      1
     );
-  if (
-    path.includes('/customers/') ||
-    path.endsWith('/portal/api-access-requests') ||
-    path.endsWith('/documents/exports')
-  )
-    return json({
-      data: { resourceId: '01JCOMMAND000000000000001', status: 'SUCCEEDED', version: 1 },
-      meta,
-    });
+  const customerAddress = path.match(/\/customers\/[^/]+\/addresses:upsert$/);
+  if (customerAddress) {
+    const body = (await request.clone().json()) as { mode?: 'CREATE' | 'UPDATE' };
+    if (body.mode === 'CREATE') {
+      if (request.headers.has('If-Match')) {
+        return json(
+          {
+            code: 'VALIDATION_FAILED',
+            message: 'CREATE forbids If-Match.',
+            requestId: meta.requestId,
+          },
+          422
+        );
+      }
+      return json(
+        {
+          data: { resourceId: '01JCOMMAND000000000000001', status: 'SUCCEEDED', version: 1 },
+          meta,
+        },
+        200,
+        1
+      );
+    }
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
+    const version = precondition.version + 1;
+    return json(
+      {
+        data: { resourceId: '01JCOMMAND000000000000001', status: 'SUCCEEDED', version },
+        meta,
+      },
+      200,
+      version
+    );
+  }
+  if (path.endsWith('/portal/api-access-requests') || path.endsWith('/documents/exports')) {
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
+    return json(
+      {
+        data: { resourceId: '01JCOMMAND000000000000001', status: 'SUCCEEDED', version: 1 },
+        meta,
+      },
+      200,
+      1
+    );
+  }
   return json({ message: `No typed mock route for ${path}` }, 404);
 };
 

@@ -210,7 +210,12 @@ export interface WaybillDetail {
 
 export type WaybillSensitiveField = 'customer' | 'customerCode' | 'contactName' | 'contactPhone';
 export type WaybillSecuredField =
-  'customerCode' | 'senderPhone' | 'recipientPhone' | 'consigneeAddress';
+  | 'customerName'
+  | 'customerCode'
+  | 'contactName'
+  | 'senderPhone'
+  | 'recipientPhone'
+  | 'consigneeAddress';
 export type WaybillFieldPolicy = Partial<Record<WaybillSensitiveField, 'ALLOW' | 'MASK' | 'HIDE'>>;
 export interface WaybillServerFieldDecision {
   access: 'READ' | 'MASK' | 'DENY';
@@ -226,7 +231,9 @@ const readFieldDecisions: Record<WaybillSensitiveField, WaybillServerFieldDecisi
   contactPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
 };
 const readSecuredFieldDecisions: Record<WaybillSecuredField, WaybillServerFieldDecision> = {
+  customerName: { access: 'READ', copyAllowed: true, exportAllowed: true },
   customerCode: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  contactName: { access: 'READ', copyAllowed: true, exportAllowed: true },
   senderPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
   recipientPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
   consigneeAddress: { access: 'READ', copyAllowed: true, exportAllowed: true },

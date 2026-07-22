@@ -44,7 +44,13 @@ function expectWaybillResponse(body: unknown): asserts body is WaybillResponse {
       id: expect.any(String),
       waybillNo: 'S2505120004',
       masterNo: 'MAWB-20260722-01',
-      customerName: '智立华南客户',
+      customerName: {
+        access: 'READ',
+        rawValue: '智立华南客户',
+        displayValue: '智立华南客户',
+        copyAllowed: true,
+        exportAllowed: true,
+      },
       customerCode: {
         access: 'READ',
         rawValue: 'CUST-SOUTH-001',
@@ -52,7 +58,13 @@ function expectWaybillResponse(body: unknown): asserts body is WaybillResponse {
         copyAllowed: true,
         exportAllowed: true,
       },
-      contactName: '张伟',
+      contactName: {
+        access: 'READ',
+        rawValue: '张伟',
+        displayValue: '张伟',
+        copyAllowed: true,
+        exportAllowed: true,
+      },
       senderPhone: {
         access: 'MASK',
         displayValue: '0755****6600',

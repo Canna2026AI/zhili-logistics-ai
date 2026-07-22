@@ -113,21 +113,23 @@ function toWaybillDetail(value: unknown): WaybillDetail | null {
     typeof record.state === 'string'
       ? stateLabels[record.state as keyof typeof stateLabels]
       : undefined;
+  const customerName = toSecuredProjection(record.customerName);
   const customerCode = toSecuredProjection(record.customerCode);
+  const contactName = toSecuredProjection(record.contactName);
   const senderPhone = toSecuredProjection(record.senderPhone);
   const recipientPhone = toSecuredProjection(record.recipientPhone);
   const consigneeAddress = toSecuredProjection(record.consigneeAddress);
   if (
     !state ||
+    !customerName ||
     !customerCode ||
+    !contactName ||
     !senderPhone ||
     !recipientPhone ||
     !consigneeAddress ||
     typeof record.id !== 'string' ||
     typeof record.waybillNo !== 'string' ||
     !(typeof record.masterNo === 'string' || record.masterNo === null) ||
-    typeof record.customerName !== 'string' ||
-    !(typeof record.contactName === 'string' || record.contactName === null) ||
     typeof record.route !== 'string' ||
     typeof record.service !== 'string' ||
     typeof record.transport !== 'string' ||
@@ -147,9 +149,9 @@ function toWaybillDetail(value: unknown): WaybillDetail | null {
     id: record.id,
     waybillNo: record.waybillNo,
     masterNo: record.masterNo ?? '',
-    customer: record.customerName,
+    customer: customerName.displayValue,
     customerCode: customerCode.displayValue,
-    contactName: record.contactName ?? '',
+    contactName: contactName.displayValue,
     contactPhone: recipientPhone.displayValue,
     senderPhone: senderPhone.displayValue,
     recipientPhone: recipientPhone.displayValue,
@@ -167,13 +169,15 @@ function toWaybillDetail(value: unknown): WaybillDetail | null {
     branch: record.branch,
     timeline: record.timeline as string[],
     fieldDecisions: {
-      customer: { access: 'READ', copyAllowed: true, exportAllowed: true },
+      customer: customerName.decision,
       customerCode: customerCode.decision,
-      contactName: { access: 'READ', copyAllowed: true, exportAllowed: true },
+      contactName: contactName.decision,
       contactPhone: recipientPhone.decision,
     },
     securedFieldDecisions: {
+      customerName: customerName.decision,
       customerCode: customerCode.decision,
+      contactName: contactName.decision,
       senderPhone: senderPhone.decision,
       recipientPhone: recipientPhone.decision,
       consigneeAddress: consigneeAddress.decision,

@@ -559,7 +559,9 @@ describe("Backend B1 hardened operation contracts", () => {
   it("projects Waybill PII with reusable READ MASK and DENY decisions", () => {
     const waybill = schemaBlock("Waybill");
     for (const field of [
+      "customerName",
       "customerCode",
+      "contactName",
       "senderPhone",
       "recipientPhone",
       "consigneeAddress",
@@ -650,7 +652,9 @@ describe("Backend B1 hardened operation contracts", () => {
       { $ref?: string }
     >;
     for (const field of [
+      "customerName",
       "customerCode",
+      "contactName",
       "senderPhone",
       "recipientPhone",
       "consigneeAddress",
@@ -659,6 +663,16 @@ describe("Backend B1 hardened operation contracts", () => {
         "#/components/schemas/SecuredTextProjection",
       );
     }
+    expect(waybill?.required).toEqual(
+      expect.arrayContaining([
+        "customerName",
+        "customerCode",
+        "contactName",
+        "senderPhone",
+        "recipientPhone",
+        "consigneeAddress",
+      ]),
+    );
     expect(properties.fieldPolicy).toBeUndefined();
     expect(properties.contactPhone).toBeUndefined();
   });
