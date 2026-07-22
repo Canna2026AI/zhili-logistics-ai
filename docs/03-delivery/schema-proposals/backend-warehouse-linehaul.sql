@@ -367,11 +367,13 @@ CREATE TABLE pod_versions (
   longitude_e6 integer,
   amendment_reason text,
   supersedes_version_id text,
+  supersedes_pod_version bigint GENERATED ALWAYS AS (pod_version - 1) STORED,
   payload jsonb NOT NULL,
   captured_at timestamptz NOT NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT pod_versions_identity_unique UNIQUE (tenant_id, id),
   CONSTRAINT pod_versions_number_unique UNIQUE (tenant_id, pod_record_id, pod_version),
+  CONSTRAINT pod_versions_chain_target_unique UNIQUE (tenant_id, id, pod_record_id, pod_version),
   CONSTRAINT pod_versions_version_check CHECK (pod_version > 0),
   CONSTRAINT pod_versions_recipient_check CHECK (length(btrim(recipient_name)) > 0),
   CONSTRAINT pod_versions_latitude_check CHECK (latitude_e6 IS NULL OR latitude_e6 BETWEEN -90000000 AND 90000000),
@@ -384,7 +386,9 @@ CREATE TABLE pod_versions (
   CONSTRAINT pod_versions_record_fk FOREIGN KEY (tenant_id, pod_record_id) REFERENCES pod_records (tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT pod_versions_signature_fk FOREIGN KEY (tenant_id, signature_media_id) REFERENCES warehouse_media (tenant_id, id) ON DELETE RESTRICT,
   CONSTRAINT pod_versions_photo_fk FOREIGN KEY (tenant_id, photo_media_id) REFERENCES warehouse_media (tenant_id, id) ON DELETE RESTRICT,
-  CONSTRAINT pod_versions_supersedes_fk FOREIGN KEY (tenant_id, supersedes_version_id) REFERENCES pod_versions (tenant_id, id) ON DELETE RESTRICT
+  CONSTRAINT pod_versions_supersedes_fk FOREIGN KEY (
+    tenant_id, supersedes_version_id, pod_record_id, supersedes_pod_version
+  ) REFERENCES pod_versions (tenant_id, id, pod_record_id, pod_version) ON DELETE RESTRICT
 );
 
 ALTER TABLE pod_records
@@ -561,6 +565,26 @@ CREATE TRIGGER warehouse_receipts_state_guard
 BEFORE UPDATE ON warehouse_receipts
 FOR EACH ROW EXECUTE FUNCTION guard_warehouse_receipt_update();
 
+CREATE FUNCTION guard_load_unit_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.status <> 'DRAFT'
+     OR NEW.version <> 0
+     OR NEW.sealed_at IS NOT NULL
+     OR NEW.dispatched_at IS NOT NULL THEN
+    RAISE EXCEPTION 'load units must be inserted as DRAFT at version zero'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER load_units_insert_guard
+BEFORE INSERT ON load_units
+FOR EACH ROW EXECUTE FUNCTION guard_load_unit_insert();
+
 CREATE FUNCTION guard_load_unit_update()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -600,20 +624,36 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
-  target_tenant_id text := CASE WHEN TG_OP = 'DELETE' THEN OLD.tenant_id ELSE NEW.tenant_id END;
-  target_load_unit_id text := CASE WHEN TG_OP = 'DELETE' THEN OLD.load_unit_id ELSE NEW.load_unit_id END;
-  load_status text;
+  parent_row record;
+  locked_parent_count integer := 0;
+  expected_parent_count integer := 1;
 BEGIN
-  SELECT status INTO load_status
-  FROM load_units
-  WHERE tenant_id = target_tenant_id AND id = target_load_unit_id
-  FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'load unit not found' USING ERRCODE = '23503';
+  IF TG_OP = 'UPDATE' THEN
+    IF NEW.tenant_id <> OLD.tenant_id THEN
+      RAISE EXCEPTION 'load item tenant cannot change' USING ERRCODE = '23514';
+    END IF;
+    IF NEW.load_unit_id <> OLD.load_unit_id THEN
+      expected_parent_count := 2;
+    END IF;
   END IF;
-  IF load_status <> 'DRAFT' THEN
-    RAISE EXCEPTION 'sealed or dispatched load unit items are immutable' USING ERRCODE = '55000';
+
+  FOR parent_row IN
+    SELECT tenant_id, id, status
+    FROM load_units
+    WHERE
+      (TG_OP <> 'INSERT' AND tenant_id = OLD.tenant_id AND id = OLD.load_unit_id)
+      OR (TG_OP <> 'DELETE' AND tenant_id = NEW.tenant_id AND id = NEW.load_unit_id)
+    ORDER BY tenant_id, id
+    FOR UPDATE
+  LOOP
+    locked_parent_count := locked_parent_count + 1;
+    IF parent_row.status <> 'DRAFT' THEN
+      RAISE EXCEPTION 'sealed or dispatched load unit items are immutable' USING ERRCODE = '55000';
+    END IF;
+  END LOOP;
+
+  IF locked_parent_count <> expected_parent_count THEN
+    RAISE EXCEPTION 'load unit not found' USING ERRCODE = '23503';
   END IF;
   IF TG_OP = 'DELETE' THEN
     RETURN OLD;
@@ -625,6 +665,54 @@ $$;
 CREATE TRIGGER load_unit_items_state_guard
 BEFORE INSERT OR UPDATE OR DELETE ON load_unit_items
 FOR EACH ROW EXECUTE FUNCTION guard_load_unit_item_mutation();
+
+CREATE FUNCTION guard_package_waybill_pair()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM waybill_packages
+    WHERE tenant_id = NEW.tenant_id
+      AND id = NEW.package_id
+      AND waybill_id = NEW.waybill_id
+  ) THEN
+    RAISE EXCEPTION 'package does not belong to waybill' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER inventory_balances_package_waybill_guard
+BEFORE INSERT OR UPDATE OF tenant_id, waybill_id, package_id ON inventory_balances
+FOR EACH ROW EXECUTE FUNCTION guard_package_waybill_pair();
+
+CREATE TRIGGER load_unit_items_package_waybill_guard
+BEFORE INSERT OR UPDATE OF tenant_id, waybill_id, package_id ON load_unit_items
+FOR EACH ROW EXECUTE FUNCTION guard_package_waybill_pair();
+
+CREATE FUNCTION guard_delivery_customer_address_pair()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM customer_addresses
+    WHERE tenant_id = NEW.tenant_id
+      AND id = NEW.destination_address_id
+      AND customer_id = NEW.customer_id
+  ) THEN
+    RAISE EXCEPTION 'address does not belong to customer' USING ERRCODE = '23514';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER delivery_tasks_customer_address_guard
+BEFORE INSERT OR UPDATE OF tenant_id, customer_id, destination_address_id ON delivery_tasks
+FOR EACH ROW EXECUTE FUNCTION guard_delivery_customer_address_pair();
 
 CREATE FUNCTION reject_immutable_fulfillment_row()
 RETURNS trigger
@@ -728,8 +816,13 @@ BEGIN
   IF NOT FOUND THEN
     RAISE EXCEPTION 'device sync session is absent' USING ERRCODE = '28000';
   END IF;
-  IF NEW.local_sequence <> session_last_local_sequence + 1 THEN
+  IF NEW.local_sequence > session_last_local_sequence + 1 THEN
     RAISE EXCEPTION 'device events must use the next ordered local sequence' USING ERRCODE = '40001';
+  END IF;
+  IF NEW.local_sequence <= session_last_local_sequence THEN
+    -- A replay is allowed to reach the tenant/device/event unique constraint so
+    -- INSERT ... ON CONFLICT can return the original durable receipt.
+    RETURN NEW;
   END IF;
   IF (session_status <> 'OPEN' OR session_expires_at <= statement_timestamp())
      AND NEW.disposition <> 'REJECTED' THEN
