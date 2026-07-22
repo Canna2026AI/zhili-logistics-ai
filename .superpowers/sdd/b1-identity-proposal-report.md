@@ -6,9 +6,13 @@ DONE
 
 ## Commit
 
-The proposal, verifier, and this report are committed together by
-`docs: propose identity master data schema`. The exact immutable commit hash is emitted by the final
-handoff (`git rev-parse HEAD`); a Git commit cannot embed its own hash without changing that hash.
+- Original proposal commit: `bbd7f5c29c1bdd85b8922a4dd2fd06f819532143`
+- Reviewed implementation commit (including refresh-lineage fix):
+  `c7d5f314195f3cd061cb8745f671688b7385235a`
+
+This report is updated in a subsequent report-only commit so it can name the immutable implementation
+commit without making an impossible self-referential hash claim. The report-only hash is emitted in
+the final handoff.
 
 ## Files
 
@@ -36,6 +40,14 @@ During self-review, the verifier was extended to require forced RLS on the `tena
 observed failing with exit 1 and `tenant roots must not expose other tenant records` (`0 !== 1`)
 before the root policy was added.
 
+The independent-review refresh-lineage regression was then added before its database constraints.
+The focused command exited 1 and reported both invalid inserts as accepted:
+
+```text
+cross_family_parent: { code: null, rejected: false }
+duplicate_successor: { code: null, rejected: false }
+```
+
 ### GREEN
 
 Executable proposal verification command:
@@ -47,11 +59,13 @@ node docs/03-delivery/schema-proposals/verify-backend-identity-masterdata.mjs
 Expected and observed result (exit 0):
 
 ```text
-PASS backend identity/master-data proposal: 21 tables, 20 forced RLS policies, tenant-safe foreign keys, normalized grants, protected credentials
+PASS backend identity/master-data proposal: 21 tables, 20 forced RLS policies; refresh lineage rejects cross-family=23503 duplicate-successor=23505
 ```
 
 The command starts PostgreSQL 17, executes `0000_foundation.sql` followed by the proposal, checks
-catalog constraints and policies, and verifies fail-closed/cross-tenant visibility as `zhili_app`.
+catalog constraints and policies, verifies fail-closed/cross-tenant visibility as `zhili_app`, and
+proves that cross-family refresh parentage is rejected with foreign-key SQLSTATE `23503` while a
+second successor is rejected with unique-violation SQLSTATE `23505`.
 
 Baseline command and result:
 
@@ -70,8 +84,9 @@ Tests  3 passed (3)
   `ON DELETE RESTRICT`; tenant-owned cross-table references are compound `(tenant_id, id)` keys.
 - Passwords use Argon2id verifiers; refresh tokens and device credentials use keyed digests; OAuth
   state uses a digest and PKCE verifier storage is authenticated ciphertext with nonce/key version.
-  Refresh rotation is modeled through family and parent-token foreign keys with compromised/revoked
-  states and reuse timestamps.
+  Refresh rotation uses a family-safe `(tenant_id, family_id, parent_token_id)` foreign key, rejects
+  self-parenting, and has a partial unique successor index. Compromised/revoked family states and reuse
+  timestamps retain the family-wide revocation relationship.
 - Permissions normalize role, action, organization/customer/warehouse scopes, and per-field
   `READ`/`MASK`/`DENY` policies through relational foreign keys rather than JSON-only references.
 - Minimal upstream `warehouses`, device binding history, and stable device task queues support
