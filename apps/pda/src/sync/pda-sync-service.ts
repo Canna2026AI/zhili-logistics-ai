@@ -57,6 +57,7 @@ export class PdaSyncService {
         key('sync', context.deviceId, ...events.map((event) => event.idempotencyKey))
       );
       const batch = await this.queue.applySyncResults(results);
+      await this.media.restore();
       total.applied += batch.applied;
       total.duplicate += batch.duplicate;
       total.conflict += batch.conflict;

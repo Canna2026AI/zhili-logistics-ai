@@ -252,18 +252,27 @@ export class IndexedDbQueueStore implements QueueStore {
   }
 
   async putEvent(event: QueuedEvent) {
-    const [database, codec, dedupeHash] = await Promise.all([
+    const [database, codec, fallbackHash] = await Promise.all([
       this.database,
       this.codec(),
       hashKey(event.envelope.idempotencyKey),
     ]);
-    const existing = await database.getFromIndex('events', 'by-dedupe', dedupeHash);
-    if (existing && existing.id !== event.envelope.eventId) return;
-    await database.put('events', {
+    const encrypted = await codec.encode(event);
+    const transaction = database.transaction('events', 'readwrite');
+    const eventStore = transaction.objectStore('events');
+    const stored = await eventStore.get(event.envelope.eventId);
+    const dedupeHash = stored?.dedupeHash ?? fallbackHash;
+    const existing = await eventStore.index('by-dedupe').get(dedupeHash);
+    if (existing && existing.id !== event.envelope.eventId) {
+      await transaction.done;
+      return;
+    }
+    await eventStore.put({
       id: event.envelope.eventId,
       dedupeHash,
-      value: await codec.encode(event),
+      value: encrypted,
     });
+    await transaction.done;
   }
 
   async deleteEvent(eventId: string) {

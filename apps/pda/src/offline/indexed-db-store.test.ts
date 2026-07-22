@@ -108,8 +108,50 @@ describe('IndexedDbQueueStore', () => {
     const raw = await store.inspectEncryptedRecordsForTest();
     expect(JSON.stringify(raw)).not.toContain('atomic-photo');
     expect(JSON.stringify(raw)).not.toContain('must-not-persist');
+    await queue.applySyncResults([
+      {
+        eventId: queue.snapshot().events[0]!.envelope.eventId,
+        disposition: 'APPLIED',
+        serverVersion: 2,
+      },
+    ]);
+    const completed = await store.inspectEncryptedRecordsForTest();
+    expect(completed.events).toEqual([]);
+    expect(completed.media).toEqual([]);
     store.close();
   });
+
+  it.each(['CONFLICT', 'REJECTED'] as const)(
+    'preserves the original local dedupe identity when an event becomes %s',
+    async (disposition) => {
+      const store = new IndexedDbQueueStore('zhili-pda-test');
+      const queue = new OfflineQueue(store);
+      await queue.restore();
+      const command = {
+        action: 'WAREHOUSE_RECEIVE',
+        entityRef: 'S2505120004',
+        payload: { actualWeightKg: '123.50' },
+        mediaRefs: [],
+        baseVersion: 7,
+      };
+      const first = await queue.enqueue(context, command);
+      await queue.applySyncResults([
+        {
+          eventId: first.envelope.eventId,
+          disposition,
+          conflictId: disposition === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
+          errorCode: disposition === 'REJECTED' ? 'INVALID_STATE' : undefined,
+        },
+      ]);
+
+      const repeated = await queue.enqueue(context, command);
+      expect(repeated.enqueueDisposition).toBe('DUPLICATE');
+      expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([
+        first.envelope.eventId,
+      ]);
+      store.close();
+    }
+  );
 
   it('stores encrypted records and uses a non-exportable WebCrypto key', async () => {
     const codec = await WebCryptoQueueCodec.generate();

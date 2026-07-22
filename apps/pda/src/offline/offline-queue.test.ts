@@ -241,4 +241,70 @@ describe('OfflineQueue', () => {
     expect(queue.snapshot().events[0]?.conflict?.differences).toBeUndefined();
     expect(queue.snapshot().events[0]?.conflict?.snapshotNotice).toContain('契约未返回');
   });
+
+  it.each(['APPLIED', 'DUPLICATE'] as const)(
+    'atomically removes the event and local media after %s',
+    async (disposition) => {
+      const store = new MemoryQueueStore();
+      const queue = createQueue(store);
+      await queue.restore();
+      const mediaId = `media-${disposition.toLowerCase()}`;
+      const event = await queue.enqueue(context, {
+        action: 'CAPTURE_RECEIPT_PHOTO',
+        entityRef: 'S2505120004',
+        payload: {},
+        mediaRefs: [mediaId],
+        mediaItems: [
+          {
+            mediaId,
+            eventId: '01JY8Z8F6ME4F0Y9QH2X6D4R7',
+            contentHash: 'sha256:photo',
+            mimeType: 'image/png',
+            blob: new Blob(['photo']),
+            status: 'UPLOADED',
+            remoteStatus: 'READY',
+            progress: 100,
+            attempts: 1,
+            context,
+          },
+        ],
+        baseVersion: 7,
+      });
+
+      await queue.applySyncResults([
+        { eventId: event.envelope.eventId, disposition, serverVersion: 8 },
+      ]);
+
+      expect(await store.getEvents()).toEqual([]);
+      expect(await store.getMedia()).toEqual([]);
+    }
+  );
+
+  it.each(['CONFLICT', 'REJECTED'] as const)(
+    'keeps the same local business intent deduplicated after %s',
+    async (disposition) => {
+      const queue = createQueue();
+      await queue.restore();
+      const command = {
+        action: 'WAREHOUSE_RECEIVE',
+        entityRef: 'S2505120004',
+        payload: { actualWeightKg: '123.50' },
+        mediaRefs: [],
+        baseVersion: 7,
+      };
+      const first = await queue.enqueue(context, command);
+      await queue.applySyncResults([
+        {
+          eventId: first.envelope.eventId,
+          disposition,
+          conflictId: disposition === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
+          errorCode: disposition === 'REJECTED' ? 'INVALID_STATE' : undefined,
+        },
+      ]);
+
+      const duplicate = await queue.enqueue(context, command);
+      expect(duplicate.enqueueDisposition).toBe('DUPLICATE');
+      expect(queue.snapshot().events).toHaveLength(1);
+    }
+  );
 });

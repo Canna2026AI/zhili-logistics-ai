@@ -139,7 +139,8 @@ describe('PdaSyncService', () => {
     await service.synchronize(syncContext);
     expect(media.snapshot()[0]).toMatchObject({ status: 'RETRY', attempts: 1 });
     await service.synchronize(syncContext);
-    expect(media.snapshot()[0]).toMatchObject({ status: 'UPLOADED', attempts: 2, progress: 100 });
+    expect(media.snapshot()).toEqual([]);
+    expect(queue.snapshot().events).toEqual([]);
     expect(port.uploadedMedia.has(item.mediaId)).toBe(true);
   });
 

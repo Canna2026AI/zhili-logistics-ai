@@ -143,7 +143,7 @@ export class OfflineQueue {
       if (!event) continue;
       if (result.disposition === 'APPLIED' || result.disposition === 'DUPLICATE') {
         counts[result.disposition === 'APPLIED' ? 'applied' : 'duplicate'] += 1;
-        await this.store.deleteEvent(result.eventId);
+        await this.store.deleteWork(result.eventId, event.envelope.mediaRefs);
         await this.store.setMeta('sync-cursor', {
           localSequence: event.envelope.localSequence,
           serverVersion: result.serverVersion,
