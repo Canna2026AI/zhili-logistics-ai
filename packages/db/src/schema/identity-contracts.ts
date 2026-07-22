@@ -1,4 +1,6 @@
 import {
+  type AnyPgColumn,
+  type ForeignKeyBuilder,
   bigint,
   check,
   foreignKey,
@@ -14,6 +16,24 @@ import {
 import { sql } from 'drizzle-orm';
 
 import { customers, tenants, users } from './identity';
+
+function referenceDataCurrentHeadForeignKey(table: {
+  currentVersionId: AnyPgColumn;
+  id: AnyPgColumn;
+  tenantId: AnyPgColumn;
+}): ForeignKeyBuilder {
+  return foreignKey({
+    columns: [table.tenantId, table.currentVersionId, table.id],
+    foreignColumns: [
+      referenceDataVersions.tenantId,
+      referenceDataVersions.id,
+      referenceDataVersions.referenceDataSetId,
+    ],
+    name: 'reference_data_sets_current_version_fk',
+  })
+    .onUpdate('restrict')
+    .onDelete('restrict');
+}
 
 const tenantPolicy = (name: string) =>
   pgPolicy(name, {
@@ -241,6 +261,7 @@ export const referenceDataSets = pgTable(
       .notNull(),
   },
   (table) => [
+    referenceDataCurrentHeadForeignKey(table),
     foreignKey({
       columns: [table.tenantId],
       foreignColumns: [tenants.id],
@@ -322,8 +343,6 @@ export const referenceDataVersions = pgTable(
   ]
 ).enableRLS();
 
-// The compound current-head FK is installed in raw SQL. Keeping it out of this module avoids a
-// circular TypeScript table declaration while the typed column remains available to services.
 export const referenceDataItems = pgTable(
   'reference_data_items',
   {

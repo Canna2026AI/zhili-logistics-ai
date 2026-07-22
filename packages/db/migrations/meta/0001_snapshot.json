@@ -1,5 +1,5 @@
 {
-  "id": "351f4615-42a5-4a8d-b702-0915ab97b91c",
+  "id": "9e840ba9-68f8-4376-8d90-7ef1e1b0837b",
   "prevId": "5df13a32-ce8b-4416-b8e8-7c638de491d0",
   "version": "7",
   "dialect": "postgresql",
@@ -218,7 +218,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -282,7 +282,7 @@
           "tableFrom": "customer_addresses",
           "tableTo": "customers",
           "columnsFrom": ["tenant_id", "customer_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -292,12 +292,12 @@
         "customer_addresses_tenant_id_id_unique": {
           "name": "customer_addresses_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "customer_addresses_delivery_pair_unique": {
           "name": "customer_addresses_delivery_pair_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "customer_id"]
+          "columns": ["tenant_id", "id", "customer_id"]
         },
         "customer_addresses_customer_code_unique": {
           "name": "customer_addresses_customer_code_unique",
@@ -354,7 +354,7 @@
         },
         "customer_addresses_version_check": {
           "name": "customer_addresses_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "customer_addresses_timestamps_check": {
           "name": "customer_addresses_timestamps_check",
@@ -409,7 +409,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -442,7 +442,7 @@
           "tableFrom": "customers",
           "tableTo": "organizations",
           "columnsFrom": ["tenant_id", "organization_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -452,7 +452,7 @@
         "customers_tenant_id_id_unique": {
           "name": "customers_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "customers_tenant_number_unique": {
           "name": "customers_tenant_number_unique",
@@ -493,7 +493,7 @@
         },
         "customers_version_check": {
           "name": "customers_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "customers_timestamps_check": {
           "name": "customers_timestamps_check",
@@ -573,7 +573,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -631,7 +631,7 @@
           "tableFrom": "device_bindings",
           "tableTo": "devices",
           "columnsFrom": ["tenant_id", "device_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -640,7 +640,7 @@
           "tableFrom": "device_bindings",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -649,7 +649,7 @@
           "tableFrom": "device_bindings",
           "tableTo": "users",
           "columnsFrom": ["tenant_id", "bound_by_user_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -658,7 +658,7 @@
           "tableFrom": "device_bindings",
           "tableTo": "users",
           "columnsFrom": ["tenant_id", "bound_subject_user_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -667,7 +667,7 @@
           "tableFrom": "device_bindings",
           "tableTo": "users",
           "columnsFrom": ["tenant_id", "revoked_by_user_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -677,7 +677,7 @@
         "device_bindings_tenant_id_id_unique": {
           "name": "device_bindings_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "device_bindings_history_unique": {
           "name": "device_bindings_history_unique",
@@ -714,7 +714,7 @@
         },
         "device_bindings_version_check": {
           "name": "device_bindings_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "device_bindings_timestamps_check": {
           "name": "device_bindings_timestamps_check",
@@ -898,7 +898,7 @@
           "tableFrom": "device_tasks",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -907,7 +907,7 @@
           "tableFrom": "device_tasks",
           "tableTo": "devices",
           "columnsFrom": ["tenant_id", "assigned_device_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -916,7 +916,7 @@
           "tableFrom": "device_tasks",
           "tableTo": "users",
           "columnsFrom": ["tenant_id", "assigned_user_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -926,7 +926,7 @@
         "device_tasks_tenant_id_id_unique": {
           "name": "device_tasks_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "device_tasks_tenant_number_unique": {
           "name": "device_tasks_tenant_number_unique",
@@ -1050,7 +1050,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -1084,7 +1084,7 @@
         "devices_tenant_id_id_unique": {
           "name": "devices_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "devices_tenant_code_unique": {
           "name": "devices_tenant_code_unique",
@@ -1110,7 +1110,7 @@
       "checkConstraints": {
         "devices_version_check": {
           "name": "devices_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "devices_timestamps_check": {
           "name": "devices_timestamps_check",
@@ -1223,7 +1223,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -1289,7 +1289,7 @@
         "oauth_states_tenant_id_id_unique": {
           "name": "oauth_states_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "oauth_states_state_hash_unique": {
           "name": "oauth_states_state_hash_unique",
@@ -1354,7 +1354,7 @@
         },
         "oauth_states_version_check": {
           "name": "oauth_states_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "oauth_states_timestamps_check": {
           "name": "oauth_states_timestamps_check",
@@ -1415,7 +1415,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -1472,7 +1472,7 @@
           "tableFrom": "organizations",
           "tableTo": "organizations",
           "columnsFrom": ["tenant_id", "parent_organization_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -1482,7 +1482,7 @@
         "organizations_tenant_id_id_unique": {
           "name": "organizations_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "organizations_tenant_code_unique": {
           "name": "organizations_tenant_code_unique",
@@ -1527,7 +1527,7 @@
         },
         "organizations_version_check": {
           "name": "organizations_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "organizations_timestamps_check": {
           "name": "organizations_timestamps_check",
@@ -1639,7 +1639,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -1672,7 +1672,7 @@
           "tableFrom": "refresh_token_families",
           "tableTo": "sessions",
           "columnsFrom": ["tenant_id", "session_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -1682,7 +1682,7 @@
         "refresh_token_families_tenant_id_id_unique": {
           "name": "refresh_token_families_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "refresh_token_families_session_unique": {
           "name": "refresh_token_families_session_unique",
@@ -1723,7 +1723,7 @@
         },
         "refresh_token_families_version_check": {
           "name": "refresh_token_families_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "refresh_token_families_timestamps_check": {
           "name": "refresh_token_families_timestamps_check",
@@ -1803,7 +1803,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -1891,7 +1891,7 @@
           "tableFrom": "refresh_tokens",
           "tableTo": "refresh_token_families",
           "columnsFrom": ["tenant_id", "family_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -1900,7 +1900,7 @@
           "tableFrom": "refresh_tokens",
           "tableTo": "refresh_tokens",
           "columnsFrom": ["tenant_id", "family_id", "parent_token_id"],
-          "columnsTo": ["family_id", "id", "tenant_id"],
+          "columnsTo": ["tenant_id", "family_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -1910,12 +1910,12 @@
         "refresh_tokens_tenant_id_id_unique": {
           "name": "refresh_tokens_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "refresh_tokens_family_id_id_unique": {
           "name": "refresh_tokens_family_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "family_id"]
+          "columns": ["tenant_id", "family_id", "id"]
         },
         "refresh_tokens_hash_unique": {
           "name": "refresh_tokens_hash_unique",
@@ -1968,7 +1968,7 @@
         },
         "refresh_tokens_version_check": {
           "name": "refresh_tokens_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "refresh_tokens_timestamps_check": {
           "name": "refresh_tokens_timestamps_check",
@@ -2010,7 +2010,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -2043,7 +2043,7 @@
           "tableFrom": "role_grant_customer_scopes",
           "tableTo": "role_grants",
           "columnsFrom": ["tenant_id", "grant_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -2052,7 +2052,7 @@
           "tableFrom": "role_grant_customer_scopes",
           "tableTo": "customers",
           "columnsFrom": ["tenant_id", "customer_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -2062,7 +2062,7 @@
         "role_grant_customer_scopes_tenant_id_id_unique": {
           "name": "role_grant_customer_scopes_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "role_grant_customer_scopes_unique": {
           "name": "role_grant_customer_scopes_unique",
@@ -2091,7 +2091,7 @@
         },
         "role_grant_customer_scopes_version_check": {
           "name": "role_grant_customer_scopes_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "role_grant_customer_scopes_timestamps_check": {
           "name": "role_grant_customer_scopes_timestamps_check",
@@ -2139,7 +2139,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -2172,7 +2172,7 @@
           "tableFrom": "role_grant_field_policies",
           "tableTo": "role_grants",
           "columnsFrom": ["tenant_id", "grant_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -2182,7 +2182,7 @@
         "role_grant_field_policies_tenant_id_id_unique": {
           "name": "role_grant_field_policies_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "role_grant_field_policies_unique": {
           "name": "role_grant_field_policies_unique",
@@ -2219,7 +2219,7 @@
         },
         "role_grant_field_policies_version_check": {
           "name": "role_grant_field_policies_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "role_grant_field_policies_timestamps_check": {
           "name": "role_grant_field_policies_timestamps_check",
@@ -2261,7 +2261,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -2285,7 +2285,7 @@
           "tableFrom": "role_grant_organization_scopes",
           "tableTo": "role_grants",
           "columnsFrom": ["tenant_id", "grant_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -2294,7 +2294,7 @@
           "tableFrom": "role_grant_organization_scopes",
           "tableTo": "organizations",
           "columnsFrom": ["tenant_id", "organization_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -2313,7 +2313,7 @@
         "role_grant_organization_scopes_tenant_id_id_unique": {
           "name": "role_grant_organization_scopes_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "role_grant_organization_scopes_unique": {
           "name": "role_grant_organization_scopes_unique",
@@ -2342,7 +2342,7 @@
         },
         "role_grant_organization_scopes_version_check": {
           "name": "role_grant_organization_scopes_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "role_grant_organization_scopes_timestamps_check": {
           "name": "role_grant_organization_scopes_timestamps_check",
@@ -2384,7 +2384,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -2417,7 +2417,7 @@
           "tableFrom": "role_grant_warehouse_scopes",
           "tableTo": "role_grants",
           "columnsFrom": ["tenant_id", "grant_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -2426,7 +2426,7 @@
           "tableFrom": "role_grant_warehouse_scopes",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -2436,7 +2436,7 @@
         "role_grant_warehouse_scopes_tenant_id_id_unique": {
           "name": "role_grant_warehouse_scopes_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "role_grant_warehouse_scopes_unique": {
           "name": "role_grant_warehouse_scopes_unique",
@@ -2465,7 +2465,7 @@
         },
         "role_grant_warehouse_scopes_version_check": {
           "name": "role_grant_warehouse_scopes_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "role_grant_warehouse_scopes_timestamps_check": {
           "name": "role_grant_warehouse_scopes_timestamps_check",
@@ -2527,7 +2527,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -2591,7 +2591,7 @@
           "tableFrom": "role_grants",
           "tableTo": "roles",
           "columnsFrom": ["tenant_id", "role_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -2610,7 +2610,7 @@
         "role_grants_tenant_id_id_unique": {
           "name": "role_grants_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "role_grants_role_action_scope_unique": {
           "name": "role_grants_role_action_scope_unique",
@@ -2651,7 +2651,7 @@
         },
         "role_grants_version_check": {
           "name": "role_grants_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "role_grants_timestamps_check": {
           "name": "role_grants_timestamps_check",
@@ -2700,7 +2700,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -2734,7 +2734,7 @@
         "roles_tenant_id_id_unique": {
           "name": "roles_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "roles_tenant_code_unique": {
           "name": "roles_tenant_code_unique",
@@ -2775,7 +2775,7 @@
         },
         "roles_version_check": {
           "name": "roles_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "roles_timestamps_check": {
           "name": "roles_timestamps_check",
@@ -2861,7 +2861,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -2926,7 +2926,7 @@
           "tableFrom": "sessions",
           "tableTo": "users",
           "columnsFrom": ["tenant_id", "user_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -2936,7 +2936,7 @@
         "sessions_tenant_id_id_unique": {
           "name": "sessions_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         }
       },
       "policies": {
@@ -2976,7 +2976,7 @@
         },
         "sessions_version_check": {
           "name": "sessions_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "sessions_timestamps_check": {
           "name": "sessions_timestamps_check",
@@ -3143,7 +3143,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -3208,7 +3208,7 @@
           "tableFrom": "user_role_assignments",
           "tableTo": "users",
           "columnsFrom": ["tenant_id", "user_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -3217,7 +3217,7 @@
           "tableFrom": "user_role_assignments",
           "tableTo": "roles",
           "columnsFrom": ["tenant_id", "role_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -3226,7 +3226,7 @@
           "tableFrom": "user_role_assignments",
           "tableTo": "users",
           "columnsFrom": ["tenant_id", "assigned_by_user_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -3236,7 +3236,7 @@
         "user_role_assignments_tenant_id_id_unique": {
           "name": "user_role_assignments_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "user_role_assignments_user_role_unique": {
           "name": "user_role_assignments_user_role_unique",
@@ -3273,7 +3273,7 @@
         },
         "user_role_assignments_version_check": {
           "name": "user_role_assignments_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "user_role_assignments_timestamps_check": {
           "name": "user_role_assignments_timestamps_check",
@@ -3346,7 +3346,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -3379,7 +3379,7 @@
           "tableFrom": "users",
           "tableTo": "organizations",
           "columnsFrom": ["tenant_id", "organization_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -3389,7 +3389,7 @@
         "users_tenant_id_id_unique": {
           "name": "users_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "users_tenant_login_unique": {
           "name": "users_tenant_login_unique",
@@ -3443,7 +3443,7 @@
         },
         "users_version_check": {
           "name": "users_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "users_timestamps_check": {
           "name": "users_timestamps_check",
@@ -3505,7 +3505,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "created_at": {
           "name": "created_at",
@@ -3562,7 +3562,7 @@
           "tableFrom": "warehouses",
           "tableTo": "organizations",
           "columnsFrom": ["tenant_id", "organization_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -3572,7 +3572,7 @@
         "warehouses_tenant_id_id_unique": {
           "name": "warehouses_tenant_id_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "warehouses_tenant_code_unique": {
           "name": "warehouses_tenant_code_unique",
@@ -3617,7 +3617,7 @@
         },
         "warehouses_version_check": {
           "name": "warehouses_version_check",
-          "value": "version >= 0"
+          "value": "version >= 1"
         },
         "warehouses_timestamps_check": {
           "name": "warehouses_timestamps_check",
@@ -4543,6 +4543,15 @@
       },
       "indexes": {},
       "foreignKeys": {
+        "reference_data_sets_current_version_fk": {
+          "name": "reference_data_sets_current_version_fk",
+          "tableFrom": "reference_data_sets",
+          "tableTo": "reference_data_versions",
+          "columnsFrom": ["tenant_id", "current_version_id", "id"],
+          "columnsTo": ["tenant_id", "id", "reference_data_set_id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        },
         "reference_data_sets_tenant_fk": {
           "name": "reference_data_sets_tenant_fk",
           "tableFrom": "reference_data_sets",
@@ -5388,7 +5397,7 @@
           "tableFrom": "attachments",
           "tableTo": "orders",
           "columnsFrom": ["tenant_id", "order_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -5397,7 +5406,7 @@
           "tableFrom": "attachments",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -5406,7 +5415,7 @@
           "tableFrom": "attachments",
           "tableTo": "import_jobs",
           "columnsFrom": ["tenant_id", "import_job_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -5416,7 +5425,7 @@
         "attachments_tenant_id_unique": {
           "name": "attachments_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "attachments_object_key_unique": {
           "name": "attachments_object_key_unique",
@@ -5604,7 +5613,7 @@
           "tableFrom": "customs_declarations",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -5614,7 +5623,7 @@
         "customs_declarations_tenant_id_unique": {
           "name": "customs_declarations_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "customs_declarations_number_unique": {
           "name": "customs_declarations_number_unique",
@@ -5789,7 +5798,7 @@
           "tableFrom": "declaration_items",
           "tableTo": "customs_declarations",
           "columnsFrom": ["tenant_id", "declaration_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -5799,7 +5808,7 @@
         "declaration_items_tenant_id_unique": {
           "name": "declaration_items_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "declaration_items_line_unique": {
           "name": "declaration_items_line_unique",
@@ -6038,7 +6047,7 @@
           "tableFrom": "import_jobs",
           "tableTo": "import_jobs",
           "columnsFrom": ["tenant_id", "rollback_of_job_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -6048,7 +6057,7 @@
         "import_jobs_tenant_id_unique": {
           "name": "import_jobs_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "import_jobs_number_unique": {
           "name": "import_jobs_number_unique",
@@ -6278,7 +6287,7 @@
           "tableFrom": "import_rows",
           "tableTo": "import_jobs",
           "columnsFrom": ["tenant_id", "import_job_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -6287,7 +6296,7 @@
           "tableFrom": "import_rows",
           "tableTo": "orders",
           "columnsFrom": ["tenant_id", "created_order_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -6296,7 +6305,7 @@
           "tableFrom": "import_rows",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "created_waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -6306,7 +6315,7 @@
         "import_rows_tenant_id_unique": {
           "name": "import_rows_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "import_rows_number_unique": {
           "name": "import_rows_number_unique",
@@ -6504,7 +6513,7 @@
           "tableFrom": "order_batch_items",
           "tableTo": "order_batch_jobs",
           "columnsFrom": ["tenant_id", "batch_job_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -6513,7 +6522,7 @@
           "tableFrom": "order_batch_items",
           "tableTo": "orders",
           "columnsFrom": ["tenant_id", "source_order_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -6522,7 +6531,7 @@
           "tableFrom": "order_batch_items",
           "tableTo": "orders",
           "columnsFrom": ["tenant_id", "result_order_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -6532,7 +6541,7 @@
         "order_batch_items_tenant_id_unique": {
           "name": "order_batch_items_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "order_batch_items_number_unique": {
           "name": "order_batch_items_number_unique",
@@ -6721,7 +6730,7 @@
         "order_batch_jobs_tenant_id_unique": {
           "name": "order_batch_jobs_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "order_batch_jobs_number_unique": {
           "name": "order_batch_jobs_number_unique",
@@ -6914,7 +6923,7 @@
           "tableFrom": "orders",
           "tableTo": "customers",
           "columnsFrom": ["tenant_id", "customer_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -6923,7 +6932,7 @@
           "tableFrom": "orders",
           "tableTo": "customer_addresses",
           "columnsFrom": ["tenant_id", "pickup_address_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -6932,7 +6941,7 @@
           "tableFrom": "orders",
           "tableTo": "customer_addresses",
           "columnsFrom": ["tenant_id", "delivery_address_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -6941,7 +6950,7 @@
           "tableFrom": "orders",
           "tableTo": "quote_acceptances",
           "columnsFrom": ["tenant_id", "quote_acceptance_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -6951,7 +6960,7 @@
         "orders_tenant_id_unique": {
           "name": "orders_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "orders_tenant_number_unique": {
           "name": "orders_tenant_number_unique",
@@ -7122,7 +7131,7 @@
           "tableFrom": "quote_acceptances",
           "tableTo": "quotes",
           "columnsFrom": ["tenant_id", "quote_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -7130,8 +7139,8 @@
           "name": "quote_acceptances_version_ownership_fk",
           "tableFrom": "quote_acceptances",
           "tableTo": "quote_versions",
-          "columnsFrom": ["tenant_id", "quote_id", "quote_version_id"],
-          "columnsTo": ["id", "quote_id", "tenant_id"],
+          "columnsFrom": ["tenant_id", "quote_version_id", "quote_id"],
+          "columnsTo": ["tenant_id", "id", "quote_id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -7141,18 +7150,18 @@
           "tableTo": "quote_options",
           "columnsFrom": [
             "tenant_id",
-            "quote_id",
-            "quote_version_id",
             "quote_option_id",
+            "quote_version_id",
+            "quote_id",
             "currency",
             "total_amount_minor"
           ],
           "columnsTo": [
-            "currency",
-            "id",
-            "quote_id",
-            "quote_version_id",
             "tenant_id",
+            "id",
+            "quote_version_id",
+            "quote_id",
+            "currency",
             "total_amount_minor"
           ],
           "onDelete": "restrict",
@@ -7164,7 +7173,7 @@
         "quote_acceptances_tenant_id_unique": {
           "name": "quote_acceptances_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "quote_acceptances_quote_unique": {
           "name": "quote_acceptances_quote_unique",
@@ -7319,7 +7328,7 @@
           "tableFrom": "quote_charge_lines",
           "tableTo": "quote_options",
           "columnsFrom": ["tenant_id", "quote_option_id", "currency"],
-          "columnsTo": ["currency", "id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id", "currency"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -7328,7 +7337,7 @@
           "tableFrom": "quote_charge_lines",
           "tableTo": "rate_rules",
           "columnsFrom": ["tenant_id", "rate_rule_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -7338,7 +7347,7 @@
         "quote_charge_lines_tenant_id_unique": {
           "name": "quote_charge_lines_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "quote_charge_lines_number_unique": {
           "name": "quote_charge_lines_number_unique",
@@ -7481,7 +7490,7 @@
           "tableFrom": "quote_explanations",
           "tableTo": "quote_options",
           "columnsFrom": ["tenant_id", "quote_option_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -7491,7 +7500,7 @@
         "quote_explanations_tenant_id_unique": {
           "name": "quote_explanations_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "quote_explanations_sequence_unique": {
           "name": "quote_explanations_sequence_unique",
@@ -7665,7 +7674,7 @@
           "tableFrom": "quote_options",
           "tableTo": "quote_versions",
           "columnsFrom": ["tenant_id", "quote_version_id", "quote_id"],
-          "columnsTo": ["id", "quote_id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id", "quote_id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -7674,7 +7683,7 @@
           "tableFrom": "quote_options",
           "tableTo": "shipping_channels",
           "columnsFrom": ["tenant_id", "channel_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -7684,24 +7693,24 @@
         "quote_options_tenant_id_unique": {
           "name": "quote_options_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "quote_options_version_key_unique": {
           "name": "quote_options_version_key_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "quote_version_id"]
+          "columns": ["tenant_id", "id", "quote_version_id"]
         },
         "quote_options_ownership_key_unique": {
           "name": "quote_options_ownership_key_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "quote_version_id", "quote_id"]
+          "columns": ["tenant_id", "id", "quote_version_id", "quote_id"]
         },
         "quote_options_acceptance_key_unique": {
           "name": "quote_options_acceptance_key_unique",
           "nullsNotDistinct": false,
           "columns": [
-            "id",
             "tenant_id",
+            "id",
             "quote_version_id",
             "quote_id",
             "currency",
@@ -7711,7 +7720,7 @@
         "quote_options_money_key_unique": {
           "name": "quote_options_money_key_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "currency"]
+          "columns": ["tenant_id", "id", "currency"]
         },
         "quote_options_code_unique": {
           "name": "quote_options_code_unique",
@@ -7868,7 +7877,7 @@
           "tableFrom": "quote_parcels",
           "tableTo": "quote_versions",
           "columnsFrom": ["tenant_id", "quote_version_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -7878,7 +7887,7 @@
         "quote_parcels_tenant_id_unique": {
           "name": "quote_parcels_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "quote_parcels_number_unique": {
           "name": "quote_parcels_number_unique",
@@ -8007,7 +8016,7 @@
           "tableFrom": "quote_versions",
           "tableTo": "quotes",
           "columnsFrom": ["tenant_id", "quote_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -8017,12 +8026,12 @@
         "quote_versions_tenant_id_unique": {
           "name": "quote_versions_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "quote_versions_ownership_key_unique": {
           "name": "quote_versions_ownership_key_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "quote_id"]
+          "columns": ["tenant_id", "id", "quote_id"]
         },
         "quote_versions_quote_version_unique": {
           "name": "quote_versions_quote_version_unique",
@@ -8193,12 +8202,35 @@
         }
       },
       "foreignKeys": {
+        "quotes_accepted_option_fk": {
+          "name": "quotes_accepted_option_fk",
+          "tableFrom": "quotes",
+          "tableTo": "quote_options",
+          "columnsFrom": [
+            "tenant_id",
+            "accepted_quote_option_id",
+            "accepted_quote_version_id",
+            "id"
+          ],
+          "columnsTo": ["tenant_id", "id", "quote_version_id", "quote_id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        },
+        "quotes_accepted_version_fk": {
+          "name": "quotes_accepted_version_fk",
+          "tableFrom": "quotes",
+          "tableTo": "quote_versions",
+          "columnsFrom": ["tenant_id", "accepted_quote_version_id", "id"],
+          "columnsTo": ["tenant_id", "id", "quote_id"],
+          "onDelete": "restrict",
+          "onUpdate": "restrict"
+        },
         "quotes_delivery_address_fk": {
           "name": "quotes_delivery_address_fk",
           "tableFrom": "quotes",
           "tableTo": "customer_addresses",
           "columnsFrom": ["tenant_id", "delivery_address_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -8216,7 +8248,7 @@
           "tableFrom": "quotes",
           "tableTo": "customers",
           "columnsFrom": ["tenant_id", "customer_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -8225,7 +8257,7 @@
           "tableFrom": "quotes",
           "tableTo": "customer_addresses",
           "columnsFrom": ["tenant_id", "pickup_address_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -8235,7 +8267,7 @@
         "quotes_tenant_id_unique": {
           "name": "quotes_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "quotes_tenant_number_unique": {
           "name": "quotes_tenant_number_unique",
@@ -8405,7 +8437,7 @@
           "tableFrom": "rate_card_versions",
           "tableTo": "rate_cards",
           "columnsFrom": ["tenant_id", "rate_card_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -8415,7 +8447,7 @@
         "rate_card_versions_tenant_id_unique": {
           "name": "rate_card_versions_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "rate_card_versions_number_unique": {
           "name": "rate_card_versions_number_unique",
@@ -8583,7 +8615,7 @@
           "tableFrom": "rate_cards",
           "tableTo": "shipping_channels",
           "columnsFrom": ["tenant_id", "channel_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -8592,7 +8624,7 @@
           "tableFrom": "rate_cards",
           "tableTo": "customers",
           "columnsFrom": ["tenant_id", "customer_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -8602,7 +8634,7 @@
         "rate_cards_tenant_id_unique": {
           "name": "rate_cards_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "rate_cards_tenant_code_unique": {
           "name": "rate_cards_tenant_code_unique",
@@ -8860,7 +8892,7 @@
           "tableFrom": "rate_rules",
           "tableTo": "rate_card_versions",
           "columnsFrom": ["tenant_id", "rate_card_version_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         },
@@ -8869,7 +8901,7 @@
           "tableFrom": "rate_rules",
           "tableTo": "shipping_channels",
           "columnsFrom": ["tenant_id", "channel_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -8879,7 +8911,7 @@
         "rate_rules_tenant_id_unique": {
           "name": "rate_rules_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         }
       },
       "policies": {
@@ -9064,7 +9096,7 @@
         "shipping_channels_tenant_id_unique": {
           "name": "shipping_channels_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "shipping_channels_tenant_code_unique": {
           "name": "shipping_channels_tenant_code_unique",
@@ -9268,7 +9300,7 @@
           "tableFrom": "waybill_packages",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "restrict"
         }
@@ -9278,12 +9310,12 @@
         "waybill_packages_tenant_id_unique": {
           "name": "waybill_packages_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "waybill_packages_warehouse_pair_unique": {
           "name": "waybill_packages_warehouse_pair_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "waybill_id"]
+          "columns": ["tenant_id", "id", "waybill_id"]
         },
         "waybill_packages_number_unique": {
           "name": "waybill_packages_number_unique",
@@ -9455,7 +9487,7 @@
           "tableFrom": "waybills",
           "tableTo": "orders",
           "columnsFrom": ["tenant_id", "order_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -9465,7 +9497,7 @@
         "waybills_tenant_id_unique": {
           "name": "waybills_tenant_id_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "waybills_tenant_number_unique": {
           "name": "waybills_tenant_number_unique",
@@ -9641,7 +9673,7 @@
           "tableFrom": "bills_of_lading",
           "tableTo": "linehaul_bookings",
           "columnsFrom": ["tenant_id", "booking_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -9650,7 +9682,7 @@
           "tableFrom": "bills_of_lading",
           "tableTo": "warehouse_media",
           "columnsFrom": ["tenant_id", "document_media_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -9660,7 +9692,7 @@
         "bills_of_lading_identity_unique": {
           "name": "bills_of_lading_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "bills_of_lading_number_unique": {
           "name": "bills_of_lading_number_unique",
@@ -9803,7 +9835,7 @@
           "tableFrom": "delivery_task_events",
           "tableTo": "delivery_tasks",
           "columnsFrom": ["tenant_id", "delivery_task_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -9813,7 +9845,7 @@
         "delivery_task_events_identity_unique": {
           "name": "delivery_task_events_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "delivery_task_events_sequence_unique": {
           "name": "delivery_task_events_sequence_unique",
@@ -9989,7 +10021,7 @@
           "tableFrom": "delivery_tasks",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -9998,7 +10030,7 @@
           "tableFrom": "delivery_tasks",
           "tableTo": "fba_deliveries",
           "columnsFrom": ["tenant_id", "fba_delivery_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -10007,7 +10039,7 @@
           "tableFrom": "delivery_tasks",
           "tableTo": "customers",
           "columnsFrom": ["tenant_id", "customer_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -10024,8 +10056,8 @@
           "name": "delivery_tasks_address_customer_fk",
           "tableFrom": "delivery_tasks",
           "tableTo": "customer_addresses",
-          "columnsFrom": ["tenant_id", "customer_id", "destination_address_id"],
-          "columnsTo": ["customer_id", "id", "tenant_id"],
+          "columnsFrom": ["tenant_id", "destination_address_id", "customer_id"],
+          "columnsTo": ["tenant_id", "id", "customer_id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         },
@@ -10034,7 +10066,7 @@
           "tableFrom": "delivery_tasks",
           "tableTo": "devices",
           "columnsFrom": ["tenant_id", "assigned_device_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10044,7 +10076,7 @@
         "delivery_tasks_identity_unique": {
           "name": "delivery_tasks_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "delivery_tasks_number_unique": {
           "name": "delivery_tasks_number_unique",
@@ -10181,7 +10213,7 @@
           "tableFrom": "device_event_media_claims",
           "tableTo": "device_event_receipts",
           "columnsFrom": ["tenant_id", "device_event_receipt_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -10190,7 +10222,7 @@
           "tableFrom": "device_event_media_claims",
           "tableTo": "warehouse_media",
           "columnsFrom": ["tenant_id", "media_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10200,7 +10232,7 @@
         "device_event_media_claims_identity_unique": {
           "name": "device_event_media_claims_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "device_event_media_claims_key_unique": {
           "name": "device_event_media_claims_key_unique",
@@ -10391,6 +10423,15 @@
         }
       },
       "foreignKeys": {
+        "device_event_receipts_conflict_fk": {
+          "name": "device_event_receipts_conflict_fk",
+          "tableFrom": "device_event_receipts",
+          "tableTo": "device_sync_conflicts",
+          "columnsFrom": ["tenant_id", "conflict_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "device_event_receipts_tenant_fk": {
           "name": "device_event_receipts_tenant_fk",
           "tableFrom": "device_event_receipts",
@@ -10405,7 +10446,7 @@
           "tableFrom": "device_event_receipts",
           "tableTo": "device_sync_sessions",
           "columnsFrom": ["tenant_id", "session_id", "device_id", "warehouse_id"],
-          "columnsTo": ["device_id", "id", "tenant_id", "warehouse_id"],
+          "columnsTo": ["tenant_id", "id", "device_id", "warehouse_id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -10414,7 +10455,7 @@
           "tableFrom": "device_event_receipts",
           "tableTo": "device_event_receipts",
           "columnsFrom": ["tenant_id", "duplicate_of_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10424,7 +10465,7 @@
         "device_event_receipts_identity_unique": {
           "name": "device_event_receipts_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "device_event_receipts_event_unique": {
           "name": "device_event_receipts_event_unique",
@@ -10554,6 +10595,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "version": {
+          "name": "version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -10609,7 +10657,7 @@
           "tableFrom": "device_sync_conflicts",
           "tableTo": "device_event_receipts",
           "columnsFrom": ["tenant_id", "device_event_receipt_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10619,7 +10667,7 @@
         "device_sync_conflicts_identity_unique": {
           "name": "device_sync_conflicts_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "device_sync_conflicts_event_unique": {
           "name": "device_sync_conflicts_event_unique",
@@ -10642,9 +10690,13 @@
           "name": "device_sync_conflicts_resolution_shape_check",
           "value": "((status = 'OPEN'::text) AND (resolution IS NULL) AND (resolution_payload IS NULL) AND (resolved_at IS NULL)) OR ((status = 'RESOLVED'::text) AND (resolution IS NOT NULL) AND (resolved_at IS NOT NULL))"
         },
+        "device_sync_conflicts_resource_versions_check": {
+          "name": "device_sync_conflicts_resource_versions_check",
+          "value": "(expected_version >= 0) AND (server_version >= 0)"
+        },
         "device_sync_conflicts_version_check": {
           "name": "device_sync_conflicts_version_check",
-          "value": "(expected_version >= 0) AND (server_version >= 0)"
+          "value": "version >= 1"
         },
         "device_sync_conflicts_status_check": {
           "name": "device_sync_conflicts_status_check",
@@ -10772,7 +10824,7 @@
           "tableFrom": "device_sync_sessions",
           "tableTo": "devices",
           "columnsFrom": ["tenant_id", "device_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -10781,7 +10833,7 @@
           "tableFrom": "device_sync_sessions",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10791,12 +10843,12 @@
         "device_sync_sessions_identity_unique": {
           "name": "device_sync_sessions_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "device_sync_sessions_scope_unique": {
           "name": "device_sync_sessions_scope_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "device_id", "warehouse_id"]
+          "columns": ["tenant_id", "id", "device_id", "warehouse_id"]
         }
       },
       "policies": {
@@ -10955,7 +11007,7 @@
           "tableFrom": "fba_deliveries",
           "tableTo": "linehaul_bookings",
           "columnsFrom": ["tenant_id", "booking_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -10964,7 +11016,7 @@
           "tableFrom": "fba_deliveries",
           "tableTo": "customer_addresses",
           "columnsFrom": ["tenant_id", "destination_address_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -10974,7 +11026,7 @@
         "fba_deliveries_identity_unique": {
           "name": "fba_deliveries_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "fba_deliveries_number_unique": {
           "name": "fba_deliveries_number_unique",
@@ -11125,7 +11177,7 @@
           "tableFrom": "inventory_balances",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11134,7 +11186,7 @@
           "tableFrom": "inventory_balances",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11142,8 +11194,8 @@
           "name": "inventory_balances_package_waybill_fk",
           "tableFrom": "inventory_balances",
           "tableTo": "waybill_packages",
-          "columnsFrom": ["tenant_id", "waybill_id", "package_id"],
-          "columnsTo": ["id", "tenant_id", "waybill_id"],
+          "columnsFrom": ["tenant_id", "package_id", "waybill_id"],
+          "columnsTo": ["tenant_id", "id", "waybill_id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -11153,7 +11205,7 @@
         "inventory_balances_identity_unique": {
           "name": "inventory_balances_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "inventory_balances_bucket_unique": {
           "name": "inventory_balances_bucket_unique",
@@ -11298,7 +11350,7 @@
           "tableFrom": "inventory_ledger_entries",
           "tableTo": "warehouse_receipts",
           "columnsFrom": ["tenant_id", "receipt_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11316,7 +11368,7 @@
           "tableFrom": "inventory_ledger_entries",
           "tableTo": "inventory_balances",
           "columnsFrom": ["tenant_id", "inventory_balance_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11326,7 +11378,7 @@
         "inventory_ledger_entries_identity_unique": {
           "name": "inventory_ledger_entries_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "inventory_ledger_entries_idempotency_unique": {
           "name": "inventory_ledger_entries_idempotency_unique",
@@ -11482,7 +11534,7 @@
           "tableFrom": "linehaul_bookings",
           "tableTo": "load_units",
           "columnsFrom": ["tenant_id", "load_unit_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11492,7 +11544,7 @@
         "linehaul_bookings_identity_unique": {
           "name": "linehaul_bookings_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "linehaul_bookings_number_unique": {
           "name": "linehaul_bookings_number_unique",
@@ -11628,7 +11680,7 @@
           "tableFrom": "load_unit_items",
           "tableTo": "load_units",
           "columnsFrom": ["tenant_id", "load_unit_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -11637,7 +11689,7 @@
           "tableFrom": "load_unit_items",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11645,8 +11697,8 @@
           "name": "load_unit_items_package_waybill_fk",
           "tableFrom": "load_unit_items",
           "tableTo": "waybill_packages",
-          "columnsFrom": ["tenant_id", "waybill_id", "package_id"],
-          "columnsTo": ["id", "tenant_id", "waybill_id"],
+          "columnsFrom": ["tenant_id", "package_id", "waybill_id"],
+          "columnsTo": ["tenant_id", "id", "waybill_id"],
           "onDelete": "restrict",
           "onUpdate": "restrict"
         }
@@ -11656,7 +11708,7 @@
         "load_unit_items_identity_unique": {
           "name": "load_unit_items_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "load_unit_items_package_unique": {
           "name": "load_unit_items_package_unique",
@@ -11809,7 +11861,7 @@
           "tableFrom": "load_units",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "origin_warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -11818,7 +11870,7 @@
           "tableFrom": "load_units",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "destination_warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11828,7 +11880,7 @@
         "load_units_identity_unique": {
           "name": "load_units_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "load_units_number_unique": {
           "name": "load_units_number_unique",
@@ -11962,6 +12014,15 @@
         }
       },
       "foreignKeys": {
+        "pod_records_current_version_fk": {
+          "name": "pod_records_current_version_fk",
+          "tableFrom": "pod_records",
+          "tableTo": "pod_versions",
+          "columnsFrom": ["tenant_id", "id", "current_version"],
+          "columnsTo": ["tenant_id", "pod_record_id", "pod_version"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "pod_records_tenant_fk": {
           "name": "pod_records_tenant_fk",
           "tableFrom": "pod_records",
@@ -11976,7 +12037,7 @@
           "tableFrom": "pod_records",
           "tableTo": "delivery_tasks",
           "columnsFrom": ["tenant_id", "delivery_task_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -11986,7 +12047,7 @@
         "pod_records_identity_unique": {
           "name": "pod_records_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "pod_records_number_unique": {
           "name": "pod_records_number_unique",
@@ -12168,7 +12229,7 @@
           "tableFrom": "pod_versions",
           "tableTo": "pod_records",
           "columnsFrom": ["tenant_id", "pod_record_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -12177,7 +12238,7 @@
           "tableFrom": "pod_versions",
           "tableTo": "warehouse_media",
           "columnsFrom": ["tenant_id", "signature_media_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -12186,7 +12247,7 @@
           "tableFrom": "pod_versions",
           "tableTo": "warehouse_media",
           "columnsFrom": ["tenant_id", "photo_media_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -12196,11 +12257,11 @@
           "tableTo": "pod_versions",
           "columnsFrom": [
             "tenant_id",
-            "pod_record_id",
             "supersedes_version_id",
+            "pod_record_id",
             "supersedes_pod_version"
           ],
-          "columnsTo": ["id", "pod_record_id", "pod_version", "tenant_id"],
+          "columnsTo": ["tenant_id", "id", "pod_record_id", "pod_version"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -12210,12 +12271,12 @@
         "pod_versions_identity_unique": {
           "name": "pod_versions_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "pod_versions_chain_target_unique": {
           "name": "pod_versions_chain_target_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id", "pod_record_id", "pod_version"]
+          "columns": ["tenant_id", "id", "pod_record_id", "pod_version"]
         },
         "pod_versions_number_unique": {
           "name": "pod_versions_number_unique",
@@ -12416,7 +12477,7 @@
           "tableFrom": "print_jobs",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -12425,7 +12486,7 @@
           "tableFrom": "print_jobs",
           "tableTo": "devices",
           "columnsFrom": ["tenant_id", "device_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -12435,7 +12496,7 @@
         "print_jobs_identity_unique": {
           "name": "print_jobs_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "print_jobs_number_unique": {
           "name": "print_jobs_number_unique",
@@ -12592,7 +12653,7 @@
           "tableFrom": "route_decisions",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -12601,7 +12662,7 @@
           "tableFrom": "route_decisions",
           "tableTo": "warehouse_receipts",
           "columnsFrom": ["tenant_id", "receipt_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -12611,7 +12672,7 @@
         "route_decisions_identity_unique": {
           "name": "route_decisions_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "route_decisions_waybill_version_unique": {
           "name": "route_decisions_waybill_version_unique",
@@ -12770,7 +12831,7 @@
           "tableFrom": "warehouse_measurements",
           "tableTo": "warehouse_receipts",
           "columnsFrom": ["tenant_id", "receipt_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -12779,7 +12840,7 @@
           "tableFrom": "warehouse_measurements",
           "tableTo": "devices",
           "columnsFrom": ["tenant_id", "device_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -12788,7 +12849,7 @@
           "tableFrom": "warehouse_measurements",
           "tableTo": "warehouse_measurements",
           "columnsFrom": ["tenant_id", "supersedes_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -12798,7 +12859,7 @@
         "warehouse_measurements_identity_unique": {
           "name": "warehouse_measurements_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "warehouse_measurements_receipt_version_unique": {
           "name": "warehouse_measurements_receipt_version_unique",
@@ -12963,7 +13024,7 @@
           "tableFrom": "warehouse_media",
           "tableTo": "warehouse_receipts",
           "columnsFrom": ["tenant_id", "receipt_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -12972,7 +13033,7 @@
           "tableFrom": "warehouse_media",
           "tableTo": "devices",
           "columnsFrom": ["tenant_id", "capture_device_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -12982,7 +13043,7 @@
         "warehouse_media_identity_unique": {
           "name": "warehouse_media_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "warehouse_media_object_key_unique": {
           "name": "warehouse_media_object_key_unique",
@@ -13149,6 +13210,15 @@
         }
       },
       "foreignKeys": {
+        "warehouse_receipts_active_measurement_fk": {
+          "name": "warehouse_receipts_active_measurement_fk",
+          "tableFrom": "warehouse_receipts",
+          "tableTo": "warehouse_measurements",
+          "columnsFrom": ["tenant_id", "active_measurement_id"],
+          "columnsTo": ["tenant_id", "id"],
+          "onDelete": "restrict",
+          "onUpdate": "no action"
+        },
         "warehouse_receipts_tenant_fk": {
           "name": "warehouse_receipts_tenant_fk",
           "tableFrom": "warehouse_receipts",
@@ -13163,7 +13233,7 @@
           "tableFrom": "warehouse_receipts",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -13172,7 +13242,7 @@
           "tableFrom": "warehouse_receipts",
           "tableTo": "waybills",
           "columnsFrom": ["tenant_id", "waybill_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -13181,7 +13251,7 @@
           "tableFrom": "warehouse_receipts",
           "tableTo": "warehouse_scans",
           "columnsFrom": ["tenant_id", "scan_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -13191,7 +13261,7 @@
         "warehouse_receipts_identity_unique": {
           "name": "warehouse_receipts_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "warehouse_receipts_number_unique": {
           "name": "warehouse_receipts_number_unique",
@@ -13348,7 +13418,7 @@
           "tableFrom": "warehouse_scans",
           "tableTo": "warehouses",
           "columnsFrom": ["tenant_id", "warehouse_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         },
@@ -13357,7 +13427,7 @@
           "tableFrom": "warehouse_scans",
           "tableTo": "devices",
           "columnsFrom": ["tenant_id", "device_id"],
-          "columnsTo": ["id", "tenant_id"],
+          "columnsTo": ["tenant_id", "id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -13367,7 +13437,7 @@
         "warehouse_scans_identity_unique": {
           "name": "warehouse_scans_identity_unique",
           "nullsNotDistinct": false,
-          "columns": ["id", "tenant_id"]
+          "columns": ["tenant_id", "id"]
         },
         "warehouse_scans_device_event_unique": {
           "name": "warehouse_scans_device_event_unique",

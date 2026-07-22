@@ -96,7 +96,7 @@ export const organizations = pgTable(
     organizationType: text('organization_type').notNull(),
     status: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -119,12 +119,12 @@ export const organizations = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.parentOrganizationId],
-      foreignColumns: [table.id, table.tenantId],
+      foreignColumns: [table.tenantId, table.id],
       name: 'organizations_parent_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('organizations_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('organizations_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('organizations_tenant_code_unique').on(table.tenantId, table.code),
     pgPolicy('organizations_tenant_isolation', {
       as: 'permissive',
@@ -154,7 +154,7 @@ export const organizations = pgTable(
       'organizations_status_check',
       sql`status = ANY (ARRAY['ACTIVE'::text, 'INACTIVE'::text])`
     ),
-    check('organizations_version_check', sql`version >= 0`),
+    check('organizations_version_check', sql`version >= 1`),
     check('organizations_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -170,7 +170,7 @@ export const warehouses = pgTable(
     timezone: text().default('Asia/Shanghai').notNull(),
     status: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -193,12 +193,12 @@ export const warehouses = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.organizationId],
-      foreignColumns: [organizations.id, organizations.tenantId],
+      foreignColumns: [organizations.tenantId, organizations.id],
       name: 'warehouses_organization_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('warehouses_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('warehouses_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('warehouses_tenant_code_unique').on(table.tenantId, table.code),
     pgPolicy('warehouses_tenant_isolation', {
       as: 'permissive',
@@ -222,7 +222,7 @@ export const warehouses = pgTable(
       sql`(length(btrim(timezone)) >= 1) AND (length(btrim(timezone)) <= 64)`
     ),
     check('warehouses_status_check', sql`status = ANY (ARRAY['ACTIVE'::text, 'INACTIVE'::text])`),
-    check('warehouses_version_check', sql`version >= 0`),
+    check('warehouses_version_check', sql`version >= 1`),
     check('warehouses_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -240,7 +240,7 @@ export const users = pgTable(
     status: text().default('INVITED').notNull(),
     passwordChangedAt: timestamp('password_changed_at', { withTimezone: true, mode: 'string' }),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -258,12 +258,12 @@ export const users = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.organizationId],
-      foreignColumns: [organizations.id, organizations.tenantId],
+      foreignColumns: [organizations.tenantId, organizations.id],
       name: 'users_organization_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('users_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('users_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('users_tenant_login_unique').on(table.tenantId, table.loginNameNormalized),
     unique('users_tenant_email_unique').on(table.tenantId, table.emailNormalized),
     pgPolicy('users_tenant_isolation', {
@@ -295,7 +295,7 @@ export const users = pgTable(
       'users_status_check',
       sql`status = ANY (ARRAY['INVITED'::text, 'ACTIVE'::text, 'LOCKED'::text, 'DISABLED'::text])`
     ),
-    check('users_version_check', sql`version >= 0`),
+    check('users_version_check', sql`version >= 1`),
     check('users_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -310,7 +310,7 @@ export const customers = pgTable(
     displayName: text('display_name').notNull(),
     status: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -328,12 +328,12 @@ export const customers = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.organizationId],
-      foreignColumns: [organizations.id, organizations.tenantId],
+      foreignColumns: [organizations.tenantId, organizations.id],
       name: 'customers_organization_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('customers_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('customers_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('customers_tenant_number_unique').on(table.tenantId, table.customerNumber),
     pgPolicy('customers_tenant_isolation', {
       as: 'permissive',
@@ -356,7 +356,7 @@ export const customers = pgTable(
       'customers_status_check',
       sql`status = ANY (ARRAY['ACTIVE'::text, 'ON_HOLD'::text, 'INACTIVE'::text])`
     ),
-    check('customers_version_check', sql`version >= 0`),
+    check('customers_version_check', sql`version >= 1`),
     check('customers_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -379,7 +379,7 @@ export const customerAddresses = pgTable(
     line2: text(),
     status: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -403,15 +403,15 @@ export const customerAddresses = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.customerId],
-      foreignColumns: [customers.id, customers.tenantId],
+      foreignColumns: [customers.tenantId, customers.id],
       name: 'customer_addresses_customer_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('customer_addresses_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('customer_addresses_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('customer_addresses_delivery_pair_unique').on(
-      table.id,
       table.tenantId,
+      table.id,
       table.customerId
     ),
     unique('customer_addresses_customer_code_unique').on(
@@ -456,7 +456,7 @@ export const customerAddresses = pgTable(
       'customer_addresses_status_check',
       sql`status = ANY (ARRAY['ACTIVE'::text, 'INACTIVE'::text])`
     ),
-    check('customer_addresses_version_check', sql`version >= 0`),
+    check('customer_addresses_version_check', sql`version >= 1`),
     check('customer_addresses_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -470,7 +470,7 @@ export const roles = pgTable(
     displayName: text('display_name').notNull(),
     status: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -486,7 +486,7 @@ export const roles = pgTable(
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('roles_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('roles_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('roles_tenant_code_unique').on(table.tenantId, table.roleCode),
     pgPolicy('roles_tenant_isolation', {
       as: 'permissive',
@@ -506,7 +506,7 @@ export const roles = pgTable(
       sql`(length(btrim(display_name)) >= 1) AND (length(btrim(display_name)) <= 160)`
     ),
     check('roles_status_check', sql`status = ANY (ARRAY['ACTIVE'::text, 'INACTIVE'::text])`),
-    check('roles_version_check', sql`version >= 0`),
+    check('roles_version_check', sql`version >= 1`),
     check('roles_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -522,7 +522,7 @@ export const roleGrants = pgTable(
     dataScopeKind: text('data_scope_kind').notNull(),
     status: text().default('ACTIVE').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -546,7 +546,7 @@ export const roleGrants = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.roleId],
-      foreignColumns: [roles.id, roles.tenantId],
+      foreignColumns: [roles.tenantId, roles.id],
       name: 'role_grants_role_fk',
     })
       .onUpdate('restrict')
@@ -558,7 +558,7 @@ export const roleGrants = pgTable(
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('role_grants_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('role_grants_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('role_grants_role_action_scope_unique').on(
       table.tenantId,
       table.roleId,
@@ -584,7 +584,7 @@ export const roleGrants = pgTable(
       sql`data_scope_kind = ANY (ARRAY['TENANT'::text, 'ORGANIZATION'::text, 'CUSTOMER'::text, 'WAREHOUSE'::text, 'SELF'::text])`
     ),
     check('role_grants_status_check', sql`status = ANY (ARRAY['ACTIVE'::text, 'INACTIVE'::text])`),
-    check('role_grants_version_check', sql`version >= 0`),
+    check('role_grants_version_check', sql`version >= 1`),
     check('role_grants_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -597,7 +597,7 @@ export const roleGrantOrganizationScopes = pgTable(
     grantId: text('grant_id').notNull(),
     organizationId: text('organization_id').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -608,14 +608,14 @@ export const roleGrantOrganizationScopes = pgTable(
   (table) => [
     foreignKey({
       columns: [table.tenantId, table.grantId],
-      foreignColumns: [roleGrants.id, roleGrants.tenantId],
+      foreignColumns: [roleGrants.tenantId, roleGrants.id],
       name: 'role_grant_organization_scopes_grant_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.organizationId],
-      foreignColumns: [organizations.id, organizations.tenantId],
+      foreignColumns: [organizations.tenantId, organizations.id],
       name: 'role_grant_organization_scopes_organization_fk',
     })
       .onUpdate('restrict')
@@ -627,7 +627,7 @@ export const roleGrantOrganizationScopes = pgTable(
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('role_grant_organization_scopes_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('role_grant_organization_scopes_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('role_grant_organization_scopes_unique').on(
       table.tenantId,
       table.grantId,
@@ -648,7 +648,7 @@ export const roleGrantOrganizationScopes = pgTable(
       'role_grant_organization_scopes_tenant_id_ulid_check',
       sql`tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'::text`
     ),
-    check('role_grant_organization_scopes_version_check', sql`version >= 0`),
+    check('role_grant_organization_scopes_version_check', sql`version >= 1`),
     check('role_grant_organization_scopes_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -661,7 +661,7 @@ export const roleGrantCustomerScopes = pgTable(
     grantId: text('grant_id').notNull(),
     customerId: text('customer_id').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -679,19 +679,19 @@ export const roleGrantCustomerScopes = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.grantId],
-      foreignColumns: [roleGrants.id, roleGrants.tenantId],
+      foreignColumns: [roleGrants.tenantId, roleGrants.id],
       name: 'role_grant_customer_scopes_grant_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.customerId],
-      foreignColumns: [customers.id, customers.tenantId],
+      foreignColumns: [customers.tenantId, customers.id],
       name: 'role_grant_customer_scopes_customer_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('role_grant_customer_scopes_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('role_grant_customer_scopes_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('role_grant_customer_scopes_unique').on(table.tenantId, table.grantId, table.customerId),
     pgPolicy('role_grant_customer_scopes_tenant_isolation', {
       as: 'permissive',
@@ -708,7 +708,7 @@ export const roleGrantCustomerScopes = pgTable(
       'role_grant_customer_scopes_tenant_id_ulid_check',
       sql`tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'::text`
     ),
-    check('role_grant_customer_scopes_version_check', sql`version >= 0`),
+    check('role_grant_customer_scopes_version_check', sql`version >= 1`),
     check('role_grant_customer_scopes_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -721,7 +721,7 @@ export const roleGrantWarehouseScopes = pgTable(
     grantId: text('grant_id').notNull(),
     warehouseId: text('warehouse_id').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -739,19 +739,19 @@ export const roleGrantWarehouseScopes = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.grantId],
-      foreignColumns: [roleGrants.id, roleGrants.tenantId],
+      foreignColumns: [roleGrants.tenantId, roleGrants.id],
       name: 'role_grant_warehouse_scopes_grant_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.warehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'role_grant_warehouse_scopes_warehouse_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('role_grant_warehouse_scopes_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('role_grant_warehouse_scopes_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('role_grant_warehouse_scopes_unique').on(
       table.tenantId,
       table.grantId,
@@ -772,7 +772,7 @@ export const roleGrantWarehouseScopes = pgTable(
       'role_grant_warehouse_scopes_tenant_id_ulid_check',
       sql`tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'::text`
     ),
-    check('role_grant_warehouse_scopes_version_check', sql`version >= 0`),
+    check('role_grant_warehouse_scopes_version_check', sql`version >= 1`),
     check('role_grant_warehouse_scopes_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -786,7 +786,7 @@ export const roleGrantFieldPolicies = pgTable(
     fieldPath: text('field_path').notNull(),
     accessLevel: text('access_level').notNull(),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -804,12 +804,12 @@ export const roleGrantFieldPolicies = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.grantId],
-      foreignColumns: [roleGrants.id, roleGrants.tenantId],
+      foreignColumns: [roleGrants.tenantId, roleGrants.id],
       name: 'role_grant_field_policies_grant_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('role_grant_field_policies_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('role_grant_field_policies_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('role_grant_field_policies_unique').on(table.tenantId, table.grantId, table.fieldPath),
     pgPolicy('role_grant_field_policies_tenant_isolation', {
       as: 'permissive',
@@ -834,7 +834,7 @@ export const roleGrantFieldPolicies = pgTable(
       'role_grant_field_policies_access_check',
       sql`access_level = ANY (ARRAY['READ'::text, 'MASK'::text, 'DENY'::text])`
     ),
-    check('role_grant_field_policies_version_check', sql`version >= 0`),
+    check('role_grant_field_policies_version_check', sql`version >= 1`),
     check('role_grant_field_policies_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -853,7 +853,7 @@ export const userRoleAssignments = pgTable(
       .notNull(),
     validUntil: timestamp('valid_until', { withTimezone: true, mode: 'string' }),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -879,26 +879,26 @@ export const userRoleAssignments = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.userId],
-      foreignColumns: [users.id, users.tenantId],
+      foreignColumns: [users.tenantId, users.id],
       name: 'user_role_assignments_user_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.roleId],
-      foreignColumns: [roles.id, roles.tenantId],
+      foreignColumns: [roles.tenantId, roles.id],
       name: 'user_role_assignments_role_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.assignedByUserId],
-      foreignColumns: [users.id, users.tenantId],
+      foreignColumns: [users.tenantId, users.id],
       name: 'user_role_assignments_assigner_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('user_role_assignments_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('user_role_assignments_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('user_role_assignments_user_role_unique').on(
       table.tenantId,
       table.userId,
@@ -925,7 +925,7 @@ export const userRoleAssignments = pgTable(
       'user_role_assignments_validity_check',
       sql`(valid_until IS NULL) OR (valid_until > valid_from)`
     ),
-    check('user_role_assignments_version_check', sql`version >= 0`),
+    check('user_role_assignments_version_check', sql`version >= 1`),
     check('user_role_assignments_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -947,7 +947,7 @@ export const sessions = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'string' }),
     revokedReason: text('revoked_reason'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -973,12 +973,12 @@ export const sessions = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.userId],
-      foreignColumns: [users.id, users.tenantId],
+      foreignColumns: [users.tenantId, users.id],
       name: 'sessions_user_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('sessions_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('sessions_tenant_id_id_unique').on(table.tenantId, table.id),
     pgPolicy('sessions_tenant_isolation', {
       as: 'permissive',
       for: 'all',
@@ -1001,7 +1001,7 @@ export const sessions = pgTable(
       'sessions_revocation_check',
       sql`((status = 'REVOKED'::text) AND (revoked_at IS NOT NULL)) OR (status <> 'REVOKED'::text)`
     ),
-    check('sessions_version_check', sql`version >= 0`),
+    check('sessions_version_check', sql`version >= 1`),
     check(
       'sessions_timestamps_check',
       sql`(updated_at >= created_at) AND (last_seen_at >= created_at)`
@@ -1020,7 +1020,7 @@ export const refreshTokenFamilies = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'string' }),
     revokedReason: text('revoked_reason'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -1038,12 +1038,12 @@ export const refreshTokenFamilies = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.sessionId],
-      foreignColumns: [sessions.id, sessions.tenantId],
+      foreignColumns: [sessions.tenantId, sessions.id],
       name: 'refresh_token_families_session_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('refresh_token_families_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('refresh_token_families_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('refresh_token_families_session_unique').on(table.tenantId, table.sessionId),
     pgPolicy('refresh_token_families_tenant_isolation', {
       as: 'permissive',
@@ -1069,7 +1069,7 @@ export const refreshTokenFamilies = pgTable(
       'refresh_token_families_revocation_check',
       sql`((status = 'REVOKED'::text) AND (revoked_at IS NOT NULL)) OR (status <> 'REVOKED'::text)`
     ),
-    check('refresh_token_families_version_check', sql`version >= 0`),
+    check('refresh_token_families_version_check', sql`version >= 1`),
     check('refresh_token_families_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -1088,7 +1088,7 @@ export const refreshTokens = pgTable(
     consumedAt: timestamp('consumed_at', { withTimezone: true, mode: 'string' }),
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'string' }),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -1119,20 +1119,20 @@ export const refreshTokens = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.familyId],
-      foreignColumns: [refreshTokenFamilies.id, refreshTokenFamilies.tenantId],
+      foreignColumns: [refreshTokenFamilies.tenantId, refreshTokenFamilies.id],
       name: 'refresh_tokens_family_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.familyId, table.parentTokenId],
-      foreignColumns: [table.familyId, table.id, table.tenantId],
+      foreignColumns: [table.tenantId, table.familyId, table.id],
       name: 'refresh_tokens_parent_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('refresh_tokens_tenant_id_id_unique').on(table.id, table.tenantId),
-    unique('refresh_tokens_family_id_id_unique').on(table.id, table.tenantId, table.familyId),
+    unique('refresh_tokens_tenant_id_id_unique').on(table.tenantId, table.id),
+    unique('refresh_tokens_family_id_id_unique').on(table.tenantId, table.familyId, table.id),
     unique('refresh_tokens_hash_unique').on(table.tokenHash),
     pgPolicy('refresh_tokens_tenant_isolation', {
       as: 'permissive',
@@ -1164,7 +1164,7 @@ export const refreshTokens = pgTable(
       'refresh_tokens_no_self_parent_check',
       sql`(parent_token_id IS NULL) OR (parent_token_id <> id)`
     ),
-    check('refresh_tokens_version_check', sql`version >= 0`),
+    check('refresh_tokens_version_check', sql`version >= 1`),
     check('refresh_tokens_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -1186,7 +1186,7 @@ export const oauthStates = pgTable(
     expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'string' }).notNull(),
     consumedAt: timestamp('consumed_at', { withTimezone: true, mode: 'string' }),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -1210,7 +1210,7 @@ export const oauthStates = pgTable(
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('oauth_states_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('oauth_states_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('oauth_states_state_hash_unique').on(table.stateHash),
     pgPolicy('oauth_states_tenant_isolation', {
       as: 'permissive',
@@ -1242,7 +1242,7 @@ export const oauthStates = pgTable(
       'oauth_states_consumed_check',
       sql`((status = 'CONSUMED'::text) AND (consumed_at IS NOT NULL)) OR (status <> 'CONSUMED'::text)`
     ),
-    check('oauth_states_version_check', sql`version >= 0`),
+    check('oauth_states_version_check', sql`version >= 1`),
     check('oauth_states_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();
@@ -1259,7 +1259,7 @@ export const devices = pgTable(
     status: text().default('PENDING').notNull(),
     lastSeenAt: timestamp('last_seen_at', { withTimezone: true, mode: 'string' }),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -1275,7 +1275,7 @@ export const devices = pgTable(
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('devices_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('devices_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('devices_tenant_code_unique').on(table.tenantId, table.deviceCode),
     unique('devices_credential_hash_unique').on(table.credentialHash),
     pgPolicy('devices_tenant_isolation', {
@@ -1285,7 +1285,7 @@ export const devices = pgTable(
       using: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
-    check('devices_version_check', sql`version >= 0`),
+    check('devices_version_check', sql`version >= 1`),
     check('devices_timestamps_check', sql`updated_at >= created_at`),
     check('devices_id_ulid_check', sql`id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'::text`),
     check('devices_tenant_id_ulid_check', sql`tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'::text`),
@@ -1323,7 +1323,7 @@ export const deviceBindings = pgTable(
     revokedAt: timestamp('revoked_at', { withTimezone: true, mode: 'string' }),
     revokedByUserId: text('revoked_by_user_id'),
     // You can use { mode: 'number' } if numbers are exceeding js number limitations
-    version: bigint({ mode: 'number' }).default(0).notNull(),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -1348,40 +1348,40 @@ export const deviceBindings = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.deviceId],
-      foreignColumns: [devices.id, devices.tenantId],
+      foreignColumns: [devices.tenantId, devices.id],
       name: 'device_bindings_device_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.warehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'device_bindings_warehouse_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.boundByUserId],
-      foreignColumns: [users.id, users.tenantId],
+      foreignColumns: [users.tenantId, users.id],
       name: 'device_bindings_bound_by_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.boundSubjectUserId],
-      foreignColumns: [users.id, users.tenantId],
+      foreignColumns: [users.tenantId, users.id],
       name: 'device_bindings_bound_subject_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.revokedByUserId],
-      foreignColumns: [users.id, users.tenantId],
+      foreignColumns: [users.tenantId, users.id],
       name: 'device_bindings_revoked_by_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('device_bindings_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('device_bindings_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('device_bindings_history_unique').on(
       table.tenantId,
       table.deviceId,
@@ -1408,7 +1408,7 @@ export const deviceBindings = pgTable(
       'device_bindings_revocation_check',
       sql`((status = 'REVOKED'::text) AND (revoked_at IS NOT NULL) AND (revoked_by_user_id IS NOT NULL)) OR (status = 'ACTIVE'::text)`
     ),
-    check('device_bindings_version_check', sql`version >= 0`),
+    check('device_bindings_version_check', sql`version >= 1`),
     check(
       'device_bindings_timestamps_check',
       sql`(updated_at >= created_at) AND (bound_at >= created_at)`
@@ -1462,26 +1462,26 @@ export const deviceTasks = pgTable(
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.warehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'device_tasks_warehouse_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.assignedDeviceId],
-      foreignColumns: [devices.id, devices.tenantId],
+      foreignColumns: [devices.tenantId, devices.id],
       name: 'device_tasks_device_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.assignedUserId],
-      foreignColumns: [users.id, users.tenantId],
+      foreignColumns: [users.tenantId, users.id],
       name: 'device_tasks_user_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('device_tasks_tenant_id_id_unique').on(table.id, table.tenantId),
+    unique('device_tasks_tenant_id_id_unique').on(table.tenantId, table.id),
     unique('device_tasks_tenant_number_unique').on(table.tenantId, table.taskNumber),
     pgPolicy('device_tasks_tenant_isolation', {
       as: 'permissive',

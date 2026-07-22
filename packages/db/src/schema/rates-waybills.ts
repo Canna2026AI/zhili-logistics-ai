@@ -1,4 +1,6 @@
 import {
+  type AnyPgColumn,
+  type ForeignKeyBuilder,
   bigint,
   check,
   customType,
@@ -16,6 +18,40 @@ import {
 import { sql } from 'drizzle-orm';
 
 import { customerAddresses, customers, tenants } from './identity';
+
+function acceptedQuoteForeignKeys(table: {
+  acceptedQuoteOptionId: AnyPgColumn;
+  acceptedQuoteVersionId: AnyPgColumn;
+  id: AnyPgColumn;
+  tenantId: AnyPgColumn;
+}): readonly [ForeignKeyBuilder, ForeignKeyBuilder] {
+  return [
+    foreignKey({
+      columns: [
+        table.tenantId,
+        table.acceptedQuoteOptionId,
+        table.acceptedQuoteVersionId,
+        table.id,
+      ],
+      foreignColumns: [
+        quoteOptions.tenantId,
+        quoteOptions.id,
+        quoteOptions.quoteVersionId,
+        quoteOptions.quoteId,
+      ],
+      name: 'quotes_accepted_option_fk',
+    })
+      .onUpdate('restrict')
+      .onDelete('restrict'),
+    foreignKey({
+      columns: [table.tenantId, table.acceptedQuoteVersionId, table.id],
+      foreignColumns: [quoteVersions.tenantId, quoteVersions.id, quoteVersions.quoteId],
+      name: 'quotes_accepted_version_fk',
+    })
+      .onUpdate('restrict')
+      .onDelete('restrict'),
+  ] as const;
+}
 
 const int8Range = customType<{ data: string; driverData: string }>({
   dataType: () => 'int8range',
@@ -53,7 +89,7 @@ export const shippingChannels = pgTable(
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('shipping_channels_tenant_id_unique').on(table.id, table.tenantId),
+    unique('shipping_channels_tenant_id_unique').on(table.tenantId, table.id),
     unique('shipping_channels_tenant_code_unique').on(table.tenantId, table.code),
     pgPolicy('shipping_channels_tenant_isolation', {
       as: 'permissive',
@@ -113,19 +149,19 @@ export const rateCards = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.channelId],
-      foreignColumns: [shippingChannels.id, shippingChannels.tenantId],
+      foreignColumns: [shippingChannels.tenantId, shippingChannels.id],
       name: 'rate_cards_channel_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.customerId],
-      foreignColumns: [customers.id, customers.tenantId],
+      foreignColumns: [customers.tenantId, customers.id],
       name: 'rate_cards_customer_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('rate_cards_tenant_id_unique').on(table.id, table.tenantId),
+    unique('rate_cards_tenant_id_unique').on(table.tenantId, table.id),
     unique('rate_cards_tenant_code_unique').on(table.tenantId, table.code),
     pgPolicy('rate_cards_tenant_isolation', {
       as: 'permissive',
@@ -184,12 +220,12 @@ export const rateCardVersions = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.rateCardId],
-      foreignColumns: [rateCards.id, rateCards.tenantId],
+      foreignColumns: [rateCards.tenantId, rateCards.id],
       name: 'rate_card_versions_card_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('rate_card_versions_tenant_id_unique').on(table.id, table.tenantId),
+    unique('rate_card_versions_tenant_id_unique').on(table.tenantId, table.id),
     unique('rate_card_versions_number_unique').on(
       table.tenantId,
       table.rateCardId,
@@ -275,19 +311,19 @@ export const rateRules = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.rateCardVersionId],
-      foreignColumns: [rateCardVersions.id, rateCardVersions.tenantId],
+      foreignColumns: [rateCardVersions.tenantId, rateCardVersions.id],
       name: 'rate_rules_version_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.channelId],
-      foreignColumns: [shippingChannels.id, shippingChannels.tenantId],
+      foreignColumns: [shippingChannels.tenantId, shippingChannels.id],
       name: 'rate_rules_channel_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('rate_rules_tenant_id_unique').on(table.id, table.tenantId),
+    unique('rate_rules_tenant_id_unique').on(table.tenantId, table.id),
     pgPolicy('rate_rules_tenant_isolation', {
       as: 'permissive',
       for: 'all',
@@ -360,6 +396,7 @@ export const quotes = pgTable(
       .notNull(),
   },
   (table) => [
+    ...acceptedQuoteForeignKeys(table),
     index('quotes_cursor_idx').using(
       'btree',
       table.tenantId.asc().nullsLast().op('text_ops'),
@@ -368,7 +405,7 @@ export const quotes = pgTable(
     ),
     foreignKey({
       columns: [table.tenantId, table.deliveryAddressId],
-      foreignColumns: [customerAddresses.id, customerAddresses.tenantId],
+      foreignColumns: [customerAddresses.tenantId, customerAddresses.id],
       name: 'quotes_delivery_address_fk',
     })
       .onUpdate('restrict')
@@ -382,19 +419,19 @@ export const quotes = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.customerId],
-      foreignColumns: [customers.id, customers.tenantId],
+      foreignColumns: [customers.tenantId, customers.id],
       name: 'quotes_customer_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.pickupAddressId],
-      foreignColumns: [customerAddresses.id, customerAddresses.tenantId],
+      foreignColumns: [customerAddresses.tenantId, customerAddresses.id],
       name: 'quotes_pickup_address_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('quotes_tenant_id_unique').on(table.id, table.tenantId),
+    unique('quotes_tenant_id_unique').on(table.tenantId, table.id),
     unique('quotes_tenant_number_unique').on(table.tenantId, table.quoteNumber),
     unique('quotes_tenant_idempotency_unique').on(table.tenantId, table.idempotencyKey),
     pgPolicy('quotes_tenant_isolation', {
@@ -452,13 +489,13 @@ export const quoteVersions = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.quoteId],
-      foreignColumns: [quotes.id, quotes.tenantId],
+      foreignColumns: [quotes.tenantId, quotes.id],
       name: 'quote_versions_quote_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('quote_versions_tenant_id_unique').on(table.id, table.tenantId),
-    unique('quote_versions_ownership_key_unique').on(table.id, table.tenantId, table.quoteId),
+    unique('quote_versions_tenant_id_unique').on(table.tenantId, table.id),
+    unique('quote_versions_ownership_key_unique').on(table.tenantId, table.id, table.quoteId),
     unique('quote_versions_quote_version_unique').on(
       table.tenantId,
       table.quoteId,
@@ -513,12 +550,12 @@ export const quoteParcels = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.quoteVersionId],
-      foreignColumns: [quoteVersions.id, quoteVersions.tenantId],
+      foreignColumns: [quoteVersions.tenantId, quoteVersions.id],
       name: 'quote_parcels_version_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('quote_parcels_tenant_id_unique').on(table.id, table.tenantId),
+    unique('quote_parcels_tenant_id_unique').on(table.tenantId, table.id),
     unique('quote_parcels_number_unique').on(
       table.tenantId,
       table.quoteVersionId,
@@ -577,35 +614,35 @@ export const quoteOptions = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.quoteVersionId, table.quoteId],
-      foreignColumns: [quoteVersions.id, quoteVersions.quoteId, quoteVersions.tenantId],
+      foreignColumns: [quoteVersions.tenantId, quoteVersions.id, quoteVersions.quoteId],
       name: 'quote_options_version_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.channelId],
-      foreignColumns: [shippingChannels.id, shippingChannels.tenantId],
+      foreignColumns: [shippingChannels.tenantId, shippingChannels.id],
       name: 'quote_options_channel_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('quote_options_tenant_id_unique').on(table.id, table.tenantId),
-    unique('quote_options_version_key_unique').on(table.id, table.tenantId, table.quoteVersionId),
+    unique('quote_options_tenant_id_unique').on(table.tenantId, table.id),
+    unique('quote_options_version_key_unique').on(table.tenantId, table.id, table.quoteVersionId),
     unique('quote_options_ownership_key_unique').on(
-      table.id,
       table.tenantId,
+      table.id,
       table.quoteVersionId,
       table.quoteId
     ),
     unique('quote_options_acceptance_key_unique').on(
-      table.id,
       table.tenantId,
+      table.id,
       table.quoteVersionId,
       table.quoteId,
       table.currency,
       table.totalAmountMinor
     ),
-    unique('quote_options_money_key_unique').on(table.id, table.tenantId, table.currency),
+    unique('quote_options_money_key_unique').on(table.tenantId, table.id, table.currency),
     unique('quote_options_code_unique').on(table.tenantId, table.quoteVersionId, table.optionCode),
     pgPolicy('quote_options_tenant_isolation', {
       as: 'permissive',
@@ -672,19 +709,19 @@ export const quoteChargeLines = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.quoteOptionId, table.currency],
-      foreignColumns: [quoteOptions.currency, quoteOptions.id, quoteOptions.tenantId],
+      foreignColumns: [quoteOptions.tenantId, quoteOptions.id, quoteOptions.currency],
       name: 'quote_charge_lines_option_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.rateRuleId],
-      foreignColumns: [rateRules.id, rateRules.tenantId],
+      foreignColumns: [rateRules.tenantId, rateRules.id],
       name: 'quote_charge_lines_rule_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('quote_charge_lines_tenant_id_unique').on(table.id, table.tenantId),
+    unique('quote_charge_lines_tenant_id_unique').on(table.tenantId, table.id),
     unique('quote_charge_lines_number_unique').on(
       table.tenantId,
       table.quoteOptionId,
@@ -744,12 +781,12 @@ export const quoteExplanations = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.quoteOptionId],
-      foreignColumns: [quoteOptions.id, quoteOptions.tenantId],
+      foreignColumns: [quoteOptions.tenantId, quoteOptions.id],
       name: 'quote_explanations_option_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('quote_explanations_tenant_id_unique').on(table.id, table.tenantId),
+    unique('quote_explanations_tenant_id_unique').on(table.tenantId, table.id),
     unique('quote_explanations_sequence_unique').on(
       table.tenantId,
       table.quoteOptionId,
@@ -812,14 +849,14 @@ export const quoteAcceptances = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.quoteId],
-      foreignColumns: [quotes.id, quotes.tenantId],
+      foreignColumns: [quotes.tenantId, quotes.id],
       name: 'quote_acceptances_quote_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
-      columns: [table.tenantId, table.quoteId, table.quoteVersionId],
-      foreignColumns: [quoteVersions.id, quoteVersions.quoteId, quoteVersions.tenantId],
+      columns: [table.tenantId, table.quoteVersionId, table.quoteId],
+      foreignColumns: [quoteVersions.tenantId, quoteVersions.id, quoteVersions.quoteId],
       name: 'quote_acceptances_version_ownership_fk',
     })
       .onUpdate('restrict')
@@ -827,25 +864,25 @@ export const quoteAcceptances = pgTable(
     foreignKey({
       columns: [
         table.tenantId,
-        table.quoteId,
-        table.quoteVersionId,
         table.quoteOptionId,
+        table.quoteVersionId,
+        table.quoteId,
         table.currency,
         table.totalAmountMinor,
       ],
       foreignColumns: [
-        quoteOptions.currency,
-        quoteOptions.id,
-        quoteOptions.quoteId,
-        quoteOptions.quoteVersionId,
         quoteOptions.tenantId,
+        quoteOptions.id,
+        quoteOptions.quoteVersionId,
+        quoteOptions.quoteId,
+        quoteOptions.currency,
         quoteOptions.totalAmountMinor,
       ],
       name: 'quote_acceptances_option_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('quote_acceptances_tenant_id_unique').on(table.id, table.tenantId),
+    unique('quote_acceptances_tenant_id_unique').on(table.tenantId, table.id),
     unique('quote_acceptances_quote_unique').on(table.tenantId, table.quoteId),
     pgPolicy('quote_acceptances_tenant_isolation', {
       as: 'permissive',
@@ -906,33 +943,33 @@ export const orders = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.customerId],
-      foreignColumns: [customers.id, customers.tenantId],
+      foreignColumns: [customers.tenantId, customers.id],
       name: 'orders_customer_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.pickupAddressId],
-      foreignColumns: [customerAddresses.id, customerAddresses.tenantId],
+      foreignColumns: [customerAddresses.tenantId, customerAddresses.id],
       name: 'orders_pickup_address_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deliveryAddressId],
-      foreignColumns: [customerAddresses.id, customerAddresses.tenantId],
+      foreignColumns: [customerAddresses.tenantId, customerAddresses.id],
       name: 'orders_delivery_address_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.quoteAcceptanceId],
-      foreignColumns: [quoteAcceptances.id, quoteAcceptances.tenantId],
+      foreignColumns: [quoteAcceptances.tenantId, quoteAcceptances.id],
       name: 'orders_quote_acceptance_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('orders_tenant_id_unique').on(table.id, table.tenantId),
+    unique('orders_tenant_id_unique').on(table.tenantId, table.id),
     unique('orders_tenant_number_unique').on(table.tenantId, table.orderNumber),
     unique('orders_tenant_idempotency_unique').on(table.tenantId, table.idempotencyKey),
     pgPolicy('orders_tenant_isolation', {
@@ -996,7 +1033,7 @@ export const orderBatchJobs = pgTable(
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('order_batch_jobs_tenant_id_unique').on(table.id, table.tenantId),
+    unique('order_batch_jobs_tenant_id_unique').on(table.tenantId, table.id),
     unique('order_batch_jobs_number_unique').on(table.tenantId, table.batchNumber),
     unique('order_batch_jobs_idempotency_unique').on(table.tenantId, table.idempotencyKey),
     pgPolicy('order_batch_jobs_tenant_isolation', {
@@ -1068,26 +1105,26 @@ export const orderBatchItems = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.batchJobId],
-      foreignColumns: [orderBatchJobs.id, orderBatchJobs.tenantId],
+      foreignColumns: [orderBatchJobs.tenantId, orderBatchJobs.id],
       name: 'order_batch_items_job_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.sourceOrderId],
-      foreignColumns: [orders.id, orders.tenantId],
+      foreignColumns: [orders.tenantId, orders.id],
       name: 'order_batch_items_source_order_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.resultOrderId],
-      foreignColumns: [orders.id, orders.tenantId],
+      foreignColumns: [orders.tenantId, orders.id],
       name: 'order_batch_items_result_order_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('order_batch_items_tenant_id_unique').on(table.id, table.tenantId),
+    unique('order_batch_items_tenant_id_unique').on(table.tenantId, table.id),
     unique('order_batch_items_number_unique').on(
       table.tenantId,
       table.batchJobId,
@@ -1155,12 +1192,12 @@ export const waybills = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.orderId],
-      foreignColumns: [orders.id, orders.tenantId],
+      foreignColumns: [orders.tenantId, orders.id],
       name: 'waybills_order_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('waybills_tenant_id_unique').on(table.id, table.tenantId),
+    unique('waybills_tenant_id_unique').on(table.tenantId, table.id),
     unique('waybills_tenant_number_unique').on(table.tenantId, table.waybillNumber),
     unique('waybills_tenant_tracking_unique').on(table.tenantId, table.trackingNumber),
     unique('waybills_tenant_idempotency_unique').on(table.tenantId, table.idempotencyKey),
@@ -1242,13 +1279,13 @@ export const waybillPackages = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'waybill_packages_waybill_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('waybill_packages_tenant_id_unique').on(table.id, table.tenantId),
-    unique('waybill_packages_warehouse_pair_unique').on(table.id, table.tenantId, table.waybillId),
+    unique('waybill_packages_tenant_id_unique').on(table.tenantId, table.id),
+    unique('waybill_packages_warehouse_pair_unique').on(table.tenantId, table.id, table.waybillId),
     unique('waybill_packages_number_unique').on(
       table.tenantId,
       table.waybillId,
@@ -1317,12 +1354,12 @@ export const customsDeclarations = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'customs_declarations_waybill_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('customs_declarations_tenant_id_unique').on(table.id, table.tenantId),
+    unique('customs_declarations_tenant_id_unique').on(table.tenantId, table.id),
     unique('customs_declarations_number_unique').on(table.tenantId, table.declarationNumber),
     pgPolicy('customs_declarations_tenant_isolation', {
       as: 'permissive',
@@ -1386,12 +1423,12 @@ export const declarationItems = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.declarationId],
-      foreignColumns: [customsDeclarations.id, customsDeclarations.tenantId],
+      foreignColumns: [customsDeclarations.tenantId, customsDeclarations.id],
       name: 'declaration_items_declaration_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('declaration_items_tenant_id_unique').on(table.id, table.tenantId),
+    unique('declaration_items_tenant_id_unique').on(table.tenantId, table.id),
     unique('declaration_items_line_unique').on(
       table.tenantId,
       table.declarationId,
@@ -1462,26 +1499,26 @@ export const attachments = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.orderId],
-      foreignColumns: [orders.id, orders.tenantId],
+      foreignColumns: [orders.tenantId, orders.id],
       name: 'attachments_order_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'attachments_waybill_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.importJobId],
-      foreignColumns: [importJobs.id, importJobs.tenantId],
+      foreignColumns: [importJobs.tenantId, importJobs.id],
       name: 'attachments_import_job_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
-    unique('attachments_tenant_id_unique').on(table.id, table.tenantId),
+    unique('attachments_tenant_id_unique').on(table.tenantId, table.id),
     unique('attachments_object_key_unique').on(table.tenantId, table.objectKey),
     pgPolicy('attachments_tenant_isolation', {
       as: 'permissive',
@@ -1559,12 +1596,12 @@ export const importJobs = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.rollbackOfJobId],
-      foreignColumns: [table.id, table.tenantId],
+      foreignColumns: [table.tenantId, table.id],
       name: 'import_jobs_rollback_job_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('import_jobs_tenant_id_unique').on(table.id, table.tenantId),
+    unique('import_jobs_tenant_id_unique').on(table.tenantId, table.id),
     unique('import_jobs_number_unique').on(table.tenantId, table.importNumber),
     unique('import_jobs_idempotency_unique').on(table.tenantId, table.idempotencyKey),
     pgPolicy('import_jobs_tenant_isolation', {
@@ -1653,26 +1690,26 @@ export const importRows = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.importJobId],
-      foreignColumns: [importJobs.id, importJobs.tenantId],
+      foreignColumns: [importJobs.tenantId, importJobs.id],
       name: 'import_rows_job_fk',
     })
       .onUpdate('restrict')
       .onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.createdOrderId],
-      foreignColumns: [orders.id, orders.tenantId],
+      foreignColumns: [orders.tenantId, orders.id],
       name: 'import_rows_order_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.createdWaybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'import_rows_waybill_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('import_rows_tenant_id_unique').on(table.id, table.tenantId),
+    unique('import_rows_tenant_id_unique').on(table.tenantId, table.id),
     unique('import_rows_number_unique').on(table.tenantId, table.importJobId, table.rowNumber),
     unique('import_rows_fingerprint_unique').on(
       table.tenantId,

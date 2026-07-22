@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { drizzle } from 'drizzle-orm/postgres-js';
@@ -7,6 +8,8 @@ import postgres, { type Sql } from 'postgres';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const packageRoot = resolve(import.meta.dirname, '..');
+const snapshotPath = resolve(packageRoot, 'migrations/meta/0001_snapshot.json');
+const downMigrationPath = resolve(packageRoot, 'migrations/down/0001_b1_domains.down.sql');
 const expectedDomainTables = [
   'attachments',
   'bills_of_lading',
@@ -81,6 +84,53 @@ const expectedDomainTables = [
   'waybill_packages',
   'waybills',
 ] as const;
+const versionedAggregateTables = [
+  'attachments',
+  'bills_of_lading',
+  'customer_addresses',
+  'customers',
+  'customs_declarations',
+  'delivery_tasks',
+  'device_bindings',
+  'device_sync_conflicts',
+  'device_tasks',
+  'devices',
+  'fba_deliveries',
+  'impersonation_sessions',
+  'import_jobs',
+  'inventory_balances',
+  'linehaul_bookings',
+  'load_units',
+  'oauth_identities',
+  'oauth_states',
+  'order_batch_jobs',
+  'orders',
+  'organizations',
+  'partners',
+  'permission_simulations',
+  'print_jobs',
+  'quotes',
+  'rate_cards',
+  'rate_rules',
+  'reference_data_sets',
+  'refresh_token_families',
+  'refresh_tokens',
+  'role_grant_customer_scopes',
+  'role_grant_field_policies',
+  'role_grant_organization_scopes',
+  'role_grant_warehouse_scopes',
+  'role_grants',
+  'roles',
+  'sessions',
+  'shipping_channels',
+  'tenants',
+  'user_role_assignments',
+  'users',
+  'warehouse_receipts',
+  'warehouses',
+  'waybill_packages',
+  'waybills',
+] as const;
 
 const tenantA = '01J1000000000000000000000A';
 const tenantB = '01J1000000000000000000000B';
@@ -95,7 +145,20 @@ const warehouseA2 = '01J1000000000000000000041A';
 const actorA = '01J1000000000000000000050A';
 const subjectA = '01J1000000000000000000051A';
 const subjectB = '01J1000000000000000000051B';
+const actorB = '01J1000000000000000000052B';
 const deviceA = '01J1000000000000000000060A';
+const controlRoleA = '01J1000000000000000000070A';
+const controlAssignmentA = '01J1000000000000000000071A';
+const controlTenantC = '01J1000000000000000000000C';
+const deniedTenantD = '01J1000000000000000000000D';
+const realPasswordHash =
+  '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1yZWFsLWE$MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY';
+const dummyCredential = {
+  tenant_id: '01J0000000000000000000000A',
+  user_id: '01J0000000000000000000000B',
+  password_hash:
+    '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1kdW1teQ$YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk',
+} as const;
 
 let container: StartedPostgreSqlContainer;
 let admin: Sql;
@@ -144,6 +207,38 @@ async function schemaFingerprint(): Promise<string> {
           trigger.action_orientation, trigger.action_statement)
       FROM information_schema.triggers trigger
       WHERE trigger.trigger_schema = 'public'
+      UNION ALL
+      SELECT 'function', n.nspname, p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+        concat_ws('|', p.prosecdef, p.proconfig::text, p.proacl::text, pg_get_functiondef(p.oid))
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+      UNION ALL
+      SELECT 'role', 'cluster', r.rolname,
+        concat_ws('|', r.rolsuper, r.rolinherit, r.rolcreaterole, r.rolcreatedb,
+          r.rolcanlogin, r.rolreplication, r.rolbypassrls)
+      FROM pg_roles r
+      WHERE r.rolname IN ('zhili_app', 'zhili_worker', 'zhili_auth', 'zhili_control_plane')
+      UNION ALL
+      SELECT 'role_membership', member_role.rolname, granted_role.rolname,
+        concat_ws('|', membership.admin_option, grantor.rolname)
+      FROM pg_auth_members membership
+      JOIN pg_roles granted_role ON granted_role.oid = membership.roleid
+      JOIN pg_roles member_role ON member_role.oid = membership.member
+      JOIN pg_roles grantor ON grantor.oid = membership.grantor
+      WHERE granted_role.rolname LIKE 'zhili_%' OR member_role.rolname LIKE 'zhili_%'
+      UNION ALL
+      SELECT 'table_security', n.nspname, c.relname,
+        concat_ws('|', c.relrowsecurity, c.relforcerowsecurity, c.relacl::text)
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+      UNION ALL
+      SELECT 'extension', 'cluster', e.extname,
+        concat_ws('|', e.extversion, owner_role.rolname, n.nspname)
+      FROM pg_extension e
+      JOIN pg_roles owner_role ON owner_role.oid = e.extowner
+      JOIN pg_namespace n ON n.oid = e.extnamespace
     )
     SELECT kind, parent, name, definition
     FROM schema_objects
@@ -151,6 +246,129 @@ async function schemaFingerprint(): Promise<string> {
   `;
 
   return createHash('sha256').update(JSON.stringify(rows)).digest('hex');
+}
+
+interface ConstraintMapping {
+  readonly columnsFrom: readonly string[];
+  readonly columnsTo?: readonly string[];
+  readonly name: string;
+  readonly tableFrom: string;
+  readonly tableTo?: string;
+}
+
+async function liveConstraintMappings(): Promise<{
+  readonly foreignKeys: readonly ConstraintMapping[];
+  readonly uniqueConstraints: readonly ConstraintMapping[];
+}> {
+  const foreignKeys = await admin<ConstraintMapping[]>`
+    SELECT
+      constraint_row.conname AS name,
+      child.relname AS "tableFrom",
+      parent.relname AS "tableTo",
+      ARRAY(
+        SELECT child_attribute.attname
+        FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, position)
+        JOIN pg_attribute child_attribute
+          ON child_attribute.attrelid = constraint_row.conrelid
+         AND child_attribute.attnum = key_column.attnum
+        ORDER BY key_column.position
+      ) AS "columnsFrom",
+      ARRAY(
+        SELECT parent_attribute.attname
+        FROM unnest(constraint_row.confkey) WITH ORDINALITY AS key_column(attnum, position)
+        JOIN pg_attribute parent_attribute
+          ON parent_attribute.attrelid = constraint_row.confrelid
+         AND parent_attribute.attnum = key_column.attnum
+        ORDER BY key_column.position
+      ) AS "columnsTo"
+    FROM pg_constraint constraint_row
+    JOIN pg_class child ON child.oid = constraint_row.conrelid
+    JOIN pg_namespace child_namespace ON child_namespace.oid = child.relnamespace
+    JOIN pg_class parent ON parent.oid = constraint_row.confrelid
+    WHERE constraint_row.contype = 'f'
+      AND child_namespace.nspname = 'public'
+      AND child.relname = ANY(${expectedDomainTables as unknown as string[]})
+    ORDER BY child.relname, constraint_row.conname
+  `;
+  const uniqueConstraints = await admin<ConstraintMapping[]>`
+    SELECT
+      constraint_row.conname AS name,
+      child.relname AS "tableFrom",
+      ARRAY(
+        SELECT child_attribute.attname
+        FROM unnest(constraint_row.conkey) WITH ORDINALITY AS key_column(attnum, position)
+        JOIN pg_attribute child_attribute
+          ON child_attribute.attrelid = constraint_row.conrelid
+         AND child_attribute.attnum = key_column.attnum
+        ORDER BY key_column.position
+      ) AS "columnsFrom"
+    FROM pg_constraint constraint_row
+    JOIN pg_class child ON child.oid = constraint_row.conrelid
+    JOIN pg_namespace child_namespace ON child_namespace.oid = child.relnamespace
+    WHERE constraint_row.contype = 'u'
+      AND child_namespace.nspname = 'public'
+      AND child.relname = ANY(${expectedDomainTables as unknown as string[]})
+    ORDER BY child.relname, constraint_row.conname
+  `;
+  return { foreignKeys, uniqueConstraints };
+}
+
+async function snapshotConstraintMappings(): Promise<{
+  readonly foreignKeys: readonly ConstraintMapping[];
+  readonly uniqueConstraints: readonly ConstraintMapping[];
+}> {
+  const snapshot = JSON.parse(await readFile(snapshotPath, 'utf8')) as {
+    readonly tables: Readonly<
+      Record<
+        string,
+        {
+          readonly foreignKeys: Readonly<
+            Record<
+              string,
+              {
+                readonly columnsFrom: readonly string[];
+                readonly columnsTo: readonly string[];
+                readonly name: string;
+                readonly tableFrom: string;
+                readonly tableTo: string;
+              }
+            >
+          >;
+          readonly name: string;
+          readonly uniqueConstraints: Readonly<
+            Record<string, { readonly columns: readonly string[]; readonly name: string }>
+          >;
+        }
+      >
+    >;
+  };
+  const domainTableNames = new Set<string>(expectedDomainTables);
+  const tables = Object.values(snapshot.tables).filter(({ name }) => domainTableNames.has(name));
+  return {
+    foreignKeys: tables
+      .flatMap(({ foreignKeys }) => Object.values(foreignKeys))
+      .map(({ columnsFrom, columnsTo, name, tableFrom, tableTo }) => ({
+        columnsFrom,
+        columnsTo,
+        name,
+        tableFrom,
+        tableTo,
+      }))
+      .sort((left, right) =>
+        `${left.tableFrom}.${left.name}`.localeCompare(`${right.tableFrom}.${right.name}`)
+      ),
+    uniqueConstraints: tables
+      .flatMap(({ name: tableFrom, uniqueConstraints }) =>
+        Object.values(uniqueConstraints).map(({ columns, name }) => ({
+          columnsFrom: columns,
+          name,
+          tableFrom,
+        }))
+      )
+      .sort((left, right) =>
+        `${left.tableFrom}.${left.name}`.localeCompare(`${right.tableFrom}.${right.name}`)
+      ),
+  };
 }
 
 async function seedCrossDomainParents(): Promise<void> {
@@ -174,7 +392,7 @@ async function seedCrossDomainParents(): Promise<void> {
       id, tenant_id, organization_id, login_name_normalized, display_name,
       password_hash, status
     ) VALUES
-      (${actorA}, ${tenantA}, ${organizationA}, 'actor.a', 'Actor A', '$argon2id$test-a', 'ACTIVE'),
+      (${actorA}, ${tenantA}, ${organizationA}, 'actor.a', 'Actor A', ${realPasswordHash}, 'ACTIVE'),
       (${subjectA}, ${tenantA}, ${organizationA}, 'subject.a', 'Subject A', NULL, 'ACTIVE'),
       (${subjectB}, ${tenantB}, ${organizationB}, 'subject.b', 'Subject B', NULL, 'ACTIVE')
   `;
@@ -212,6 +430,14 @@ afterAll(async () => {
 });
 
 describe('B1 ordered domain migration', () => {
+  it('keeps every live compound FK and candidate-key mapping identical to Drizzle snapshot', async () => {
+    const live = await liveConstraintMappings();
+    const snapshot = await snapshotConstraintMappings();
+
+    expect(snapshot.foreignKeys).toEqual(live.foreignKeys);
+    expect(snapshot.uniqueConstraints).toEqual(live.uniqueConstraints);
+  });
+
   it('creates the reviewed identity, rates/waybills and warehouse/linehaul schema', async () => {
     const tables = await admin<{ table_name: string }[]>`
       SELECT table_name
@@ -282,6 +508,32 @@ describe('B1 ordered domain migration', () => {
 
     firstFingerprint = await schemaFingerprint();
     expect(firstFingerprint).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('starts every API-visible aggregate at version one and exposes a conflict CAS version', async () => {
+    const columns = await admin<{ column_default: string | null; table_name: string }[]>`
+      SELECT table_name, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND column_name = 'version'
+        AND table_name = ANY(${versionedAggregateTables as unknown as string[]})
+      ORDER BY table_name
+    `;
+    expect(columns.map(({ table_name }) => table_name)).toEqual([...versionedAggregateTables]);
+    expect(columns.every(({ column_default }) => column_default === '1')).toBe(true);
+
+    const invalidChecks = await admin<{ table_name: string }[]>`
+      SELECT child.relname AS table_name
+      FROM pg_constraint constraint_row
+      JOIN pg_class child ON child.oid = constraint_row.conrelid
+      JOIN pg_namespace namespace_row ON namespace_row.oid = child.relnamespace
+      WHERE namespace_row.nspname = 'public'
+        AND child.relname = ANY(${versionedAggregateTables as unknown as string[]})
+        AND constraint_row.conname = child.relname || '_version_check'
+        AND pg_get_constraintdef(constraint_row.oid, true) NOT LIKE '%version >= 1%'
+      ORDER BY child.relname
+    `;
+    expect(invalidChecks).toEqual([]);
   });
 
   it('enforces tenant ownership, measurements, state, quote immutability and load-unit locks', async () => {
@@ -638,6 +890,24 @@ describe('B1 ordered domain migration', () => {
     ).rejects.toMatchObject({ code: '55000' });
 
     await admin`
+      INSERT INTO reference_data_versions (
+        id, tenant_id, reference_data_set_id, version_number, state, created_by_user_id
+      ) VALUES (
+        '01J1000000000000000001051A', ${tenantA}, '01J1000000000000000001040A',
+        2, 'DRAFT', ${actorA}
+      )
+    `;
+    await expect(
+      admin`
+        UPDATE reference_data_items
+        SET reference_data_version_id = '01J1000000000000000001051A',
+            item_key = 'CN-MOVED',
+            item_payload = '{"name":"moved and tampered"}'::jsonb
+        WHERE id = '01J1000000000000000001060A'
+      `
+    ).rejects.toMatchObject({ code: '55000' });
+
+    await admin`
       INSERT INTO customer_credit_policies (
         id, tenant_id, customer_id, policy_version, currency,
         credit_limit_minor, payment_cycle, hold_policy, created_by_user_id
@@ -668,9 +938,364 @@ describe('B1 ordered domain migration', () => {
     `;
   });
 
-  it('exposes pre-tenant password lookup only through a fixed-search-path auth capability', async () => {
+  it('enforces exact conflict resolution CAS and rejects stale concurrent resolution', async () => {
+    await admin`
+      INSERT INTO device_sync_sessions (
+        id, tenant_id, device_id, warehouse_id, binding_version, expires_at
+      ) VALUES (
+        '01J1000000000000000001200A', ${tenantA}, ${deviceA}, ${warehouseA}, 1,
+        now() + interval '1 hour'
+      )
+    `;
+    await admin.begin(async (transaction) => {
+      await transaction`
+        INSERT INTO device_event_receipts (
+          id, tenant_id, session_id, device_id, warehouse_id, event_id,
+          local_sequence, event_type, aggregate_type, aggregate_id,
+          expected_version, disposition, server_version, conflict_id, payload, occurred_at
+        ) VALUES (
+          '01J1000000000000000001210A', ${tenantA}, '01J1000000000000000001200A',
+          ${deviceA}, ${warehouseA}, 'event-conflict-cas', 1, 'UPDATE', 'WAYBILL',
+          '01J1000000000000000001110A', 1, 'CONFLICT', 2,
+          '01J1000000000000000001220A', '{}'::jsonb, now()
+        )
+      `;
+      await transaction`
+        INSERT INTO device_sync_conflicts (
+          id, tenant_id, device_event_receipt_id, aggregate_type, aggregate_id,
+          expected_version, server_version, server_snapshot, client_snapshot
+        ) VALUES (
+          '01J1000000000000000001220A', ${tenantA},
+          '01J1000000000000000001210A', 'WAYBILL',
+          '01J1000000000000000001110A', 1, 2, '{}'::jsonb, '{}'::jsonb
+        )
+      `;
+    });
+
+    const [openConflict] = await admin<{ status: string; version: string }[]>`
+      SELECT status, version::text
+      FROM device_sync_conflicts
+      WHERE id = '01J1000000000000000001220A'
+    `;
+    expect(openConflict).toEqual({ status: 'OPEN', version: '1' });
+
+    await expect(
+      admin`
+        UPDATE device_sync_conflicts
+        SET status = 'RESOLVED', resolution = 'KEEP_SERVER', resolution_payload = '{}'::jsonb,
+            resolved_at = now(), version = 3
+        WHERE id = '01J1000000000000000001220A'
+      `
+    ).rejects.toMatchObject({ code: '40001' });
+
+    const [resolved] = await admin<{ status: string; version: string }[]>`
+      UPDATE device_sync_conflicts
+      SET status = 'RESOLVED', resolution = 'KEEP_SERVER', resolution_payload = '{}'::jsonb,
+          resolved_at = now(), version = 2
+      WHERE id = '01J1000000000000000001220A' AND version = 1
+      RETURNING status, version::text
+    `;
+    expect(resolved).toEqual({ status: 'RESOLVED', version: '2' });
+
+    await expect(
+      admin`
+        UPDATE device_sync_conflicts
+        SET resolution = 'SUBMIT_MANUAL', resolution_payload = '{"stale":true}'::jsonb,
+            version = 3
+        WHERE id = '01J1000000000000000001220A'
+      `
+    ).rejects.toMatchObject({ code: '55000' });
+  });
+
+  it('exposes atomic least-privilege control-plane commands with DB-backed authorization', async () => {
+    const [seedState] = await admin<{ seeded: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM tenants WHERE id = ${tenantA}) AS seeded
+    `;
+    if (!seedState?.seeded) await seedCrossDomainParents();
+
+    await admin`
+      INSERT INTO permission_actions (action_code, resource_type, description) VALUES
+        ('platform.tenant.create', 'tenant', 'Create a tenant'),
+        ('platform.tenant.status', 'tenant', 'Change tenant status'),
+        ('platform.entitlement.manage', 'entitlement', 'Manage tenant entitlements')
+      ON CONFLICT (action_code) DO NOTHING
+    `;
+    await admin`
+      INSERT INTO roles (id, tenant_id, role_code, display_name)
+      VALUES (${controlRoleA}, ${tenantA}, 'PLATFORM_CONTROL', 'Platform control')
+    `;
+    await admin`
+      INSERT INTO user_role_assignments (id, tenant_id, user_id, role_id, assigned_by_user_id)
+      VALUES (${controlAssignmentA}, ${tenantA}, ${actorA}, ${controlRoleA}, ${actorA})
+    `;
+    await admin`
+      INSERT INTO role_grants (
+        id, tenant_id, role_id, action_code, effect, data_scope_kind
+      ) VALUES
+        ('01J1000000000000000000072A', ${tenantA}, ${controlRoleA},
+          'platform.tenant.create', 'ALLOW', 'TENANT'),
+        ('01J1000000000000000000073A', ${tenantA}, ${controlRoleA},
+          'platform.tenant.status', 'ALLOW', 'TENANT'),
+        ('01J1000000000000000000074A', ${tenantA}, ${controlRoleA},
+          'platform.entitlement.manage', 'ALLOW', 'TENANT')
+    `;
+
+    const functions = await admin<
+      {
+        config: string[] | null;
+        execute_allowed: boolean;
+        proname: string;
+        security_definer: boolean;
+      }[]
+    >`
+      SELECT
+        p.proname,
+        p.prosecdef AS security_definer,
+        p.proconfig AS config,
+        has_function_privilege('zhili_control_plane', p.oid, 'EXECUTE') AS execute_allowed
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname IN (
+          'control_plane_create_tenant',
+          'control_plane_set_tenant_status',
+          'control_plane_set_entitlement'
+        )
+      ORDER BY p.proname
+    `;
+    expect(functions).toEqual([
+      {
+        proname: 'control_plane_create_tenant',
+        security_definer: true,
+        config: ['search_path=pg_catalog, public'],
+        execute_allowed: true,
+      },
+      {
+        proname: 'control_plane_set_entitlement',
+        security_definer: true,
+        config: ['search_path=pg_catalog, public'],
+        execute_allowed: true,
+      },
+      {
+        proname: 'control_plane_set_tenant_status',
+        security_definer: true,
+        config: ['search_path=pg_catalog, public'],
+        execute_allowed: true,
+      },
+    ]);
+
     const [boundary] = await admin<
-      { config: string[] | null; execute_allowed: boolean; security_definer: boolean }[]
+      {
+        can_insert_audit: boolean;
+        can_insert_idempotency: boolean;
+        can_insert_outbox: boolean;
+        can_insert_tenants: boolean;
+        can_select_users: boolean;
+        can_update_tenants: boolean;
+        rolbypassrls: boolean;
+        rolcreaterole: boolean;
+        rolsuper: boolean;
+      }[]
+    >`
+      SELECT
+        role_row.rolsuper,
+        role_row.rolcreaterole,
+        role_row.rolbypassrls,
+        has_table_privilege('zhili_control_plane', 'public.tenants', 'INSERT') AS can_insert_tenants,
+        has_table_privilege('zhili_control_plane', 'public.tenants', 'UPDATE') AS can_update_tenants,
+        has_table_privilege('zhili_control_plane', 'public.users', 'SELECT') AS can_select_users,
+        has_table_privilege('zhili_control_plane', 'public.audit_events', 'INSERT') AS can_insert_audit,
+        has_table_privilege('zhili_control_plane', 'public.outbox_events', 'INSERT') AS can_insert_outbox,
+        has_table_privilege(
+          'zhili_control_plane', 'public.idempotency_records', 'INSERT'
+        ) AS can_insert_idempotency
+      FROM pg_roles role_row
+      WHERE role_row.rolname = 'zhili_control_plane'
+    `;
+    expect(boundary).toEqual({
+      rolsuper: false,
+      rolcreaterole: false,
+      rolbypassrls: false,
+      can_insert_tenants: false,
+      can_update_tenants: false,
+      can_select_users: false,
+      can_insert_audit: false,
+      can_insert_outbox: false,
+      can_insert_idempotency: false,
+    });
+
+    await admin.unsafe(
+      "ALTER ROLE zhili_control_plane WITH LOGIN PASSWORD 'integration-control-only'"
+    );
+    const controlUrl = new URL(container.getConnectionUri());
+    controlUrl.username = 'zhili_control_plane';
+    controlUrl.password = 'integration-control-only';
+    const control = postgres(controlUrl.toString(), { max: 1 });
+    try {
+      await expect(control`SELECT id FROM tenants LIMIT 1`).rejects.toMatchObject({
+        code: '42501',
+      });
+
+      const [created] = await control<
+        { replayed: boolean; status: string; tenant_id: string; version: string }[]
+      >`
+        SELECT tenant_id, status, version::text, replayed
+        FROM control_plane_create_tenant(
+          ${tenantA}, ${actorA}, ${controlTenantC}, 'tenant-c', 'Tenant C',
+          '01J1000000000000000001300A', 'control-create-c', ${'1'.repeat(64)}
+        )
+      `;
+      expect(created).toEqual({
+        tenant_id: controlTenantC,
+        status: 'ACTIVE',
+        version: '1',
+        replayed: false,
+      });
+
+      const [replayedCreate] = await control<
+        { replayed: boolean; status: string; tenant_id: string; version: string }[]
+      >`
+        SELECT tenant_id, status, version::text, replayed
+        FROM control_plane_create_tenant(
+          ${tenantA}, ${actorA}, ${controlTenantC}, 'tenant-c', 'Tenant C',
+          '01J1000000000000000001300A', 'control-create-c', ${'1'.repeat(64)}
+        )
+      `;
+      expect(replayedCreate).toEqual({ ...created, replayed: true });
+
+      const [afterReplay] = await admin<
+        {
+          audit_count: number;
+          idempotency_count: number;
+          outbox_count: number;
+          tenant_count: number;
+        }[]
+      >`
+        SELECT
+          (SELECT count(*)::int FROM tenants WHERE id = ${controlTenantC}) AS tenant_count,
+          (SELECT count(*)::int FROM idempotency_records
+            WHERE tenant_id = ${tenantA} AND idempotency_key = 'control-create-c') AS idempotency_count,
+          (SELECT count(*)::int FROM audit_events
+            WHERE id = '01J1000000000000000001300A') AS audit_count,
+          (SELECT count(*)::int FROM outbox_events
+            WHERE id = '01J1000000000000000001300A') AS outbox_count
+      `;
+      expect(afterReplay).toEqual({
+        tenant_count: 1,
+        idempotency_count: 1,
+        audit_count: 1,
+        outbox_count: 1,
+      });
+
+      const [suspended] = await control<
+        { replayed: boolean; status: string; tenant_id: string; version: string }[]
+      >`
+        SELECT tenant_id, status, version::text, replayed
+        FROM control_plane_set_tenant_status(
+          ${tenantA}, ${actorA}, ${controlTenantC}, 1, 'SUSPENDED',
+          '01J1000000000000000001310A', 'control-suspend-c', ${'2'.repeat(64)}
+        )
+      `;
+      expect(suspended).toEqual({
+        tenant_id: controlTenantC,
+        status: 'SUSPENDED',
+        version: '2',
+        replayed: false,
+      });
+      await expect(
+        control`
+          SELECT * FROM control_plane_set_tenant_status(
+            ${tenantA}, ${actorA}, ${controlTenantC}, 1, 'ACTIVE',
+            '01J1000000000000000001320A', 'control-stale-c', ${'3'.repeat(64)}
+          )
+        `
+      ).rejects.toMatchObject({ code: '40001' });
+
+      const [entitlement] = await control<
+        {
+          entitlement_version: number;
+          module_code: string;
+          replayed: boolean;
+          tenant_id: string;
+          tenant_version: string;
+        }[]
+      >`
+        SELECT tenant_id, module_code, entitlement_version, tenant_version::text, replayed
+        FROM control_plane_set_entitlement(
+          ${tenantA}, ${actorA}, ${tenantB}, ${subjectB},
+          '01J1000000000000000001330B', 1, 'CONTROL_TEST', 500,
+          now(), now() + interval '30 days', 1,
+          '01J1000000000000000001340A', 'control-entitlement-b', ${'4'.repeat(64)}
+        )
+      `;
+      expect(entitlement).toEqual({
+        tenant_id: tenantB,
+        module_code: 'CONTROL_TEST',
+        entitlement_version: 1,
+        tenant_version: '2',
+        replayed: false,
+      });
+
+      await expect(
+        control`
+          SELECT * FROM control_plane_create_tenant(
+            ${tenantA}, ${subjectA}, ${deniedTenantD}, 'tenant-d', 'Tenant D',
+            '01J1000000000000000001350A', 'control-denied-d', ${'5'.repeat(64)}
+          )
+        `
+      ).rejects.toMatchObject({ code: '42501' });
+
+      const [negative] = await admin<
+        {
+          audit_count: number;
+          idempotency_count: number;
+          outbox_count: number;
+          tenant_count: number;
+        }[]
+      >`
+        SELECT
+          (SELECT count(*)::int FROM tenants WHERE id = ${deniedTenantD}) AS tenant_count,
+          (SELECT count(*)::int FROM idempotency_records
+            WHERE tenant_id = ${tenantA} AND idempotency_key IN ('control-stale-c', 'control-denied-d'))
+            AS idempotency_count,
+          (SELECT count(*)::int FROM audit_events
+            WHERE id IN ('01J1000000000000000001320A', '01J1000000000000000001350A')) AS audit_count,
+          (SELECT count(*)::int FROM outbox_events
+            WHERE id IN ('01J1000000000000000001320A', '01J1000000000000000001350A')) AS outbox_count
+      `;
+      expect(negative).toEqual({
+        tenant_count: 0,
+        idempotency_count: 0,
+        audit_count: 0,
+        outbox_count: 0,
+      });
+    } finally {
+      await control.end();
+    }
+  });
+
+  it('returns one indistinguishable credential row for every pre-tenant auth miss', async () => {
+    const [seedState] = await admin<{ seeded: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM tenants WHERE id = ${tenantA}) AS seeded
+    `;
+    if (!seedState?.seeded) await seedCrossDomainParents();
+
+    await admin`
+      INSERT INTO users (
+        id, tenant_id, organization_id, login_name_normalized, display_name,
+        password_hash, status
+      ) VALUES (
+        ${actorB}, ${tenantB}, ${organizationB}, 'actor.a', 'Actor B', ${realPasswordHash}, 'ACTIVE'
+      )
+    `;
+
+    const [boundary] = await admin<
+      {
+        config: string[] | null;
+        execute_allowed: boolean;
+        public_execute_allowed: boolean;
+        security_definer: boolean;
+      }[]
     >`
       SELECT
         p.prosecdef AS security_definer,
@@ -679,7 +1304,12 @@ describe('B1 ordered domain migration', () => {
           'zhili_auth',
           'public.auth_lookup_password(text,text)',
           'EXECUTE'
-        ) AS execute_allowed
+        ) AS execute_allowed,
+        EXISTS (
+          SELECT 1
+          FROM aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) function_acl
+          WHERE function_acl.grantee = 0 AND function_acl.privilege_type = 'EXECUTE'
+        ) AS public_execute_allowed
       FROM pg_proc p
       JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'public' AND p.proname = 'auth_lookup_password'
@@ -688,6 +1318,7 @@ describe('B1 ordered domain migration', () => {
       security_definer: true,
       config: ['search_path=pg_catalog, public'],
       execute_allowed: true,
+      public_execute_allowed: false,
     });
 
     const [privilege] = await admin<{ can_select_users: boolean }[]>`
@@ -701,13 +1332,39 @@ describe('B1 ordered domain migration', () => {
     authUrl.password = 'integration-auth-only';
     const auth = postgres(authUrl.toString(), { max: 1 });
     try {
-      const [credential] = await auth<
-        { password_hash: string; tenant_id: string; user_id: string }[]
-      >`SELECT tenant_id, user_id, password_hash FROM auth_lookup_password('actor.a', 'tenant-a')`;
+      const lookup = async (account: string, tenantHint: string | null) =>
+        auth<
+          { password_hash: string; tenant_id: string; user_id: string }[]
+        >`SELECT tenant_id, user_id, password_hash FROM auth_lookup_password(
+          ${account}, ${tenantHint}
+        )`;
+
+      expect(await lookup('missing.user', null)).toEqual([dummyCredential]);
+      expect(await lookup('actor.a', 'wrong-tenant')).toEqual([dummyCredential]);
+      expect(await lookup('actor.a', null)).toEqual([dummyCredential]);
+
+      const [credential] = await lookup('actor.a', 'tenant-a');
       expect(credential).toEqual({
         tenant_id: tenantA,
         user_id: actorA,
-        password_hash: '$argon2id$test-a',
+        password_hash: realPasswordHash,
+      });
+
+      await admin`UPDATE users SET status = 'DISABLED' WHERE tenant_id = ${tenantA} AND id = ${actorA}`;
+      expect(await lookup('actor.a', 'tenant-a')).toEqual([dummyCredential]);
+      await admin`UPDATE users SET status = 'ACTIVE' WHERE tenant_id = ${tenantA} AND id = ${actorA}`;
+
+      await admin`UPDATE tenants SET status = 'SUSPENDED' WHERE id = ${tenantA}`;
+      expect(await lookup('actor.a', 'tenant-a')).toEqual([dummyCredential]);
+      await admin`UPDATE tenants SET status = 'ACTIVE' WHERE id = ${tenantA}`;
+
+      const [restoredCredential] = await auth<
+        { password_hash: string; tenant_id: string; user_id: string }[]
+      >`SELECT tenant_id, user_id, password_hash FROM auth_lookup_password('actor.a', 'tenant-a')`;
+      expect(restoredCredential).toEqual({
+        tenant_id: tenantA,
+        user_id: actorA,
+        password_hash: realPasswordHash,
       });
       await expect(auth`SELECT id FROM users LIMIT 1`).rejects.toMatchObject({ code: '42501' });
     } finally {
@@ -715,15 +1372,48 @@ describe('B1 ordered domain migration', () => {
     }
   });
 
-  it('survives a reversible schema reset/down and produces an identical second-up fingerprint', async () => {
-    expect(firstFingerprint).not.toBe('');
-    await admin.unsafe('DROP SCHEMA public CASCADE; CREATE SCHEMA public;');
-    await admin`GRANT ALL ON SCHEMA public TO CURRENT_USER`;
-    await admin`DELETE FROM drizzle.__drizzle_migrations`;
+  it('executes the checked-in B1 down migration, preserves foundation, and reapplies identically', async () => {
+    const beforeDownFingerprint = firstFingerprint || (await schemaFingerprint());
+    const downSql = await readFile(downMigrationPath, 'utf8');
+    expect(downSql).not.toMatch(/DROP\s+SCHEMA/i);
+    await admin.unsafe(downSql);
+
+    const remainingTables = await admin<{ table_name: string }[]>`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+      ORDER BY table_name
+    `;
+    expect(remainingTables.map(({ table_name }) => table_name)).toEqual([
+      'audit_events',
+      'idempotency_records',
+      'outbox_events',
+    ]);
+    const remainingRoles = await admin<{ rolname: string }[]>`
+      SELECT rolname FROM pg_roles WHERE rolname LIKE 'zhili_%' ORDER BY rolname
+    `;
+    expect(remainingRoles.map(({ rolname }) => rolname)).toEqual(['zhili_app', 'zhili_worker']);
+    const remainingFunctions = await admin<{ proname: string }[]>`
+      SELECT p.proname
+      FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+      ORDER BY p.proname
+    `;
+    expect(remainingFunctions.map(({ proname }) => proname)).toEqual([
+      'prevent_audit_event_mutation',
+    ]);
+    const b1Extension = await admin<{ extname: string }[]>`
+      SELECT extname FROM pg_extension WHERE extname = 'btree_gist'
+    `;
+    expect(b1Extension).toEqual([]);
+
+    await admin`DELETE FROM drizzle.__drizzle_migrations WHERE id = (
+      SELECT max(id) FROM drizzle.__drizzle_migrations
+    )`;
 
     await migrateUp();
 
     const secondFingerprint = await schemaFingerprint();
-    expect(secondFingerprint).toBe(firstFingerprint);
+    expect(secondFingerprint).toBe(beforeDownFingerprint);
   });
 });

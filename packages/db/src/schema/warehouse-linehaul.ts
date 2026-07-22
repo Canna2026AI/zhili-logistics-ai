@@ -1,4 +1,6 @@
 import {
+  type AnyPgColumn,
+  type ForeignKeyBuilder,
   bigint,
   check,
   foreignKey,
@@ -15,6 +17,40 @@ import { sql } from 'drizzle-orm';
 
 import { customerAddresses, customers, devices, tenants, warehouses } from './identity';
 import { waybillPackages, waybills } from './rates-waybills';
+
+function receiptActiveMeasurementForeignKey(table: {
+  activeMeasurementId: AnyPgColumn;
+  tenantId: AnyPgColumn;
+}): ForeignKeyBuilder {
+  return foreignKey({
+    columns: [table.tenantId, table.activeMeasurementId],
+    foreignColumns: [warehouseMeasurements.tenantId, warehouseMeasurements.id],
+    name: 'warehouse_receipts_active_measurement_fk',
+  }).onDelete('restrict');
+}
+
+function podCurrentVersionForeignKey(table: {
+  currentVersion: AnyPgColumn;
+  id: AnyPgColumn;
+  tenantId: AnyPgColumn;
+}): ForeignKeyBuilder {
+  return foreignKey({
+    columns: [table.tenantId, table.id, table.currentVersion],
+    foreignColumns: [podVersions.tenantId, podVersions.podRecordId, podVersions.podVersion],
+    name: 'pod_records_current_version_fk',
+  }).onDelete('restrict');
+}
+
+function deviceEventConflictForeignKey(table: {
+  conflictId: AnyPgColumn;
+  tenantId: AnyPgColumn;
+}): ForeignKeyBuilder {
+  return foreignKey({
+    columns: [table.tenantId, table.conflictId],
+    foreignColumns: [deviceSyncConflicts.tenantId, deviceSyncConflicts.id],
+    name: 'device_event_receipts_conflict_fk',
+  }).onDelete('restrict');
+}
 
 export const warehouseScans = pgTable(
   'warehouse_scans',
@@ -48,15 +84,15 @@ export const warehouseScans = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.warehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'warehouse_scans_warehouse_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deviceId],
-      foreignColumns: [devices.id, devices.tenantId],
+      foreignColumns: [devices.tenantId, devices.id],
       name: 'warehouse_scans_device_fk',
     }).onDelete('restrict'),
-    unique('warehouse_scans_identity_unique').on(table.id, table.tenantId),
+    unique('warehouse_scans_identity_unique').on(table.tenantId, table.id),
     unique('warehouse_scans_device_event_unique').on(
       table.tenantId,
       table.deviceId,
@@ -104,6 +140,7 @@ export const warehouseReceipts = pgTable(
       .notNull(),
   },
   (table) => [
+    receiptActiveMeasurementForeignKey(table),
     index('warehouse_receipts_cursor_idx').using(
       'btree',
       table.tenantId.asc().nullsLast().op('text_ops'),
@@ -117,20 +154,20 @@ export const warehouseReceipts = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.warehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'warehouse_receipts_warehouse_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'warehouse_receipts_waybill_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.scanId],
-      foreignColumns: [warehouseScans.id, warehouseScans.tenantId],
+      foreignColumns: [warehouseScans.tenantId, warehouseScans.id],
       name: 'warehouse_receipts_scan_fk',
     }).onDelete('restrict'),
-    unique('warehouse_receipts_identity_unique').on(table.id, table.tenantId),
+    unique('warehouse_receipts_identity_unique').on(table.tenantId, table.id),
     unique('warehouse_receipts_number_unique').on(table.tenantId, table.receiptNo),
     unique('warehouse_receipts_scan_unique').on(table.tenantId, table.scanId),
     pgPolicy('warehouse_receipts_tenant_isolation', {
@@ -187,20 +224,20 @@ export const warehouseMeasurements = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.receiptId],
-      foreignColumns: [warehouseReceipts.id, warehouseReceipts.tenantId],
+      foreignColumns: [warehouseReceipts.tenantId, warehouseReceipts.id],
       name: 'warehouse_measurements_receipt_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deviceId],
-      foreignColumns: [devices.id, devices.tenantId],
+      foreignColumns: [devices.tenantId, devices.id],
       name: 'warehouse_measurements_device_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.supersedesId],
-      foreignColumns: [table.id, table.tenantId],
+      foreignColumns: [table.tenantId, table.id],
       name: 'warehouse_measurements_supersedes_fk',
     }).onDelete('restrict'),
-    unique('warehouse_measurements_identity_unique').on(table.id, table.tenantId),
+    unique('warehouse_measurements_identity_unique').on(table.tenantId, table.id),
     unique('warehouse_measurements_receipt_version_unique').on(
       table.tenantId,
       table.receiptId,
@@ -257,15 +294,15 @@ export const warehouseMedia = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.receiptId],
-      foreignColumns: [warehouseReceipts.id, warehouseReceipts.tenantId],
+      foreignColumns: [warehouseReceipts.tenantId, warehouseReceipts.id],
       name: 'warehouse_media_receipt_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.captureDeviceId],
-      foreignColumns: [devices.id, devices.tenantId],
+      foreignColumns: [devices.tenantId, devices.id],
       name: 'warehouse_media_device_fk',
     }).onDelete('restrict'),
-    unique('warehouse_media_identity_unique').on(table.id, table.tenantId),
+    unique('warehouse_media_identity_unique').on(table.tenantId, table.id),
     unique('warehouse_media_object_key_unique').on(table.tenantId, table.objectKey),
     pgPolicy('warehouse_media_tenant_isolation', {
       as: 'permissive',
@@ -317,22 +354,22 @@ export const inventoryBalances = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.warehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'inventory_balances_warehouse_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'inventory_balances_waybill_fk',
     }).onDelete('restrict'),
     foreignKey({
-      columns: [table.tenantId, table.waybillId, table.packageId],
-      foreignColumns: [waybillPackages.id, waybillPackages.tenantId, waybillPackages.waybillId],
+      columns: [table.tenantId, table.packageId, table.waybillId],
+      foreignColumns: [waybillPackages.tenantId, waybillPackages.id, waybillPackages.waybillId],
       name: 'inventory_balances_package_waybill_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('inventory_balances_identity_unique').on(table.id, table.tenantId),
+    unique('inventory_balances_identity_unique').on(table.tenantId, table.id),
     unique('inventory_balances_bucket_unique').on(
       table.tenantId,
       table.warehouseId,
@@ -384,7 +421,7 @@ export const inventoryLedgerEntries = pgTable(
     ),
     foreignKey({
       columns: [table.tenantId, table.receiptId],
-      foreignColumns: [warehouseReceipts.id, warehouseReceipts.tenantId],
+      foreignColumns: [warehouseReceipts.tenantId, warehouseReceipts.id],
       name: 'inventory_ledger_entries_receipt_fk',
     }).onDelete('restrict'),
     foreignKey({
@@ -394,10 +431,10 @@ export const inventoryLedgerEntries = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.inventoryBalanceId],
-      foreignColumns: [inventoryBalances.id, inventoryBalances.tenantId],
+      foreignColumns: [inventoryBalances.tenantId, inventoryBalances.id],
       name: 'inventory_ledger_entries_balance_fk',
     }).onDelete('restrict'),
-    unique('inventory_ledger_entries_identity_unique').on(table.id, table.tenantId),
+    unique('inventory_ledger_entries_identity_unique').on(table.tenantId, table.id),
     unique('inventory_ledger_entries_idempotency_unique').on(table.tenantId, table.idempotencyKey),
     pgPolicy('inventory_ledger_entries_tenant_isolation', {
       as: 'permissive',
@@ -448,15 +485,15 @@ export const routeDecisions = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'route_decisions_waybill_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.receiptId],
-      foreignColumns: [warehouseReceipts.id, warehouseReceipts.tenantId],
+      foreignColumns: [warehouseReceipts.tenantId, warehouseReceipts.id],
       name: 'route_decisions_receipt_fk',
     }).onDelete('restrict'),
-    unique('route_decisions_identity_unique').on(table.id, table.tenantId),
+    unique('route_decisions_identity_unique').on(table.tenantId, table.id),
     unique('route_decisions_waybill_version_unique').on(
       table.tenantId,
       table.waybillId,
@@ -512,15 +549,15 @@ export const loadUnits = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.originWarehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'load_units_origin_warehouse_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.destinationWarehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'load_units_destination_warehouse_fk',
     }).onDelete('restrict'),
-    unique('load_units_identity_unique').on(table.id, table.tenantId),
+    unique('load_units_identity_unique').on(table.tenantId, table.id),
     unique('load_units_number_unique').on(table.tenantId, table.loadUnitNo),
     pgPolicy('load_units_tenant_isolation', {
       as: 'permissive',
@@ -573,22 +610,22 @@ export const loadUnitItems = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.loadUnitId],
-      foreignColumns: [loadUnits.id, loadUnits.tenantId],
+      foreignColumns: [loadUnits.tenantId, loadUnits.id],
       name: 'load_unit_items_load_unit_fk',
     }).onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'load_unit_items_waybill_fk',
     }).onDelete('restrict'),
     foreignKey({
-      columns: [table.tenantId, table.waybillId, table.packageId],
-      foreignColumns: [waybillPackages.id, waybillPackages.tenantId, waybillPackages.waybillId],
+      columns: [table.tenantId, table.packageId, table.waybillId],
+      foreignColumns: [waybillPackages.tenantId, waybillPackages.id, waybillPackages.waybillId],
       name: 'load_unit_items_package_waybill_fk',
     })
       .onUpdate('restrict')
       .onDelete('restrict'),
-    unique('load_unit_items_identity_unique').on(table.id, table.tenantId),
+    unique('load_unit_items_identity_unique').on(table.tenantId, table.id),
     unique('load_unit_items_package_unique').on(table.tenantId, table.loadUnitId, table.packageId),
     unique('load_unit_items_sequence_unique').on(
       table.tenantId,
@@ -640,10 +677,10 @@ export const linehaulBookings = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.loadUnitId],
-      foreignColumns: [loadUnits.id, loadUnits.tenantId],
+      foreignColumns: [loadUnits.tenantId, loadUnits.id],
       name: 'linehaul_bookings_load_unit_fk',
     }).onDelete('restrict'),
-    unique('linehaul_bookings_identity_unique').on(table.id, table.tenantId),
+    unique('linehaul_bookings_identity_unique').on(table.tenantId, table.id),
     unique('linehaul_bookings_number_unique').on(table.tenantId, table.bookingNo),
     pgPolicy('linehaul_bookings_tenant_isolation', {
       as: 'permissive',
@@ -697,15 +734,15 @@ export const billsOfLading = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.bookingId],
-      foreignColumns: [linehaulBookings.id, linehaulBookings.tenantId],
+      foreignColumns: [linehaulBookings.tenantId, linehaulBookings.id],
       name: 'bills_of_lading_booking_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.documentMediaId],
-      foreignColumns: [warehouseMedia.id, warehouseMedia.tenantId],
+      foreignColumns: [warehouseMedia.tenantId, warehouseMedia.id],
       name: 'bills_of_lading_media_fk',
     }).onDelete('restrict'),
-    unique('bills_of_lading_identity_unique').on(table.id, table.tenantId),
+    unique('bills_of_lading_identity_unique').on(table.tenantId, table.id),
     unique('bills_of_lading_number_unique').on(table.tenantId, table.bolNo),
     pgPolicy('bills_of_lading_tenant_isolation', {
       as: 'permissive',
@@ -756,15 +793,15 @@ export const fbaDeliveries = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.bookingId],
-      foreignColumns: [linehaulBookings.id, linehaulBookings.tenantId],
+      foreignColumns: [linehaulBookings.tenantId, linehaulBookings.id],
       name: 'fba_deliveries_booking_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.destinationAddressId],
-      foreignColumns: [customerAddresses.id, customerAddresses.tenantId],
+      foreignColumns: [customerAddresses.tenantId, customerAddresses.id],
       name: 'fba_deliveries_address_fk',
     }).onDelete('restrict'),
-    unique('fba_deliveries_identity_unique').on(table.id, table.tenantId),
+    unique('fba_deliveries_identity_unique').on(table.tenantId, table.id),
     unique('fba_deliveries_number_unique').on(table.tenantId, table.fbaDeliveryNo),
     unique('fba_deliveries_appointment_unique').on(table.tenantId, table.appointmentReference),
     pgPolicy('fba_deliveries_tenant_isolation', {
@@ -815,17 +852,17 @@ export const deliveryTasks = pgTable(
     ),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
-      foreignColumns: [waybills.id, waybills.tenantId],
+      foreignColumns: [waybills.tenantId, waybills.id],
       name: 'delivery_tasks_waybill_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.fbaDeliveryId],
-      foreignColumns: [fbaDeliveries.id, fbaDeliveries.tenantId],
+      foreignColumns: [fbaDeliveries.tenantId, fbaDeliveries.id],
       name: 'delivery_tasks_fba_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.customerId],
-      foreignColumns: [customers.id, customers.tenantId],
+      foreignColumns: [customers.tenantId, customers.id],
       name: 'delivery_tasks_customer_fk',
     }).onDelete('restrict'),
     foreignKey({
@@ -834,11 +871,11 @@ export const deliveryTasks = pgTable(
       name: 'delivery_tasks_tenant_fk',
     }).onDelete('restrict'),
     foreignKey({
-      columns: [table.tenantId, table.customerId, table.destinationAddressId],
+      columns: [table.tenantId, table.destinationAddressId, table.customerId],
       foreignColumns: [
-        customerAddresses.customerId,
-        customerAddresses.id,
         customerAddresses.tenantId,
+        customerAddresses.id,
+        customerAddresses.customerId,
       ],
       name: 'delivery_tasks_address_customer_fk',
     })
@@ -846,10 +883,10 @@ export const deliveryTasks = pgTable(
       .onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.assignedDeviceId],
-      foreignColumns: [devices.id, devices.tenantId],
+      foreignColumns: [devices.tenantId, devices.id],
       name: 'delivery_tasks_device_fk',
     }).onDelete('restrict'),
-    unique('delivery_tasks_identity_unique').on(table.id, table.tenantId),
+    unique('delivery_tasks_identity_unique').on(table.tenantId, table.id),
     unique('delivery_tasks_number_unique').on(table.tenantId, table.taskNo),
     pgPolicy('delivery_tasks_tenant_isolation', {
       as: 'permissive',
@@ -901,10 +938,10 @@ export const deliveryTaskEvents = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deliveryTaskId],
-      foreignColumns: [deliveryTasks.id, deliveryTasks.tenantId],
+      foreignColumns: [deliveryTasks.tenantId, deliveryTasks.id],
       name: 'delivery_task_events_task_fk',
     }).onDelete('cascade'),
-    unique('delivery_task_events_identity_unique').on(table.id, table.tenantId),
+    unique('delivery_task_events_identity_unique').on(table.tenantId, table.id),
     unique('delivery_task_events_sequence_unique').on(
       table.tenantId,
       table.deliveryTaskId,
@@ -953,6 +990,7 @@ export const podRecords = pgTable(
       .notNull(),
   },
   (table) => [
+    podCurrentVersionForeignKey(table),
     index('pod_records_cursor_idx').using(
       'btree',
       table.tenantId.asc().nullsLast().op('text_ops'),
@@ -966,10 +1004,10 @@ export const podRecords = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deliveryTaskId],
-      foreignColumns: [deliveryTasks.id, deliveryTasks.tenantId],
+      foreignColumns: [deliveryTasks.tenantId, deliveryTasks.id],
       name: 'pod_records_task_fk',
     }).onDelete('restrict'),
-    unique('pod_records_identity_unique').on(table.id, table.tenantId),
+    unique('pod_records_identity_unique').on(table.tenantId, table.id),
     unique('pod_records_number_unique').on(table.tenantId, table.podNo),
     unique('pod_records_task_unique').on(table.tenantId, table.deliveryTaskId),
     pgPolicy('pod_records_tenant_isolation', {
@@ -1023,33 +1061,33 @@ export const podVersions = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.podRecordId],
-      foreignColumns: [podRecords.id, podRecords.tenantId],
+      foreignColumns: [podRecords.tenantId, podRecords.id],
       name: 'pod_versions_record_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.signatureMediaId],
-      foreignColumns: [warehouseMedia.id, warehouseMedia.tenantId],
+      foreignColumns: [warehouseMedia.tenantId, warehouseMedia.id],
       name: 'pod_versions_signature_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.photoMediaId],
-      foreignColumns: [warehouseMedia.id, warehouseMedia.tenantId],
+      foreignColumns: [warehouseMedia.tenantId, warehouseMedia.id],
       name: 'pod_versions_photo_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [
         table.tenantId,
-        table.podRecordId,
         table.supersedesVersionId,
+        table.podRecordId,
         table.supersedesPodVersion,
       ],
-      foreignColumns: [table.id, table.podRecordId, table.podVersion, table.tenantId],
+      foreignColumns: [table.tenantId, table.id, table.podRecordId, table.podVersion],
       name: 'pod_versions_supersedes_fk',
     }).onDelete('restrict'),
-    unique('pod_versions_identity_unique').on(table.id, table.tenantId),
+    unique('pod_versions_identity_unique').on(table.tenantId, table.id),
     unique('pod_versions_chain_target_unique').on(
-      table.id,
       table.tenantId,
+      table.id,
       table.podRecordId,
       table.podVersion
     ),
@@ -1110,18 +1148,18 @@ export const deviceSyncSessions = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deviceId],
-      foreignColumns: [devices.id, devices.tenantId],
+      foreignColumns: [devices.tenantId, devices.id],
       name: 'device_sync_sessions_device_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.warehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'device_sync_sessions_warehouse_fk',
     }).onDelete('restrict'),
-    unique('device_sync_sessions_identity_unique').on(table.id, table.tenantId),
+    unique('device_sync_sessions_identity_unique').on(table.tenantId, table.id),
     unique('device_sync_sessions_scope_unique').on(
-      table.id,
       table.tenantId,
+      table.id,
       table.deviceId,
       table.warehouseId
     ),
@@ -1178,6 +1216,7 @@ export const deviceEventReceipts = pgTable(
       .notNull(),
   },
   (table) => [
+    deviceEventConflictForeignKey(table),
     index('device_event_receipts_cursor_idx').using(
       'btree',
       table.tenantId.asc().nullsLast().op('text_ops'),
@@ -1192,19 +1231,19 @@ export const deviceEventReceipts = pgTable(
     foreignKey({
       columns: [table.tenantId, table.sessionId, table.deviceId, table.warehouseId],
       foreignColumns: [
-        deviceSyncSessions.deviceId,
-        deviceSyncSessions.id,
         deviceSyncSessions.tenantId,
+        deviceSyncSessions.id,
+        deviceSyncSessions.deviceId,
         deviceSyncSessions.warehouseId,
       ],
       name: 'device_event_receipts_session_scope_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.duplicateOfId],
-      foreignColumns: [table.id, table.tenantId],
+      foreignColumns: [table.tenantId, table.id],
       name: 'device_event_receipts_duplicate_fk',
     }).onDelete('restrict'),
-    unique('device_event_receipts_identity_unique').on(table.id, table.tenantId),
+    unique('device_event_receipts_identity_unique').on(table.tenantId, table.id),
     unique('device_event_receipts_event_unique').on(table.tenantId, table.deviceId, table.eventId),
     unique('device_event_receipts_sequence_unique').on(
       table.tenantId,
@@ -1268,15 +1307,15 @@ export const deviceEventMediaClaims = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deviceEventReceiptId],
-      foreignColumns: [deviceEventReceipts.id, deviceEventReceipts.tenantId],
+      foreignColumns: [deviceEventReceipts.tenantId, deviceEventReceipts.id],
       name: 'device_event_media_claims_receipt_fk',
     }).onDelete('cascade'),
     foreignKey({
       columns: [table.tenantId, table.mediaId],
-      foreignColumns: [warehouseMedia.id, warehouseMedia.tenantId],
+      foreignColumns: [warehouseMedia.tenantId, warehouseMedia.id],
       name: 'device_event_media_claims_media_fk',
     }).onDelete('restrict'),
-    unique('device_event_media_claims_identity_unique').on(table.id, table.tenantId),
+    unique('device_event_media_claims_identity_unique').on(table.tenantId, table.id),
     unique('device_event_media_claims_key_unique').on(
       table.tenantId,
       table.deviceEventReceiptId,
@@ -1315,6 +1354,7 @@ export const deviceSyncConflicts = pgTable(
     resolution: text(),
     resolutionPayload: jsonb('resolution_payload'),
     resolvedAt: timestamp('resolved_at', { withTimezone: true, mode: 'string' }),
+    version: bigint({ mode: 'number' }).default(1).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true, mode: 'string' })
       .defaultNow()
       .notNull(),
@@ -1333,10 +1373,10 @@ export const deviceSyncConflicts = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deviceEventReceiptId],
-      foreignColumns: [deviceEventReceipts.id, deviceEventReceipts.tenantId],
+      foreignColumns: [deviceEventReceipts.tenantId, deviceEventReceipts.id],
       name: 'device_sync_conflicts_event_fk',
     }).onDelete('restrict'),
-    unique('device_sync_conflicts_identity_unique').on(table.id, table.tenantId),
+    unique('device_sync_conflicts_identity_unique').on(table.tenantId, table.id),
     unique('device_sync_conflicts_event_unique').on(table.tenantId, table.deviceEventReceiptId),
     pgPolicy('device_sync_conflicts_tenant_isolation', {
       as: 'permissive',
@@ -1350,9 +1390,10 @@ export const deviceSyncConflicts = pgTable(
       sql`((status = 'OPEN'::text) AND (resolution IS NULL) AND (resolution_payload IS NULL) AND (resolved_at IS NULL)) OR ((status = 'RESOLVED'::text) AND (resolution IS NOT NULL) AND (resolved_at IS NOT NULL))`
     ),
     check(
-      'device_sync_conflicts_version_check',
+      'device_sync_conflicts_resource_versions_check',
       sql`(expected_version >= 0) AND (server_version >= 0)`
     ),
+    check('device_sync_conflicts_version_check', sql`version >= 1`),
     check(
       'device_sync_conflicts_status_check',
       sql`status = ANY (ARRAY['OPEN'::text, 'RESOLVED'::text])`
@@ -1404,15 +1445,15 @@ export const printJobs = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.warehouseId],
-      foreignColumns: [warehouses.id, warehouses.tenantId],
+      foreignColumns: [warehouses.tenantId, warehouses.id],
       name: 'print_jobs_warehouse_fk',
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.deviceId],
-      foreignColumns: [devices.id, devices.tenantId],
+      foreignColumns: [devices.tenantId, devices.id],
       name: 'print_jobs_device_fk',
     }).onDelete('restrict'),
-    unique('print_jobs_identity_unique').on(table.id, table.tenantId),
+    unique('print_jobs_identity_unique').on(table.tenantId, table.id),
     unique('print_jobs_number_unique').on(table.tenantId, table.jobNo),
     unique('print_jobs_dedupe_unique').on(table.tenantId, table.dedupeKey),
     pgPolicy('print_jobs_tenant_isolation', {

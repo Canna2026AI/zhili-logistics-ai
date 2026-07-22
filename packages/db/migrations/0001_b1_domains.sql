@@ -3646,3 +3646,657 @@ ALTER TABLE print_jobs
   ALTER COLUMN version SET DEFAULT 1,
   DROP CONSTRAINT print_jobs_version_check,
   ADD CONSTRAINT print_jobs_version_check CHECK (version >= 1);
+
+-- Root-owned aggregate-version and immutable-history hardening.
+DO $aggregate_versions$
+DECLARE
+  aggregate_table text;
+BEGIN
+  FOREACH aggregate_table IN ARRAY ARRAY[
+    'organizations',
+    'warehouses',
+    'users',
+    'customers',
+    'customer_addresses',
+    'roles',
+    'role_grants',
+    'role_grant_organization_scopes',
+    'role_grant_customer_scopes',
+    'role_grant_warehouse_scopes',
+    'role_grant_field_policies',
+    'user_role_assignments',
+    'sessions',
+    'refresh_token_families',
+    'refresh_tokens',
+    'oauth_states',
+    'devices',
+    'device_bindings'
+  ]
+  LOOP
+    EXECUTE format('ALTER TABLE %I ALTER COLUMN version SET DEFAULT 1', aggregate_table);
+    EXECUTE format(
+      'ALTER TABLE %I DROP CONSTRAINT %I',
+      aggregate_table,
+      aggregate_table || '_version_check'
+    );
+    EXECUTE format(
+      'ALTER TABLE %I ADD CONSTRAINT %I CHECK (version >= 1)',
+      aggregate_table,
+      aggregate_table || '_version_check'
+    );
+  END LOOP;
+END
+$aggregate_versions$;
+
+ALTER TABLE device_sync_conflicts
+  DROP CONSTRAINT device_sync_conflicts_version_check,
+  ADD COLUMN version bigint NOT NULL DEFAULT 1,
+  ADD CONSTRAINT device_sync_conflicts_resource_versions_check CHECK (
+    expected_version >= 0 AND server_version >= 0
+  ),
+  ADD CONSTRAINT device_sync_conflicts_version_check CHECK (version >= 1);
+
+CREATE FUNCTION guard_device_sync_conflict_resolution()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.version <> OLD.version + 1 THEN
+    RAISE EXCEPTION 'device sync conflict version must advance exactly once'
+      USING ERRCODE = '40001';
+  END IF;
+  IF OLD.status <> 'OPEN' THEN
+    RAISE EXCEPTION 'resolved device sync conflict is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+  IF NEW.status <> 'RESOLVED' THEN
+    RAISE EXCEPTION 'device sync conflict must transition from OPEN to RESOLVED'
+      USING ERRCODE = '55000';
+  END IF;
+  IF NEW.id IS DISTINCT FROM OLD.id
+     OR NEW.tenant_id IS DISTINCT FROM OLD.tenant_id
+     OR NEW.device_event_receipt_id IS DISTINCT FROM OLD.device_event_receipt_id
+     OR NEW.aggregate_type IS DISTINCT FROM OLD.aggregate_type
+     OR NEW.aggregate_id IS DISTINCT FROM OLD.aggregate_id
+     OR NEW.expected_version IS DISTINCT FROM OLD.expected_version
+     OR NEW.server_version IS DISTINCT FROM OLD.server_version
+     OR NEW.server_snapshot IS DISTINCT FROM OLD.server_snapshot
+     OR NEW.client_snapshot IS DISTINCT FROM OLD.client_snapshot
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at THEN
+    RAISE EXCEPTION 'device sync conflict identity and snapshots are immutable'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER device_sync_conflicts_resolution_guard
+BEFORE UPDATE ON device_sync_conflicts
+FOR EACH ROW EXECUTE FUNCTION guard_device_sync_conflict_resolution();
+
+CREATE OR REPLACE FUNCTION guard_reference_data_item_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  old_version_state text;
+  new_version_state text;
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    PERFORM 1
+    FROM reference_data_versions
+    WHERE (tenant_id = OLD.tenant_id AND id = OLD.reference_data_version_id)
+       OR (tenant_id = NEW.tenant_id AND id = NEW.reference_data_version_id)
+    ORDER BY tenant_id, id
+    FOR UPDATE;
+
+    SELECT state INTO old_version_state
+    FROM reference_data_versions
+    WHERE tenant_id = OLD.tenant_id AND id = OLD.reference_data_version_id;
+    SELECT state INTO new_version_state
+    FROM reference_data_versions
+    WHERE tenant_id = NEW.tenant_id AND id = NEW.reference_data_version_id;
+
+    IF old_version_state IS DISTINCT FROM 'DRAFT'
+       OR new_version_state IS DISTINCT FROM 'DRAFT' THEN
+      RAISE EXCEPTION 'reference data items are mutable only while both versions are DRAFT'
+        USING ERRCODE = '55000';
+    END IF;
+    NEW.updated_at := now();
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'DELETE' THEN
+    SELECT state INTO old_version_state
+    FROM reference_data_versions
+    WHERE tenant_id = OLD.tenant_id AND id = OLD.reference_data_version_id
+    FOR UPDATE;
+    IF old_version_state IS DISTINCT FROM 'DRAFT' THEN
+      RAISE EXCEPTION 'reference data items are immutable after publication'
+        USING ERRCODE = '55000';
+    END IF;
+    RETURN OLD;
+  END IF;
+
+  SELECT state INTO new_version_state
+  FROM reference_data_versions
+  WHERE tenant_id = NEW.tenant_id AND id = NEW.reference_data_version_id
+  FOR UPDATE;
+  IF new_version_state IS DISTINCT FROM 'DRAFT' THEN
+    RAISE EXCEPTION 'reference data items are mutable only in a DRAFT version'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+-- Least-privilege platform control plane. The login role receives schema usage and EXECUTE only;
+-- every command verifies the asserted actor against active users, assignments, roles, and grants.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_control_plane') THEN
+    CREATE ROLE zhili_control_plane
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+  ELSE
+    ALTER ROLE zhili_control_plane
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+  END IF;
+END
+$$;
+
+CREATE FUNCTION control_plane_create_tenant(
+  p_actor_tenant_id text,
+  p_actor_user_id text,
+  p_target_tenant_id text,
+  p_slug text,
+  p_display_name text,
+  p_operation_id text,
+  p_idempotency_key text,
+  p_request_hash text
+)
+RETURNS TABLE (tenant_id text, status text, version bigint, replayed boolean)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  idempotency_inserted integer;
+  stored_hash text;
+  stored_response jsonb;
+  response jsonb;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.tenants actor_tenant
+    JOIN public.users actor_user
+      ON actor_user.tenant_id = actor_tenant.id AND actor_user.id = p_actor_user_id
+    JOIN public.user_role_assignments assignment
+      ON assignment.tenant_id = actor_user.tenant_id AND assignment.user_id = actor_user.id
+    JOIN public.roles actor_role
+      ON actor_role.tenant_id = assignment.tenant_id AND actor_role.id = assignment.role_id
+    JOIN public.role_grants actor_grant
+      ON actor_grant.tenant_id = actor_role.tenant_id AND actor_grant.role_id = actor_role.id
+    WHERE actor_tenant.id = p_actor_tenant_id
+      AND actor_tenant.status = 'ACTIVE'
+      AND actor_user.status = 'ACTIVE'
+      AND assignment.status = 'ACTIVE'
+      AND assignment.valid_from <= now()
+      AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+      AND actor_role.status = 'ACTIVE'
+      AND actor_grant.action_code = 'platform.tenant.create'
+      AND actor_grant.effect = 'ALLOW'
+      AND actor_grant.status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.user_role_assignments denied_assignment
+        JOIN public.roles denied_role
+          ON denied_role.tenant_id = denied_assignment.tenant_id
+         AND denied_role.id = denied_assignment.role_id
+        JOIN public.role_grants denied_grant
+          ON denied_grant.tenant_id = denied_role.tenant_id
+         AND denied_grant.role_id = denied_role.id
+        WHERE denied_assignment.tenant_id = actor_user.tenant_id
+          AND denied_assignment.user_id = actor_user.id
+          AND denied_assignment.status = 'ACTIVE'
+          AND denied_assignment.valid_from <= now()
+          AND (denied_assignment.valid_until IS NULL OR denied_assignment.valid_until > now())
+          AND denied_role.status = 'ACTIVE'
+          AND denied_grant.action_code = 'platform.tenant.create'
+          AND denied_grant.effect = 'DENY'
+          AND denied_grant.status = 'ACTIVE'
+      )
+  ) THEN
+    RAISE EXCEPTION 'control-plane actor is not authorized' USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO public.idempotency_records (
+    id, tenant_id, idempotency_key, request_hash, expires_at
+  ) VALUES (
+    p_operation_id, p_actor_tenant_id, p_idempotency_key, p_request_hash,
+    now() + interval '24 hours'
+  )
+  ON CONFLICT ON CONSTRAINT idempotency_records_tenant_key_unique DO NOTHING;
+  GET DIAGNOSTICS idempotency_inserted = ROW_COUNT;
+
+  IF idempotency_inserted = 0 THEN
+    SELECT record_row.request_hash, record_row.response_body
+    INTO stored_hash, stored_response
+    FROM public.idempotency_records record_row
+    WHERE record_row.tenant_id = p_actor_tenant_id
+      AND record_row.idempotency_key = p_idempotency_key
+    FOR UPDATE;
+    IF stored_hash IS DISTINCT FROM p_request_hash THEN
+      RAISE EXCEPTION 'idempotency key request hash mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF stored_response IS NULL THEN
+      RAISE EXCEPTION 'idempotent command is still in progress' USING ERRCODE = '40001';
+    END IF;
+    RETURN QUERY SELECT
+      stored_response ->> 'tenant_id',
+      stored_response ->> 'status',
+      (stored_response ->> 'version')::bigint,
+      true;
+    RETURN;
+  END IF;
+
+  INSERT INTO public.tenants (id, slug, display_name)
+  VALUES (p_target_tenant_id, lower(btrim(p_slug)), p_display_name);
+
+  response := jsonb_build_object(
+    'tenant_id', p_target_tenant_id, 'status', 'ACTIVE', 'version', 1
+  );
+  INSERT INTO public.audit_events (
+    id, tenant_id, subject_id, request_id, action, entity_type, entity_id, payload
+  ) VALUES (
+    p_operation_id, p_actor_tenant_id, p_actor_user_id, p_operation_id,
+    'platform.tenant.create', 'tenant', p_target_tenant_id,
+    jsonb_build_object('target_tenant_id', p_target_tenant_id, 'response', response)
+  );
+  INSERT INTO public.outbox_events (
+    id, tenant_id, aggregate_type, aggregate_id, aggregate_version,
+    event_type, payload, dedupe_key, trace_id
+  ) VALUES (
+    p_operation_id, p_target_tenant_id, 'TENANT', p_target_tenant_id, 1,
+    'TENANT_CREATED', response, 'control:' || p_operation_id, p_operation_id
+  );
+  UPDATE public.idempotency_records record_row
+  SET response_status = 201, response_headers = '{}'::jsonb, response_body = response
+  WHERE record_row.tenant_id = p_actor_tenant_id
+    AND record_row.idempotency_key = p_idempotency_key;
+
+  RETURN QUERY SELECT p_target_tenant_id, 'ACTIVE'::text, 1::bigint, false;
+END;
+$$;
+
+CREATE FUNCTION control_plane_set_tenant_status(
+  p_actor_tenant_id text,
+  p_actor_user_id text,
+  p_target_tenant_id text,
+  p_expected_version bigint,
+  p_new_status text,
+  p_operation_id text,
+  p_idempotency_key text,
+  p_request_hash text
+)
+RETURNS TABLE (tenant_id text, status text, version bigint, replayed boolean)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  idempotency_inserted integer;
+  stored_hash text;
+  stored_response jsonb;
+  response jsonb;
+  updated_status text;
+  updated_version bigint;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.tenants actor_tenant
+    JOIN public.users actor_user
+      ON actor_user.tenant_id = actor_tenant.id AND actor_user.id = p_actor_user_id
+    JOIN public.user_role_assignments assignment
+      ON assignment.tenant_id = actor_user.tenant_id AND assignment.user_id = actor_user.id
+    JOIN public.roles actor_role
+      ON actor_role.tenant_id = assignment.tenant_id AND actor_role.id = assignment.role_id
+    JOIN public.role_grants actor_grant
+      ON actor_grant.tenant_id = actor_role.tenant_id AND actor_grant.role_id = actor_role.id
+    WHERE actor_tenant.id = p_actor_tenant_id
+      AND actor_tenant.status = 'ACTIVE'
+      AND actor_user.status = 'ACTIVE'
+      AND assignment.status = 'ACTIVE'
+      AND assignment.valid_from <= now()
+      AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+      AND actor_role.status = 'ACTIVE'
+      AND actor_grant.action_code = 'platform.tenant.status'
+      AND actor_grant.effect = 'ALLOW'
+      AND actor_grant.status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.user_role_assignments denied_assignment
+        JOIN public.roles denied_role
+          ON denied_role.tenant_id = denied_assignment.tenant_id
+         AND denied_role.id = denied_assignment.role_id
+        JOIN public.role_grants denied_grant
+          ON denied_grant.tenant_id = denied_role.tenant_id
+         AND denied_grant.role_id = denied_role.id
+        WHERE denied_assignment.tenant_id = actor_user.tenant_id
+          AND denied_assignment.user_id = actor_user.id
+          AND denied_assignment.status = 'ACTIVE'
+          AND denied_assignment.valid_from <= now()
+          AND (denied_assignment.valid_until IS NULL OR denied_assignment.valid_until > now())
+          AND denied_role.status = 'ACTIVE'
+          AND denied_grant.action_code = 'platform.tenant.status'
+          AND denied_grant.effect = 'DENY'
+          AND denied_grant.status = 'ACTIVE'
+      )
+  ) THEN
+    RAISE EXCEPTION 'control-plane actor is not authorized' USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO public.idempotency_records (
+    id, tenant_id, idempotency_key, request_hash, expires_at
+  ) VALUES (
+    p_operation_id, p_actor_tenant_id, p_idempotency_key, p_request_hash,
+    now() + interval '24 hours'
+  )
+  ON CONFLICT ON CONSTRAINT idempotency_records_tenant_key_unique DO NOTHING;
+  GET DIAGNOSTICS idempotency_inserted = ROW_COUNT;
+  IF idempotency_inserted = 0 THEN
+    SELECT record_row.request_hash, record_row.response_body
+    INTO stored_hash, stored_response
+    FROM public.idempotency_records record_row
+    WHERE record_row.tenant_id = p_actor_tenant_id
+      AND record_row.idempotency_key = p_idempotency_key
+    FOR UPDATE;
+    IF stored_hash IS DISTINCT FROM p_request_hash THEN
+      RAISE EXCEPTION 'idempotency key request hash mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF stored_response IS NULL THEN
+      RAISE EXCEPTION 'idempotent command is still in progress' USING ERRCODE = '40001';
+    END IF;
+    RETURN QUERY SELECT
+      stored_response ->> 'tenant_id', stored_response ->> 'status',
+      (stored_response ->> 'version')::bigint, true;
+    RETURN;
+  END IF;
+
+  UPDATE public.tenants target_tenant
+  SET status = p_new_status, version = target_tenant.version + 1, updated_at = now()
+  WHERE target_tenant.id = p_target_tenant_id
+    AND target_tenant.version = p_expected_version
+  RETURNING target_tenant.status, target_tenant.version
+  INTO updated_status, updated_version;
+  IF NOT FOUND THEN
+    IF EXISTS (SELECT 1 FROM public.tenants WHERE id = p_target_tenant_id) THEN
+      RAISE EXCEPTION 'tenant version is stale' USING ERRCODE = '40001';
+    END IF;
+    RAISE EXCEPTION 'tenant not found' USING ERRCODE = 'P0002';
+  END IF;
+
+  response := jsonb_build_object(
+    'tenant_id', p_target_tenant_id, 'status', updated_status, 'version', updated_version
+  );
+  INSERT INTO public.audit_events (
+    id, tenant_id, subject_id, request_id, action, entity_type, entity_id, payload
+  ) VALUES (
+    p_operation_id, p_actor_tenant_id, p_actor_user_id, p_operation_id,
+    'platform.tenant.status', 'tenant', p_target_tenant_id,
+    jsonb_build_object('target_tenant_id', p_target_tenant_id, 'response', response)
+  );
+  INSERT INTO public.outbox_events (
+    id, tenant_id, aggregate_type, aggregate_id, aggregate_version,
+    event_type, payload, dedupe_key, trace_id
+  ) VALUES (
+    p_operation_id, p_target_tenant_id, 'TENANT', p_target_tenant_id, updated_version,
+    'TENANT_STATUS_CHANGED', response, 'control:' || p_operation_id, p_operation_id
+  );
+  UPDATE public.idempotency_records record_row
+  SET response_status = 200, response_headers = '{}'::jsonb, response_body = response
+  WHERE record_row.tenant_id = p_actor_tenant_id
+    AND record_row.idempotency_key = p_idempotency_key;
+
+  RETURN QUERY SELECT p_target_tenant_id, updated_status, updated_version, false;
+END;
+$$;
+
+CREATE FUNCTION control_plane_set_entitlement(
+  p_actor_tenant_id text,
+  p_actor_user_id text,
+  p_target_tenant_id text,
+  p_target_created_by_user_id text,
+  p_entitlement_id text,
+  p_entitlement_version integer,
+  p_module_code text,
+  p_quota_limit bigint,
+  p_valid_from timestamptz,
+  p_valid_until timestamptz,
+  p_expected_tenant_version bigint,
+  p_operation_id text,
+  p_idempotency_key text,
+  p_request_hash text
+)
+RETURNS TABLE (
+  tenant_id text,
+  module_code text,
+  entitlement_version integer,
+  tenant_version bigint,
+  replayed boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public
+AS $$
+DECLARE
+  idempotency_inserted integer;
+  stored_hash text;
+  stored_response jsonb;
+  response jsonb;
+  updated_tenant_version bigint;
+  next_entitlement_version integer;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.tenants actor_tenant
+    JOIN public.users actor_user
+      ON actor_user.tenant_id = actor_tenant.id AND actor_user.id = p_actor_user_id
+    JOIN public.user_role_assignments assignment
+      ON assignment.tenant_id = actor_user.tenant_id AND assignment.user_id = actor_user.id
+    JOIN public.roles actor_role
+      ON actor_role.tenant_id = assignment.tenant_id AND actor_role.id = assignment.role_id
+    JOIN public.role_grants actor_grant
+      ON actor_grant.tenant_id = actor_role.tenant_id AND actor_grant.role_id = actor_role.id
+    WHERE actor_tenant.id = p_actor_tenant_id
+      AND actor_tenant.status = 'ACTIVE'
+      AND actor_user.status = 'ACTIVE'
+      AND assignment.status = 'ACTIVE'
+      AND assignment.valid_from <= now()
+      AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+      AND actor_role.status = 'ACTIVE'
+      AND actor_grant.action_code = 'platform.entitlement.manage'
+      AND actor_grant.effect = 'ALLOW'
+      AND actor_grant.status = 'ACTIVE'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.user_role_assignments denied_assignment
+        JOIN public.roles denied_role
+          ON denied_role.tenant_id = denied_assignment.tenant_id
+         AND denied_role.id = denied_assignment.role_id
+        JOIN public.role_grants denied_grant
+          ON denied_grant.tenant_id = denied_role.tenant_id
+         AND denied_grant.role_id = denied_role.id
+        WHERE denied_assignment.tenant_id = actor_user.tenant_id
+          AND denied_assignment.user_id = actor_user.id
+          AND denied_assignment.status = 'ACTIVE'
+          AND denied_assignment.valid_from <= now()
+          AND (denied_assignment.valid_until IS NULL OR denied_assignment.valid_until > now())
+          AND denied_role.status = 'ACTIVE'
+          AND denied_grant.action_code = 'platform.entitlement.manage'
+          AND denied_grant.effect = 'DENY'
+          AND denied_grant.status = 'ACTIVE'
+      )
+  ) THEN
+    RAISE EXCEPTION 'control-plane actor is not authorized' USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO public.idempotency_records (
+    id, tenant_id, idempotency_key, request_hash, expires_at
+  ) VALUES (
+    p_operation_id, p_actor_tenant_id, p_idempotency_key, p_request_hash,
+    now() + interval '24 hours'
+  )
+  ON CONFLICT ON CONSTRAINT idempotency_records_tenant_key_unique DO NOTHING;
+  GET DIAGNOSTICS idempotency_inserted = ROW_COUNT;
+  IF idempotency_inserted = 0 THEN
+    SELECT record_row.request_hash, record_row.response_body
+    INTO stored_hash, stored_response
+    FROM public.idempotency_records record_row
+    WHERE record_row.tenant_id = p_actor_tenant_id
+      AND record_row.idempotency_key = p_idempotency_key
+    FOR UPDATE;
+    IF stored_hash IS DISTINCT FROM p_request_hash THEN
+      RAISE EXCEPTION 'idempotency key request hash mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF stored_response IS NULL THEN
+      RAISE EXCEPTION 'idempotent command is still in progress' USING ERRCODE = '40001';
+    END IF;
+    RETURN QUERY SELECT
+      stored_response ->> 'tenant_id', stored_response ->> 'module_code',
+      (stored_response ->> 'entitlement_version')::integer,
+      (stored_response ->> 'tenant_version')::bigint, true;
+    RETURN;
+  END IF;
+
+  UPDATE public.tenants target_tenant
+  SET version = target_tenant.version + 1, updated_at = now()
+  WHERE target_tenant.id = p_target_tenant_id
+    AND target_tenant.version = p_expected_tenant_version
+  RETURNING target_tenant.version INTO updated_tenant_version;
+  IF NOT FOUND THEN
+    IF EXISTS (SELECT 1 FROM public.tenants WHERE id = p_target_tenant_id) THEN
+      RAISE EXCEPTION 'tenant version is stale' USING ERRCODE = '40001';
+    END IF;
+    RAISE EXCEPTION 'tenant not found' USING ERRCODE = 'P0002';
+  END IF;
+
+  SELECT coalesce(max(existing_entitlement.entitlement_version), 0) + 1
+  INTO next_entitlement_version
+  FROM public.tenant_entitlements existing_entitlement
+  WHERE existing_entitlement.tenant_id = p_target_tenant_id
+    AND existing_entitlement.module_code = p_module_code;
+  IF p_entitlement_version <> next_entitlement_version THEN
+    RAISE EXCEPTION 'entitlement version is stale' USING ERRCODE = '40001';
+  END IF;
+
+  INSERT INTO public.tenant_entitlements (
+    id, tenant_id, module_code, entitlement_version, state, quota_limit,
+    usage_value, valid_from, valid_until, created_by_user_id
+  ) VALUES (
+    p_entitlement_id, p_target_tenant_id, p_module_code, p_entitlement_version,
+    'ACTIVE', p_quota_limit, 0, p_valid_from, p_valid_until, p_target_created_by_user_id
+  );
+
+  response := jsonb_build_object(
+    'tenant_id', p_target_tenant_id, 'module_code', p_module_code,
+    'entitlement_version', p_entitlement_version, 'tenant_version', updated_tenant_version
+  );
+  INSERT INTO public.audit_events (
+    id, tenant_id, subject_id, request_id, action, entity_type, entity_id, payload
+  ) VALUES (
+    p_operation_id, p_actor_tenant_id, p_actor_user_id, p_operation_id,
+    'platform.entitlement.manage', 'tenant_entitlement', p_entitlement_id,
+    jsonb_build_object('target_tenant_id', p_target_tenant_id, 'response', response)
+  );
+  INSERT INTO public.outbox_events (
+    id, tenant_id, aggregate_type, aggregate_id, aggregate_version,
+    event_type, payload, dedupe_key, trace_id
+  ) VALUES (
+    p_operation_id, p_target_tenant_id, 'TENANT', p_target_tenant_id,
+    updated_tenant_version, 'TENANT_ENTITLEMENT_CHANGED', response,
+    'control:' || p_operation_id, p_operation_id
+  );
+  UPDATE public.idempotency_records record_row
+  SET response_status = 200, response_headers = '{}'::jsonb, response_body = response
+  WHERE record_row.tenant_id = p_actor_tenant_id
+    AND record_row.idempotency_key = p_idempotency_key;
+
+  RETURN QUERY SELECT
+    p_target_tenant_id, p_module_code, p_entitlement_version, updated_tenant_version, false;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION control_plane_create_tenant(
+  text, text, text, text, text, text, text, text
+) FROM PUBLIC;
+REVOKE ALL ON FUNCTION control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) FROM PUBLIC;
+REVOKE ALL ON FUNCTION control_plane_set_entitlement(
+  text, text, text, text, text, integer, text, bigint,
+  timestamptz, timestamptz, bigint, text, text, text
+) FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO zhili_control_plane;
+GRANT EXECUTE ON FUNCTION control_plane_create_tenant(
+  text, text, text, text, text, text, text, text
+) TO zhili_control_plane;
+GRANT EXECUTE ON FUNCTION control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) TO zhili_control_plane;
+GRANT EXECUTE ON FUNCTION control_plane_set_entitlement(
+  text, text, text, text, text, integer, text, bigint,
+  timestamptz, timestamptz, bigint, text, text, text
+) TO zhili_control_plane;
+
+-- Pre-tenant auth anti-enumeration boundary. Every lookup returns exactly one credential-shaped
+-- row; only an unambiguous active tenant/user match receives the real verifier.
+DROP FUNCTION auth_lookup_password(text, text);
+CREATE FUNCTION auth_lookup_password(p_account text, p_tenant_hint text)
+RETURNS TABLE (tenant_id text, user_id text, password_hash text)
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+  WITH normalized_input AS (
+    SELECT
+      lower(btrim(p_account)) AS account,
+      nullif(lower(btrim(p_tenant_hint)), '') AS tenant_hint
+  ),
+  candidates AS MATERIALIZED (
+    SELECT user_row.tenant_id, user_row.id AS user_id, user_row.password_hash
+    FROM public.users user_row
+    JOIN public.tenants tenant_row ON tenant_row.id = user_row.tenant_id
+    CROSS JOIN normalized_input input_row
+    WHERE user_row.login_name_normalized = input_row.account
+      AND (input_row.tenant_hint IS NULL OR tenant_row.slug = input_row.tenant_hint)
+      AND tenant_row.status = 'ACTIVE'
+      AND user_row.status = 'ACTIVE'
+      AND user_row.password_hash IS NOT NULL
+    ORDER BY user_row.tenant_id, user_row.id
+    LIMIT 2
+  ),
+  candidate_rollup AS (
+    SELECT
+      count(*) AS candidate_count,
+      min(candidates.tenant_id) AS tenant_id,
+      min(candidates.user_id) AS user_id,
+      min(candidates.password_hash) AS password_hash
+    FROM candidates
+  )
+  SELECT
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.tenant_id ELSE '01J0000000000000000000000A' END,
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.user_id ELSE '01J0000000000000000000000B' END,
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.password_hash
+      ELSE '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1kdW1teQ$YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk'
+    END
+  FROM candidate_rollup
+$$;
+
+COMMENT ON FUNCTION auth_lookup_password(text, text) IS
+  'Always returns one verifier row. The auth service must perform one Argon2id verify and return the same rate-limited generic failure for every mismatch.';
+REVOKE ALL ON FUNCTION auth_lookup_password(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION auth_lookup_password(text, text) TO zhili_auth;
