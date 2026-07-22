@@ -1,0 +1,307 @@
+x-json-logging: &json-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: '3'
+
+x-health-defaults: &health-defaults
+  interval: 5s
+  timeout: 3s
+  retries: 20
+  start_period: 10s
+
+x-one-shot-limits: &one-shot-limits
+  cpus: 0.5
+  mem_limit: 256m
+  pids_limit: 128
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+    ports:
+      - '127.0.0.1:${POSTGRES_PORT}:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      <<: *health-defaults
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+    cpus: 1.0
+    mem_limit: 768m
+    pids_limit: 256
+    logging: *json-logging
+
+  redis:
+    image: redis:8-alpine
+    command:
+      - redis-server
+      - --appendonly
+      - 'yes'
+      - --requirepass
+      - ${REDIS_PASSWORD}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    ports:
+      - '127.0.0.1:${REDIS_PORT}:6379'
+    volumes:
+      - redis-data:/data
+    networks:
+      - backend
+    healthcheck:
+      <<: *health-defaults
+      test:
+        - CMD-SHELL
+        - REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli --no-auth-warning ping | grep '^PONG$'
+    cpus: 0.5
+    mem_limit: 256m
+    pids_limit: 128
+    logging: *json-logging
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    command:
+      - server
+      - /data
+      - --console-address
+      - :9001
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    ports:
+      - '127.0.0.1:${MINIO_API_PORT}:9000'
+      - '127.0.0.1:${MINIO_CONSOLE_PORT}:9001'
+    volumes:
+      - minio-data:/data
+    networks:
+      - backend
+    healthcheck:
+      <<: *health-defaults
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - http://127.0.0.1:9000/minio/health/live
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 256
+    logging: *json-logging
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - >-
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}"
+        "$${MINIO_ROOT_PASSWORD}" >/dev/null && mc mb --ignore-existing
+        "local/$${MINIO_BUCKET}" >/dev/null && echo MINIO_INIT_OK
+    environment:
+      MC_CONFIG_DIR: /tmp/.mc
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: 'no'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    <<: *one-shot-limits
+    logging: *json-logging
+
+  migrate:
+    image: zhili-task6-api:local
+    command:
+      - node
+      - /app/infra/scripts/migrate.mjs
+    environment:
+      NODE_ENV: production
+      ADMIN_DATABASE_URL: postgresql://postgres:${POSTGRES_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://zhili_api_login:${POSTGRES_API_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      WORKER_DATABASE_URL: postgresql://zhili_worker_login:${POSTGRES_WORKER_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MIGRATIONS_FOLDER: /app/packages/db/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+    restart: 'no'
+    user: '10001:10001'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    <<: *one-shot-limits
+    logging: *json-logging
+
+  api:
+    image: zhili-task6-api:local
+    build:
+      context: ..
+      dockerfile: infra/docker/api.Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      LOG_LEVEL: ${LOG_LEVEL}
+      DATABASE_URL: postgresql://zhili_api_login:${POSTGRES_API_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      SESSION_KEY: ${SESSION_KEY}
+      ENVELOPE_MASTER_KEY: ${ENVELOPE_MASTER_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+    ports:
+      - '127.0.0.1:${API_PORT}:3000'
+    networks:
+      - backend
+    user: '10001:10001'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    healthcheck:
+      <<: *health-defaults
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/api/v1/health/ready',
+          {signal:AbortSignal.timeout(3000)}).then((response)=>{
+          if(!response.ok)process.exit(1)}).catch(()=>process.exit(1))
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 256
+    logging: *json-logging
+
+  worker:
+    image: zhili-task6-worker:local
+    build:
+      context: ..
+      dockerfile: infra/docker/worker.Dockerfile
+      network: ${DOCKER_BUILD_NETWORK:-default}
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: ${LOG_LEVEL}
+      WORKER_DATABASE_URL: postgresql://zhili_worker_login:${POSTGRES_WORKER_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
+      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      SESSION_KEY: ${SESSION_KEY}
+      ENVELOPE_MASTER_KEY: ${ENVELOPE_MASTER_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - backend
+    user: '10001:10001'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    healthcheck:
+      <<: *health-defaults
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const argv=require('fs').readFileSync('/proc/1/cmdline').toString()
+          .split('\0').filter(Boolean);process.exit(argv.length===2&&
+          (argv[0]==='node'||argv[0].endsWith('/node'))&&
+          argv[1]==='dist/main.js'?0:1)
+    cpus: 1.0
+    mem_limit: 512m
+    pids_limit: 256
+    logging: *json-logging
+
+  object-smoke:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    profiles:
+      - smoke
+    entrypoint:
+      - /bin/sh
+      - -c
+    command:
+      - >-
+        set -eu; test -n "$${OBJECT_SMOKE_KEY}"; test -n "$${OBJECT_SMOKE_BODY}";
+        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}"
+        "$${MINIO_ROOT_PASSWORD}" >/dev/null; printf '%s' "$${OBJECT_SMOKE_BODY}"
+        > /tmp/object-smoke; mc cp /tmp/object-smoke
+        "local/$${MINIO_BUCKET}/$${OBJECT_SMOKE_KEY}" >/dev/null;
+        actual=$$(mc cat "local/$${MINIO_BUCKET}/$${OBJECT_SMOKE_KEY}");
+        test "$${actual}" = "$${OBJECT_SMOKE_BODY}"; mc stat
+        "local/$${MINIO_BUCKET}/$${OBJECT_SMOKE_KEY}" >/dev/null;
+        bytes=$$(wc -c < /tmp/object-smoke | tr -d ' ');
+        echo "OBJECT_SMOKE_OK operations=cp-cat-stat bytes=$${bytes}"
+    environment:
+      MC_CONFIG_DIR: /tmp/.mc
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET}
+    networks:
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    <<: *one-shot-limits
+    logging: *json-logging
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

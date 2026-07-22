@@ -20,6 +20,7 @@
     "lint": "turbo run lint && markdownlint-cli2 '**/*.md'",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:compose": "sh infra/scripts/smoke.sh",
     "test:ui": "pnpm --filter @zhili/ui test",
     "e2e": "playwright test",
     "format": "prettier --write .",

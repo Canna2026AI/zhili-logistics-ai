@@ -1,0 +1,31 @@
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_app') THEN
+    CREATE ROLE zhili_app;
+  END IF;
+  ALTER ROLE zhili_app
+    NOLOGIN
+    NOSUPERUSER
+    NOCREATEDB
+    NOCREATEROLE
+    NOINHERIT
+    NOREPLICATION
+    NOBYPASSRLS;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_worker') THEN
+    CREATE ROLE zhili_worker;
+  END IF;
+  ALTER ROLE zhili_worker
+    NOLOGIN
+    NOSUPERUSER
+    NOCREATEDB
+    NOCREATEROLE
+    NOINHERIT
+    NOREPLICATION
+    NOBYPASSRLS;
+END
+$$;
