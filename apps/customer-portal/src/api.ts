@@ -7,10 +7,13 @@ export type CustomerAddressInput = Omit<
 >;
 
 const meta = { requestId: 'req-f1c-customer', asOf: '2026-07-22T00:00:00.000Z' };
-const json = (body: unknown, status = 200) =>
+const json = (body: unknown, status = 200, authoritativeVersion?: number) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', ETag: '"1"' },
+    headers: {
+      'content-type': 'application/json',
+      ...(authoritativeVersion === undefined ? {} : { ETag: `"${authoritativeVersion}"` }),
+    },
   });
 
 export type QuoteRequest = {
@@ -63,9 +66,9 @@ export type VersionDifference = {
   server: string;
 };
 
-const mockFetch: typeof fetch = async (input) => {
+export const customerMockFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
-  const path = new URL(request.url, window.location.origin).pathname;
+  const path = new URL(request.url).pathname;
   if (path.endsWith('/quotes')) {
     const body = (await request.clone().json()) as {
       destination: { postalCode?: string };
@@ -157,6 +160,8 @@ const mockFetch: typeof fetch = async (input) => {
       quoteOptionId: string;
       acceptedQuoteVersion: number;
     };
+    const currentVersion = Number(request.headers.get('If-Match')?.replaceAll('"', '') ?? 1);
+    const orderVersion = currentVersion + 1;
     return json(
       {
         data: {
@@ -167,12 +172,13 @@ const mockFetch: typeof fetch = async (input) => {
           linkVersion: 1,
           orderId: acceptedQuoteLink[1],
           waybillId: '01JWAYBILL000000000000001',
-          orderVersion: 2,
+          orderVersion,
           waybillVersion: 1,
         },
         meta,
       },
-      201
+      201,
+      orderVersion
     );
   }
   if (path.endsWith('/payments/statement-orders'))
@@ -266,7 +272,7 @@ async function localCommand<TRequest extends Record<string, unknown>, TResponse>
   return (await mockCustomerCommandFetch(path, body)) as TResponse;
 }
 
-const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: mockFetch });
+const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: customerMockFetch });
 const key = () => `f1c-${crypto.randomUUID?.() ?? Date.now()}`;
 
 function ensure<T>(data: T | undefined, error: unknown): T {

@@ -3211,8 +3211,6 @@ paths:
                 $ref: '#/components/schemas/ShipmentRestrictionValidationResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /orders/{orderId}:copy:
@@ -3772,8 +3770,6 @@ paths:
                 $ref: '#/components/schemas/LoadCompatibilityValidationResponse'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '409':
-          $ref: '#/components/responses/StaleVersion'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
   /linehaul/fba-shipment-links:
@@ -6206,37 +6202,62 @@ components:
       properties:
         optionId: {$ref: '#/components/schemas/Ulid'}
         reason: {type: string, minLength: 2}
-    FieldProjectionDecision:
+    SecuredTextProjection:
+      oneOf:
+        - $ref: '#/components/schemas/ReadSecuredTextProjection'
+        - $ref: '#/components/schemas/MaskedSecuredTextProjection'
+        - $ref: '#/components/schemas/DeniedSecuredTextProjection'
+      discriminator:
+        propertyName: access
+        mapping:
+          READ: '#/components/schemas/ReadSecuredTextProjection'
+          MASK: '#/components/schemas/MaskedSecuredTextProjection'
+          DENY: '#/components/schemas/DeniedSecuredTextProjection'
+    ReadSecuredTextProjection:
+      type: object
+      additionalProperties: false
+      required: [access, rawValue, displayValue, copyAllowed, exportAllowed]
+      properties:
+        access: {type: string, const: READ}
+        rawValue: {type: string, minLength: 1}
+        displayValue: {type: string, minLength: 1}
+        copyAllowed: {type: boolean}
+        exportAllowed: {type: boolean}
+    MaskedSecuredTextProjection:
+      type: object
+      additionalProperties: false
+      required: [access, displayValue, copyAllowed, exportAllowed]
+      properties:
+        access: {type: string, const: MASK}
+        displayValue:
+          type: string
+          minLength: 1
+          pattern: '^(?=.*(?:\*|•|·|X|x)).+$'
+          description: Server-generated masked value containing at least one masking glyph.
+        copyAllowed: {type: boolean}
+        exportAllowed: {type: boolean}
+    DeniedSecuredTextProjection:
       type: object
       additionalProperties: false
       required: [access, copyAllowed, exportAllowed]
       properties:
-        access: {type: string, enum: [READ, MASK, DENY]}
-        copyAllowed: {type: boolean}
-        exportAllowed: {type: boolean}
-        maskPattern: {type: string, minLength: 1, maxLength: 80}
-    WaybillFieldPolicyProjection:
-      type: object
-      additionalProperties: false
-      required: [customerName, customerCode, contactName, contactPhone]
-      properties:
-        customerName: {$ref: '#/components/schemas/FieldProjectionDecision'}
-        customerCode: {$ref: '#/components/schemas/FieldProjectionDecision'}
-        contactName: {$ref: '#/components/schemas/FieldProjectionDecision'}
-        contactPhone: {$ref: '#/components/schemas/FieldProjectionDecision'}
+        access: {type: string, const: DENY}
+        copyAllowed: {type: boolean, const: false}
+        exportAllowed: {type: boolean, const: false}
     Waybill:
       type: object
       additionalProperties: false
-      required: [id, waybillNo, masterNo, fieldPolicy, route, service, transport, forecastWeightKg, actualWeightKg, volumeM3, pieces, createdAt, state, branch, timeline, allowedActions, version]
+      required: [id, waybillNo, masterNo, customerCode, senderPhone, recipientPhone, consigneeAddress, route, service, transport, forecastWeightKg, actualWeightKg, volumeM3, pieces, createdAt, state, branch, timeline, allowedActions, version]
       properties:
         id: {$ref: '#/components/schemas/Ulid'}
         waybillNo: {type: string, examples: [S2505120004]}
         masterNo: {type: [string, 'null']}
         customerName: {type: string}
-        customerCode: {type: string}
+        customerCode: {$ref: '#/components/schemas/SecuredTextProjection'}
         contactName: {type: [string, 'null']}
-        contactPhone: {type: [string, 'null']}
-        fieldPolicy: {$ref: '#/components/schemas/WaybillFieldPolicyProjection'}
+        senderPhone: {$ref: '#/components/schemas/SecuredTextProjection'}
+        recipientPhone: {$ref: '#/components/schemas/SecuredTextProjection'}
+        consigneeAddress: {$ref: '#/components/schemas/SecuredTextProjection'}
         route: {type: string}
         service: {type: string}
         transport: {type: string, enum: [AIR, SEA, RAIL, ROAD, EXPRESS]}

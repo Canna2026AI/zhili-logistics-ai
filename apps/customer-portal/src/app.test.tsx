@@ -6,6 +6,7 @@ import type { ComponentType } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
 import { customerPort } from './api';
+import * as customerApiModule from './api';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -15,6 +16,28 @@ afterEach(() => {
 });
 
 describe('客户门户', () => {
+  it('报价关联 mock 的强 ETag 与权威订单版本一致', async () => {
+    const customerMockFetch = (customerApiModule as unknown as { customerMockFetch?: typeof fetch })
+      .customerMockFetch;
+    expect(customerMockFetch).toBeTypeOf('function');
+    if (!customerMockFetch) return;
+
+    const response = await customerMockFetch(
+      new Request('http://localhost/api/v1/orders/01JORDER000000000000000006:link-accepted-quote', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'If-Match': '"7"' },
+        body: JSON.stringify({
+          quoteId: '01JQUOTE000000000000000042',
+          quoteOptionId: '01JQUOTEOPTION0000000000001',
+          acceptedQuoteVersion: 2,
+        }),
+      })
+    );
+    const body = (await response.json()) as { data: { orderVersion: number } };
+    expect(body.data.orderVersion).toBe(8);
+    expect(response.headers.get('ETag')).toBe('"8"');
+  });
+
   it('折叠菜单提供十个页面、隔离背景并在 Escape 后恢复触发点焦点', async () => {
     const user = userEvent.setup();
     const { container } = render(<App />);

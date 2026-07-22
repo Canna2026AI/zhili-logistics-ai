@@ -3539,18 +3539,42 @@ export interface components {
       optionId: components['schemas']['Ulid'];
       reason: string;
     };
-    FieldProjectionDecision: {
-      /** @enum {string} */
-      access: 'READ' | 'MASK' | 'DENY';
+    SecuredTextProjection:
+      | components['schemas']['ReadSecuredTextProjection']
+      | components['schemas']['MaskedSecuredTextProjection']
+      | components['schemas']['DeniedSecuredTextProjection'];
+    ReadSecuredTextProjection: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      access: 'READ';
+      rawValue: string;
+      displayValue: string;
       copyAllowed: boolean;
       exportAllowed: boolean;
-      maskPattern?: string;
     };
-    WaybillFieldPolicyProjection: {
-      customerName: components['schemas']['FieldProjectionDecision'];
-      customerCode: components['schemas']['FieldProjectionDecision'];
-      contactName: components['schemas']['FieldProjectionDecision'];
-      contactPhone: components['schemas']['FieldProjectionDecision'];
+    MaskedSecuredTextProjection: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      access: 'MASK';
+      /** @description Server-generated masked value containing at least one masking glyph. */
+      displayValue: string;
+      copyAllowed: boolean;
+      exportAllowed: boolean;
+    };
+    DeniedSecuredTextProjection: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      access: 'DENY';
+      /** @constant */
+      copyAllowed: false;
+      /** @constant */
+      exportAllowed: false;
     };
     Waybill: {
       id: components['schemas']['Ulid'];
@@ -3558,10 +3582,11 @@ export interface components {
       waybillNo: string;
       masterNo: string | null;
       customerName?: string;
-      customerCode?: string;
+      customerCode: components['schemas']['SecuredTextProjection'];
       contactName?: string | null;
-      contactPhone?: string | null;
-      fieldPolicy: components['schemas']['WaybillFieldPolicyProjection'];
+      senderPhone: components['schemas']['SecuredTextProjection'];
+      recipientPhone: components['schemas']['SecuredTextProjection'];
+      consigneeAddress: components['schemas']['SecuredTextProjection'];
       route: string;
       service: string;
       /** @enum {string} */
@@ -8994,7 +9019,6 @@ export interface operations {
         };
       };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -9499,7 +9523,6 @@ export interface operations {
         };
       };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
       422: components['responses']['StateTransitionFailed'];
     };
   };

@@ -6,15 +6,28 @@ const waybillProjection = {
   waybillNo: 'S2505120004',
   masterNo: 'HBL2505120004',
   customerName: '深圳鑫源贸易有限公司',
-  customerCode: 'CUST00256',
-  contactName: '王志强',
-  contactPhone: '139 2654 8800',
-  fieldPolicy: {
-    customerName: { access: 'READ', copyAllowed: true, exportAllowed: true },
-    customerCode: { access: 'READ', copyAllowed: true, exportAllowed: true },
-    contactName: { access: 'READ', copyAllowed: true, exportAllowed: true },
-    contactPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  customerCode: {
+    access: 'READ',
+    rawValue: 'CUST00256',
+    displayValue: 'CUST00256',
+    copyAllowed: true,
+    exportAllowed: true,
   },
+  contactName: '王志强',
+  senderPhone: {
+    access: 'MASK',
+    displayValue: '0755 **** 6600',
+    copyAllowed: false,
+    exportAllowed: false,
+  },
+  recipientPhone: {
+    access: 'READ',
+    rawValue: '139 2654 8800',
+    displayValue: '139 2654 8800',
+    copyAllowed: true,
+    exportAllowed: true,
+  },
+  consigneeAddress: { access: 'DENY', copyAllowed: false, exportAllowed: false },
   route: 'CN-SZX → US-LAX',
   service: 'DHL Express Worldwide',
   transport: 'SEA',
@@ -220,15 +233,22 @@ describe('waybill OpenAPI adapter', () => {
           id: 'waybill-1',
           waybillNo: 'S2505120004',
           masterNo: null,
-          customerName: '深***公司',
-          contactName: '王**',
-          contactPhone: '139 **** 8800',
-          fieldPolicy: {
-            customerName: { access: 'MASK', copyAllowed: false, exportAllowed: false },
-            customerCode: { access: 'DENY', copyAllowed: false, exportAllowed: false },
-            contactName: { access: 'MASK', copyAllowed: false, exportAllowed: false },
-            contactPhone: { access: 'MASK', copyAllowed: false, exportAllowed: false },
+          customerName: '深圳鑫源贸易有限公司',
+          customerCode: { access: 'DENY', copyAllowed: false, exportAllowed: false },
+          contactName: '王志强',
+          senderPhone: {
+            access: 'MASK',
+            displayValue: '0755 **** 6600',
+            copyAllowed: false,
+            exportAllowed: false,
           },
+          recipientPhone: {
+            access: 'MASK',
+            displayValue: '139 **** 8800',
+            copyAllowed: false,
+            exportAllowed: false,
+          },
+          consigneeAddress: { access: 'DENY', copyAllowed: false, exportAllowed: false },
           route: 'CN-SZX → US-LAX',
           service: 'DHL Express Worldwide',
           transport: 'EXPRESS',
@@ -246,11 +266,14 @@ describe('waybill OpenAPI adapter', () => {
       },
     });
     const detail = await createWaybillApi({ GET, POST: vi.fn() } as never).get('waybill-1');
-    expect(detail.customer).toBe('深***公司');
+    expect(detail.customer).toBe('深圳鑫源贸易有限公司');
     expect(detail.customerCode).toBe('');
+    expect(detail.senderPhone).toBe('0755 **** 6600');
+    expect(detail.recipientPhone).toBe('139 **** 8800');
+    expect(detail.consigneeAddress).toBe('');
     expect(detail.fieldDecisions).toMatchObject({
-      customer: { access: 'MASK' },
       customerCode: { access: 'DENY' },
+      contactPhone: { access: 'MASK' },
     });
   });
 

@@ -2,15 +2,18 @@ import { createZhiliClient } from '@zhili/api-client';
 import type { ZhiliApiClient } from '@zhili/api-client';
 import type { components } from '@zhili/contracts';
 
-const json = (body: unknown, status = 200) =>
+const json = (body: unknown, status = 200, authoritativeVersion?: number) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', ETag: '"2"' },
+    headers: {
+      'content-type': 'application/json',
+      ...(authoritativeVersion === undefined ? {} : { ETag: `"${authoritativeVersion}"` }),
+    },
   });
 const meta = { requestId: 'req-f1c-platform', asOf: '2026-07-22T00:00:00.000Z' };
-const mockFetch: typeof fetch = async (input) => {
+export const platformMockFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
-  const path = new URL(request.url, window.location.origin).pathname;
+  const path = new URL(request.url).pathname;
   if (path.endsWith('/platform/tenants'))
     return json(
       {
@@ -23,7 +26,8 @@ const mockFetch: typeof fetch = async (input) => {
         },
         meta,
       },
-      201
+      201,
+      1
     );
   if (path.endsWith('/platform/impersonations'))
     return json(
@@ -44,16 +48,21 @@ const mockFetch: typeof fetch = async (input) => {
   if (tenantStatus) {
     const body = (await request.clone().json()) as { status: 'ACTIVE' | 'SUSPENDED' };
     const currentVersion = Number(request.headers.get('If-Match')?.replaceAll('"', '') ?? 1);
-    return json({
-      data: {
-        id: tenantStatus[1],
-        name: '上海智立科技有限公司',
-        slug: 'zhili-sh',
-        status: body.status,
-        version: currentVersion + 1,
+    const nextVersion = currentVersion + 1;
+    return json(
+      {
+        data: {
+          id: tenantStatus[1],
+          name: '上海智立科技有限公司',
+          slug: 'zhili-sh',
+          status: body.status,
+          version: nextVersion,
+        },
+        meta,
       },
-      meta,
-    });
+      200,
+      nextVersion
+    );
   }
   const tenantEntitlements = path.match(/\/platform\/tenants\/([^/]+)\/entitlements$/);
   if (tenantEntitlements) {
@@ -61,14 +70,19 @@ const mockFetch: typeof fetch = async (input) => {
       .clone()
       .json()) as components['schemas']['UpdateTenantEntitlementsRequest'];
     const currentVersion = Number(request.headers.get('If-Match')?.replaceAll('"', '') ?? 1);
-    return json({
-      data: {
-        tenantId: tenantEntitlements[1],
-        modules: body.modules,
-        version: currentVersion + 1,
+    const nextVersion = currentVersion + 1;
+    return json(
+      {
+        data: {
+          tenantId: tenantEntitlements[1],
+          modules: body.modules,
+          version: nextVersion,
+        },
+        meta,
       },
-      meta,
-    });
+      200,
+      nextVersion
+    );
   }
   return json({ message: `No typed mock route for ${path}` }, 404);
 };
@@ -98,7 +112,7 @@ const platformCommand = async <TResponse>(
   throw new Error(`未实现的平台命令：${path}`);
 };
 
-const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: mockFetch });
+const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: platformMockFetch });
 const key = () => `f1c-${crypto.randomUUID?.() ?? Date.now()}`;
 const ensure = <T>(data: T | undefined, error: unknown): T => {
   if (!data || error) throw new Error('平台命令失败，输入已保留，请重试。');

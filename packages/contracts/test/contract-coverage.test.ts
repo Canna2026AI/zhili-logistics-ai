@@ -1,13 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const contract = readFileSync(
   resolve(packageRoot, "openapi/zhili.openapi.yaml"),
   "utf8",
 );
+const openapi = parse(contract) as {
+  components: { schemas: Record<string, Record<string, unknown>> };
+};
 const flowMap = JSON.parse(
   readFileSync(resolve(packageRoot, "core-flow-operation-map.json"), "utf8"),
 ) as Record<string, string[]>;
@@ -268,7 +273,9 @@ describe("Backend B1 hardened operation contracts", () => {
       "customerName",
       "customerCode",
       "contactName",
-      "contactPhone",
+      "senderPhone",
+      "recipientPhone",
+      "consigneeAddress",
       "route",
       "service",
       "transport",
@@ -551,19 +558,121 @@ describe("Backend B1 hardened operation contracts", () => {
 
   it("projects Waybill PII with reusable READ MASK and DENY decisions", () => {
     const waybill = schemaBlock("Waybill");
-    expect(waybill).toContain("fieldPolicy:");
-    const required = waybill.match(/required:\s*\[([^\]]+)\]/)?.[1] ?? "";
-    for (const field of ["customerName", "customerCode", "contactName", "contactPhone"]) {
-      expect(required).not.toContain(field);
+    for (const field of [
+      "customerCode",
+      "senderPhone",
+      "recipientPhone",
+      "consigneeAddress",
+    ]) {
+      expect(waybill).toContain(`${field}: {$ref: '#/components/schemas/SecuredTextProjection'}`);
     }
-    const policy = schemaBlock("WaybillFieldPolicyProjection");
-    for (const field of ["customerName", "customerCode", "contactName", "contactPhone"]) {
-      expect(policy).toContain(`${field}:`);
+    const secured = schemaBlock("SecuredTextProjection");
+    for (const variant of [
+      "ReadSecuredTextProjection",
+      "MaskedSecuredTextProjection",
+      "DeniedSecuredTextProjection",
+    ]) {
+      expect(secured).toContain(variant);
+      expect(schemaBlock(variant)).toContain("additionalProperties: false");
     }
-    const decision = schemaBlock("FieldProjectionDecision");
-    expect(decision).toContain("enum: [READ, MASK, DENY]");
-    expect(decision).toContain("copyAllowed:");
-    expect(decision).toContain("exportAllowed:");
+    expect(schemaBlock("ReadSecuredTextProjection")).toContain("rawValue:");
+    expect(schemaBlock("MaskedSecuredTextProjection")).not.toContain("rawValue:");
+    expect(schemaBlock("DeniedSecuredTextProjection")).toContain(
+      "copyAllowed: {type: boolean, const: false}",
+    );
+    expect(schemaBlock("DeniedSecuredTextProjection")).toContain(
+      "exportAllowed: {type: boolean, const: false}",
+    );
+  });
+
+  it("makes secured Waybill PII combinations machine-valid or machine-invalid", () => {
+    const schemas = openapi.components.schemas;
+    const secured = schemas.SecuredTextProjection;
+    expect(secured).toBeDefined();
+    const oneOf = secured?.oneOf as Array<{ $ref: string }>;
+    const projectionSchema = {
+      oneOf: oneOf.map(({ $ref }) => schemas[$ref.split("/").at(-1)!]),
+    };
+    const validate = new Ajv2020({ allErrors: true, strict: false }).compile(
+      projectionSchema,
+    );
+
+    for (const valid of [
+      {
+        access: "READ",
+        rawValue: "CUST-001",
+        displayValue: "CUST-001",
+        copyAllowed: true,
+        exportAllowed: true,
+      },
+      {
+        access: "MASK",
+        displayValue: "CUST-***",
+        copyAllowed: false,
+        exportAllowed: false,
+      },
+      { access: "DENY", copyAllowed: false, exportAllowed: false },
+    ]) {
+      expect(validate(valid), JSON.stringify(validate.errors)).toBe(true);
+    }
+
+    for (const invalid of [
+      {
+        access: "DENY",
+        rawValue: "CUST-001",
+        copyAllowed: false,
+        exportAllowed: false,
+      },
+      {
+        access: "DENY",
+        copyAllowed: true,
+        exportAllowed: false,
+      },
+      {
+        access: "DENY",
+        copyAllowed: false,
+        exportAllowed: true,
+      },
+      {
+        access: "MASK",
+        rawValue: "CUST-001",
+        displayValue: "CUST-***",
+        copyAllowed: false,
+        exportAllowed: false,
+      },
+    ]) {
+      expect(validate(invalid), JSON.stringify(invalid)).toBe(false);
+    }
+
+    const waybill = schemas.Waybill;
+    const properties = waybill?.properties as Record<
+      string,
+      { $ref?: string }
+    >;
+    for (const field of [
+      "customerCode",
+      "senderPhone",
+      "recipientPhone",
+      "consigneeAddress",
+    ]) {
+      expect(properties[field]?.$ref).toBe(
+        "#/components/schemas/SecuredTextProjection",
+      );
+    }
+    expect(properties.fieldPolicy).toBeUndefined();
+    expect(properties.contactPhone).toBeUndefined();
+  });
+
+  it("does not advertise stale versions for stateless validation", () => {
+    for (const operationId of [
+      "validateShipmentRestrictions",
+      "validateLoadCompatibility",
+    ]) {
+      const operation = operationBlock(operationId);
+      expect(operation).not.toContain("#/components/responses/StaleVersion");
+      expect(operation).not.toContain("409:");
+      expect(operation).not.toContain("'409':");
+    }
   });
 
   it("requires authoritative operation-specific responses instead of generic acknowledgements", () => {

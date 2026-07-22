@@ -189,6 +189,9 @@ export interface WaybillDetail {
   customerCode: string;
   contactName: string;
   contactPhone: string;
+  senderPhone: string;
+  recipientPhone: string;
+  consigneeAddress: string;
   route: string;
   service: string;
   transport: string;
@@ -202,9 +205,12 @@ export interface WaybillDetail {
   branch: string;
   timeline: string[];
   fieldDecisions: Record<WaybillSensitiveField, WaybillServerFieldDecision>;
+  securedFieldDecisions: Record<WaybillSecuredField, WaybillServerFieldDecision>;
 }
 
 export type WaybillSensitiveField = 'customer' | 'customerCode' | 'contactName' | 'contactPhone';
+export type WaybillSecuredField =
+  'customerCode' | 'senderPhone' | 'recipientPhone' | 'consigneeAddress';
 export type WaybillFieldPolicy = Partial<Record<WaybillSensitiveField, 'ALLOW' | 'MASK' | 'HIDE'>>;
 export interface WaybillServerFieldDecision {
   access: 'READ' | 'MASK' | 'DENY';
@@ -218,6 +224,12 @@ const readFieldDecisions: Record<WaybillSensitiveField, WaybillServerFieldDecisi
   customerCode: { access: 'READ', copyAllowed: true, exportAllowed: true },
   contactName: { access: 'READ', copyAllowed: true, exportAllowed: true },
   contactPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
+};
+const readSecuredFieldDecisions: Record<WaybillSecuredField, WaybillServerFieldDecision> = {
+  customerCode: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  senderPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  recipientPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  consigneeAddress: { access: 'READ', copyAllowed: true, exportAllowed: true },
 };
 
 function maskPhone(value: string) {
@@ -303,6 +315,9 @@ export const waybillDetailFixtures: Record<string, WaybillDetail> = Object.fromE
       customerCode: contact.code,
       contactName: contact.name,
       contactPhone: contact.phone,
+      senderPhone: contact.phone,
+      recipientPhone: contact.phone,
+      consigneeAddress: '已授权地址投影',
       route: destinationRoutes[item.destination] ?? `CN-SZX → ${item.destination}`,
       service: contact.service,
       transport: item.transport,
@@ -316,6 +331,7 @@ export const waybillDetailFixtures: Record<string, WaybillDetail> = Object.fromE
       branch: item.branch,
       timeline: [`${item.state} · ${item.branch === '深圳分公司' ? '深圳仓库' : '广州仓库'}`],
       fieldDecisions: readFieldDecisions,
+      securedFieldDecisions: readSecuredFieldDecisions,
     };
     return [item.id, detail];
   })

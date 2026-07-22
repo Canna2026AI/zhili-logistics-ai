@@ -25,6 +25,45 @@ type PlatformApiFactory = (
 };
 
 describe('platform OpenAPI adapter', () => {
+  it('derives status and entitlement mock ETags from non-default authoritative versions', async () => {
+    const platformMockFetch = (apiModule as unknown as { platformMockFetch?: typeof fetch })
+      .platformMockFetch;
+    expect(platformMockFetch).toBeTypeOf('function');
+    if (!platformMockFetch) return;
+
+    const statusResponse = await platformMockFetch(
+      new Request(
+        'http://localhost/api/v1/platform/tenants/01JTENANT0000000000000001:change-status',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'If-Match': '"7"' },
+          body: JSON.stringify({ status: 'SUSPENDED' }),
+        }
+      )
+    );
+    const statusBody = (await statusResponse.json()) as { data: { version: number } };
+    expect(statusBody.data.version).toBe(8);
+    expect(statusResponse.headers.get('ETag')).toBe('"8"');
+
+    const entitlementResponse = await platformMockFetch(
+      new Request(
+        'http://localhost/api/v1/platform/tenants/01JTENANT0000000000000001/entitlements',
+        {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json', 'If-Match': '"7"' },
+          body: JSON.stringify({
+            modules: [{ moduleCode: 'portal', enabled: true, quotas: {} }],
+          }),
+        }
+      )
+    );
+    const entitlementBody = (await entitlementResponse.json()) as {
+      data: { version: number };
+    };
+    expect(entitlementBody.data.version).toBe(8);
+    expect(entitlementResponse.headers.get('ETag')).toBe('"8"');
+  });
+
   it('uses the caller tenant and current version and returns authoritative resources', async () => {
     const createPlatformApi = (apiModule as unknown as { createPlatformApi?: PlatformApiFactory })
       .createPlatformApi;

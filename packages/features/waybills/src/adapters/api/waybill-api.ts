@@ -3,7 +3,7 @@ import type { components } from '@zhili/contracts';
 import {
   waybillDetailFixtures,
   type WaybillDetail,
-  type WaybillSensitiveField,
+  type WaybillSecuredField,
   type WaybillServerFieldDecision,
 } from '../../waybill/model/waybill';
 
@@ -26,13 +26,6 @@ type VersionPrecondition = components['schemas']['WaybillVersionPrecondition'];
 export type WaybillSplitResult = components['schemas']['WaybillSplitResult'];
 export type WaybillMergeResult = components['schemas']['WaybillMergeResult'];
 
-const fieldNames = {
-  customerName: 'customer',
-  customerCode: 'customerCode',
-  contactName: 'contactName',
-  contactPhone: 'contactPhone',
-} as const satisfies Record<string, WaybillSensitiveField>;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -41,60 +34,100 @@ function isPositiveInteger(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= 1;
 }
 
-function toFieldDecision(value: unknown): WaybillServerFieldDecision | null {
+type SecuredProjection = {
+  displayValue: string;
+  decision: WaybillServerFieldDecision;
+};
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]) {
+  const actualKeys = Object.keys(value);
+  return actualKeys.length === keys.length && actualKeys.every((key) => keys.includes(key));
+}
+
+function toSecuredProjection(value: unknown): SecuredProjection | null {
   if (!isRecord(value)) return null;
-  if (
-    !['READ', 'MASK', 'DENY'].includes(String(value.access)) ||
-    typeof value.copyAllowed !== 'boolean' ||
-    typeof value.exportAllowed !== 'boolean' ||
-    (value.maskPattern !== undefined && typeof value.maskPattern !== 'string')
-  ) {
-    return null;
+  if (value.access === 'READ') {
+    if (
+      !hasExactKeys(value, [
+        'access',
+        'rawValue',
+        'displayValue',
+        'copyAllowed',
+        'exportAllowed',
+      ]) ||
+      typeof value.rawValue !== 'string' ||
+      value.rawValue.length === 0 ||
+      typeof value.displayValue !== 'string' ||
+      value.displayValue.length === 0 ||
+      typeof value.copyAllowed !== 'boolean' ||
+      typeof value.exportAllowed !== 'boolean'
+    ) {
+      return null;
+    }
+    return {
+      displayValue: value.displayValue,
+      decision: {
+        access: 'READ',
+        copyAllowed: value.copyAllowed,
+        exportAllowed: value.exportAllowed,
+      },
+    };
   }
-  return {
-    access: value.access as WaybillServerFieldDecision['access'],
-    copyAllowed: value.copyAllowed,
-    exportAllowed: value.exportAllowed,
-    ...(typeof value.maskPattern === 'string' ? { maskPattern: value.maskPattern } : {}),
-  };
+  if (value.access === 'MASK') {
+    if (
+      !hasExactKeys(value, ['access', 'displayValue', 'copyAllowed', 'exportAllowed']) ||
+      typeof value.displayValue !== 'string' ||
+      !/[*•·Xx]/u.test(value.displayValue) ||
+      typeof value.copyAllowed !== 'boolean' ||
+      typeof value.exportAllowed !== 'boolean'
+    ) {
+      return null;
+    }
+    return {
+      displayValue: value.displayValue,
+      decision: {
+        access: 'MASK',
+        copyAllowed: value.copyAllowed,
+        exportAllowed: value.exportAllowed,
+      },
+    };
+  }
+  if (
+    value.access === 'DENY' &&
+    hasExactKeys(value, ['access', 'copyAllowed', 'exportAllowed']) &&
+    value.copyAllowed === false &&
+    value.exportAllowed === false
+  ) {
+    return {
+      displayValue: '',
+      decision: { access: 'DENY', copyAllowed: false, exportAllowed: false },
+    };
+  }
+  return null;
 }
 
 function toWaybillDetail(value: unknown): WaybillDetail | null {
-  if (!isRecord(value) || !isRecord(value.fieldPolicy)) return null;
+  if (!isRecord(value)) return null;
   const record = value;
-  const fieldPolicy = value.fieldPolicy;
   const state =
     typeof record.state === 'string'
       ? stateLabels[record.state as keyof typeof stateLabels]
       : undefined;
-  const fieldDecisions = {} as Record<WaybillSensitiveField, WaybillServerFieldDecision>;
-  const projectedValues = {} as Record<WaybillSensitiveField, string>;
-  for (const [wireField, modelField] of Object.entries(fieldNames) as [
-    keyof typeof fieldNames,
-    WaybillSensitiveField,
-  ][]) {
-    const decision = toFieldDecision(fieldPolicy[wireField]);
-    if (!decision) return null;
-    fieldDecisions[modelField] = decision;
-    const projected = record[wireField];
-    if (decision.access === 'DENY') {
-      projectedValues[modelField] = '';
-    } else if (typeof projected === 'string') {
-      projectedValues[modelField] = projected;
-    } else if (
-      (wireField === 'contactName' || wireField === 'contactPhone') &&
-      projected === null
-    ) {
-      projectedValues[modelField] = '';
-    } else {
-      return null;
-    }
-  }
+  const customerCode = toSecuredProjection(record.customerCode);
+  const senderPhone = toSecuredProjection(record.senderPhone);
+  const recipientPhone = toSecuredProjection(record.recipientPhone);
+  const consigneeAddress = toSecuredProjection(record.consigneeAddress);
   if (
     !state ||
+    !customerCode ||
+    !senderPhone ||
+    !recipientPhone ||
+    !consigneeAddress ||
     typeof record.id !== 'string' ||
     typeof record.waybillNo !== 'string' ||
     !(typeof record.masterNo === 'string' || record.masterNo === null) ||
+    typeof record.customerName !== 'string' ||
+    !(typeof record.contactName === 'string' || record.contactName === null) ||
     typeof record.route !== 'string' ||
     typeof record.service !== 'string' ||
     typeof record.transport !== 'string' ||
@@ -114,10 +147,13 @@ function toWaybillDetail(value: unknown): WaybillDetail | null {
     id: record.id,
     waybillNo: record.waybillNo,
     masterNo: record.masterNo ?? '',
-    customer: projectedValues.customer,
-    customerCode: projectedValues.customerCode,
-    contactName: projectedValues.contactName,
-    contactPhone: projectedValues.contactPhone,
+    customer: record.customerName,
+    customerCode: customerCode.displayValue,
+    contactName: record.contactName ?? '',
+    contactPhone: recipientPhone.displayValue,
+    senderPhone: senderPhone.displayValue,
+    recipientPhone: recipientPhone.displayValue,
+    consigneeAddress: consigneeAddress.displayValue,
     route: record.route,
     service: record.service,
     transport: record.transport,
@@ -130,7 +166,18 @@ function toWaybillDetail(value: unknown): WaybillDetail | null {
     version: record.version,
     branch: record.branch,
     timeline: record.timeline as string[],
-    fieldDecisions,
+    fieldDecisions: {
+      customer: { access: 'READ', copyAllowed: true, exportAllowed: true },
+      customerCode: customerCode.decision,
+      contactName: { access: 'READ', copyAllowed: true, exportAllowed: true },
+      contactPhone: recipientPhone.decision,
+    },
+    securedFieldDecisions: {
+      customerCode: customerCode.decision,
+      senderPhone: senderPhone.decision,
+      recipientPhone: recipientPhone.decision,
+      consigneeAddress: consigneeAddress.decision,
+    } satisfies Record<WaybillSecuredField, WaybillServerFieldDecision>,
   };
 }
 
