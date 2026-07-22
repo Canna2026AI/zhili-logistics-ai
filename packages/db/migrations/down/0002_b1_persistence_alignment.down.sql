@@ -1,5 +1,228 @@
+BEGIN;
+
 -- Reverse only the B1 persistence-alignment migration. Foundation and 0001 domain objects remain.
 -- The migration is intentionally explicit: no schema-, role-, extension-, or unrelated-table drops.
+
+-- Fail before any owner, policy, function, table, column, constraint, or journal-visible shape is
+-- changed. Every NOT NULL and CHECK contract restored below is represented here, including the
+-- constraints where valid 0002 values are a strict superset of valid 0001 values.
+-- These SELECT policies exist only inside this explicit transaction: they are removed immediately
+-- after a successful scan, while a rejected scan rolls their creation back with the transaction.
+DO $$
+DECLARE
+  preflight_table text;
+  rollback_executor text := current_user;
+BEGIN
+  FOREACH preflight_table IN ARRAY ARRAY[
+    'customer_addresses',
+    'organizations',
+    'customer_credit_policies',
+    'tenant_entitlements',
+    'customs_declarations',
+    'declaration_items',
+    'import_jobs',
+    'orders',
+    'quotes',
+    'waybills',
+    'rate_rules',
+    'shipping_channels',
+    'bills_of_lading',
+    'delivery_task_events',
+    'delivery_tasks',
+    'device_event_media_claims',
+    'device_event_receipts',
+    'device_sync_conflicts',
+    'device_sync_sessions',
+    'linehaul_bookings',
+    'load_unit_items',
+    'load_units',
+    'permission_simulations'
+  ]
+  LOOP
+    EXECUTE pg_catalog.format(
+      'CREATE POLICY %I ON public.%I FOR SELECT TO %I USING (true)',
+      'rollback_0001_preflight_' || preflight_table || '_select',
+      preflight_table,
+      rollback_executor
+    );
+  END LOOP;
+END
+$$;
+
+DO $$
+DECLARE
+  rollback_check record;
+  violating_count bigint;
+  violations pg_catalog.jsonb := '[]'::pg_catalog.jsonb;
+BEGIN
+  FOR rollback_check IN
+    SELECT *
+    FROM (VALUES
+      ('customer_addresses', 'address_code NOT NULL',
+        $check$SELECT count(*) FROM public.customer_addresses WHERE address_code IS NULL$check$),
+      ('customer_addresses', 'address_type NOT NULL',
+        $check$SELECT count(*) FROM public.customer_addresses WHERE address_type IS NULL$check$),
+      ('customer_addresses', 'contact_name NOT NULL',
+        $check$SELECT count(*) FROM public.customer_addresses WHERE contact_name IS NULL$check$),
+      ('customer_addresses', 'address_code 0001 check',
+        $check$SELECT count(*) FROM public.customer_addresses WHERE NOT (pg_catalog.length(pg_catalog.btrim(address_code)) BETWEEN 1 AND 64)$check$),
+      ('customer_addresses', 'address_type 0001 check',
+        $check$SELECT count(*) FROM public.customer_addresses WHERE address_type NOT IN ('BILLING', 'PICKUP', 'DELIVERY', 'RETURN')$check$),
+      ('customer_addresses', 'contact_name 0001 check',
+        $check$SELECT count(*) FROM public.customer_addresses WHERE NOT (pg_catalog.length(pg_catalog.btrim(contact_name)) BETWEEN 1 AND 160)$check$),
+      ('organizations', 'organization_type 0001 check',
+        $check$SELECT count(*) FROM public.organizations WHERE organization_type NOT IN ('TENANT_ROOT', 'BUSINESS_UNIT', 'BRANCH', 'PARTNER')$check$),
+      ('customer_credit_policies', 'credit_limit_minor NOT NULL',
+        $check$SELECT count(*) FROM public.customer_credit_policies WHERE credit_limit_minor IS NULL$check$),
+      ('customer_credit_policies', 'payment_cycle NOT NULL',
+        $check$SELECT count(*) FROM public.customer_credit_policies WHERE payment_cycle IS NULL$check$),
+      ('customer_credit_policies', 'hold_policy NOT NULL',
+        $check$SELECT count(*) FROM public.customer_credit_policies WHERE hold_policy IS NULL$check$),
+      ('customer_credit_policies', 'money 0001 check',
+        $check$SELECT count(*) FROM public.customer_credit_policies WHERE currency !~ '^[A-Z]{3}$' OR credit_limit_minor < 0$check$),
+      ('customer_credit_policies', 'payment_cycle 0001 check',
+        $check$SELECT count(*) FROM public.customer_credit_policies WHERE payment_cycle NOT IN ('PREPAID', 'WEEKLY', 'SEMIMONTHLY', 'MONTHLY', 'NET_30', 'NET_60')$check$),
+      ('customer_credit_policies', 'hold_policy 0001 check',
+        $check$SELECT count(*) FROM public.customer_credit_policies WHERE hold_policy NOT IN ('AUTO_HOLD', 'REVIEW', 'ALLOW')$check$),
+      ('tenant_entitlements', 'created_by_user_id NOT NULL',
+        $check$SELECT count(*) FROM public.tenant_entitlements WHERE created_by_user_id IS NULL$check$),
+      ('tenant_entitlements', 'module_code 0001 check',
+        $check$SELECT count(*) FROM public.tenant_entitlements WHERE module_code !~ '^[A-Z][A-Z0-9_]{1,63}$'$check$),
+      ('customs_declarations', 'declaration_number NOT NULL',
+        $check$SELECT count(*) FROM public.customs_declarations WHERE declaration_number IS NULL$check$),
+      ('customs_declarations', 'incoterm NOT NULL',
+        $check$SELECT count(*) FROM public.customs_declarations WHERE incoterm IS NULL$check$),
+      ('customs_declarations', 'declaration_number 0001 check',
+        $check$SELECT count(*) FROM public.customs_declarations WHERE NOT (pg_catalog.length(pg_catalog.btrim(declaration_number)) BETWEEN 1 AND 100)$check$),
+      ('customs_declarations', 'incoterm 0001 check',
+        $check$SELECT count(*) FROM public.customs_declarations WHERE incoterm !~ '^[A-Z]{3}$'$check$),
+      ('declaration_items', 'hs_code NOT NULL',
+        $check$SELECT count(*) FROM public.declaration_items WHERE hs_code IS NULL$check$),
+      ('declaration_items', 'origin_country_code NOT NULL',
+        $check$SELECT count(*) FROM public.declaration_items WHERE origin_country_code IS NULL$check$),
+      ('declaration_items', 'net_weight_grams NOT NULL',
+        $check$SELECT count(*) FROM public.declaration_items WHERE net_weight_grams IS NULL$check$),
+      ('declaration_items', 'hs_code 0001 check',
+        $check$SELECT count(*) FROM public.declaration_items WHERE hs_code !~ '^[0-9]{6,12}$'$check$),
+      ('declaration_items', 'origin_country_code 0001 check',
+        $check$SELECT count(*) FROM public.declaration_items WHERE origin_country_code !~ '^[A-Z]{2}$'$check$),
+      ('declaration_items', 'net_weight_grams 0001 check',
+        $check$SELECT count(*) FROM public.declaration_items WHERE net_weight_grams <= 0$check$),
+      ('import_jobs', 'source_object_key NOT NULL',
+        $check$SELECT count(*) FROM public.import_jobs WHERE source_object_key IS NULL$check$),
+      ('import_jobs', 'source_sha256 NOT NULL',
+        $check$SELECT count(*) FROM public.import_jobs WHERE source_sha256 IS NULL$check$),
+      ('import_jobs', 'idempotency_key NOT NULL',
+        $check$SELECT count(*) FROM public.import_jobs WHERE idempotency_key IS NULL$check$),
+      ('import_jobs', 'import_type 0001 check',
+        $check$SELECT count(*) FROM public.import_jobs WHERE import_type NOT IN ('ORDERS', 'WAYBILLS')$check$),
+      ('import_jobs', 'source 0001 check',
+        $check$SELECT count(*) FROM public.import_jobs WHERE (source_object_key IS NOT NULL AND pg_catalog.length(pg_catalog.btrim(source_object_key)) < 1) OR (source_sha256 IS NOT NULL AND source_sha256 !~ '^[0-9a-f]{64}$')$check$),
+      ('orders', 'idempotency_key NOT NULL',
+        $check$SELECT count(*) FROM public.orders WHERE idempotency_key IS NULL$check$),
+      ('quotes', 'idempotency_key NOT NULL',
+        $check$SELECT count(*) FROM public.quotes WHERE idempotency_key IS NULL$check$),
+      ('waybills', 'idempotency_key NOT NULL',
+        $check$SELECT count(*) FROM public.waybills WHERE idempotency_key IS NULL$check$),
+      ('rate_rules', 'calculation_method 0001 check',
+        $check$SELECT count(*) FROM public.rate_rules WHERE calculation_method NOT IN ('FLAT', 'PER_KG', 'PERCENT', 'MINIMUM')$check$),
+      ('rate_rules', 'money 0001 check',
+        $check$SELECT count(*) FROM public.rate_rules WHERE NOT (((calculation_method IN ('FLAT', 'PER_KG', 'MINIMUM')) AND amount_minor IS NOT NULL AND amount_minor >= 0 AND currency ~ '^[A-Z]{3}$' AND percentage_bps IS NULL) OR (calculation_method = 'PERCENT' AND amount_minor IS NULL AND currency IS NULL AND percentage_bps BETWEEN -10000 AND 100000))$check$),
+      ('rate_rules', 'measurement 0001 check',
+        $check$SELECT count(*) FROM public.rate_rules WHERE NOT ((dimensional_divisor IS NULL OR dimensional_divisor > 0) AND (rounding_step_grams IS NULL OR rounding_step_grams > 0))$check$),
+      ('rate_rules', 'state 0001 check',
+        $check$SELECT count(*) FROM public.rate_rules WHERE state NOT IN ('ACTIVE', 'INACTIVE')$check$),
+      ('shipping_channels', 'state 0001 check',
+        $check$SELECT count(*) FROM public.shipping_channels WHERE state NOT IN ('ACTIVE', 'INACTIVE')$check$),
+      ('bills_of_lading', 'status 0001 check',
+        $check$SELECT count(*) FROM public.bills_of_lading WHERE status NOT IN ('DRAFT', 'ISSUED', 'VOID')$check$),
+      ('delivery_task_events', 'event_type 0001 check',
+        $check$SELECT count(*) FROM public.delivery_task_events WHERE event_type NOT IN ('INTAKE', 'DISCREPANCY', 'ASSIGNED', 'ACCEPTED', 'DEPARTED', 'ARRIVED', 'DELIVERED', 'FAILED', 'CANCELLED', 'PARTNER_REPLAY')$check$),
+      ('delivery_tasks', 'waybill_id NOT NULL',
+        $check$SELECT count(*) FROM public.delivery_tasks WHERE waybill_id IS NULL$check$),
+      ('delivery_tasks', 'customer_id NOT NULL',
+        $check$SELECT count(*) FROM public.delivery_tasks WHERE customer_id IS NULL$check$),
+      ('delivery_tasks', 'destination_address_id NOT NULL',
+        $check$SELECT count(*) FROM public.delivery_tasks WHERE destination_address_id IS NULL$check$),
+      ('device_event_media_claims', 'media_id NOT NULL',
+        $check$SELECT count(*) FROM public.device_event_media_claims WHERE media_id IS NULL$check$),
+      ('device_event_receipts', 'server_version 0001 check',
+        $check$SELECT count(*) FROM public.device_event_receipts WHERE server_version IS NOT NULL AND server_version < 0$check$),
+      ('device_sync_conflicts', 'resolution_shape 0001 check',
+        $check$SELECT count(*) FROM public.device_sync_conflicts WHERE NOT ((status = 'OPEN' AND resolution IS NULL AND resolution_payload IS NULL AND resolved_at IS NULL) OR (status = 'RESOLVED' AND resolution IS NOT NULL AND resolved_at IS NOT NULL))$check$),
+      ('device_sync_sessions', 'binding_version 0001 check',
+        $check$SELECT count(*) FROM public.device_sync_sessions WHERE binding_version < 0$check$),
+      ('linehaul_bookings', 'load_unit_id NOT NULL',
+        $check$SELECT count(*) FROM public.linehaul_bookings WHERE load_unit_id IS NULL$check$),
+      ('load_unit_items', 'package_id NOT NULL',
+        $check$SELECT count(*) FROM public.load_unit_items WHERE package_id IS NULL$check$),
+      ('load_units', 'destination_warehouse_id NOT NULL',
+        $check$SELECT count(*) FROM public.load_units WHERE destination_warehouse_id IS NULL$check$),
+      ('load_units', 'distinct_warehouses 0001 check',
+        $check$SELECT count(*) FROM public.load_units WHERE NOT (origin_warehouse_id <> destination_warehouse_id)$check$),
+      ('permission_simulations', 'expiry 0001 check',
+        $check$SELECT count(*) FROM public.permission_simulations WHERE NOT (expires_at >= created_at + interval '5 minutes' AND expires_at <= created_at + interval '60 minutes')$check$)
+    ) AS rollback_checks(table_name, field_or_constraint, count_sql)
+  LOOP
+    EXECUTE rollback_check.count_sql INTO violating_count;
+    IF violating_count > 0 THEN
+      violations := violations || pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'table', rollback_check.table_name,
+          'field_or_constraint', rollback_check.field_or_constraint,
+          'violating_count', violating_count
+        )
+      );
+    END IF;
+  END LOOP;
+
+  IF pg_catalog.jsonb_array_length(violations) > 0 THEN
+    RAISE EXCEPTION 'B1_ROLLBACK_PREFLIGHT_FAILED'
+      USING ERRCODE = '23514',
+            DETAIL = violations::text,
+            HINT = 'Repair every listed 0001 compatibility violation, then rerun the complete down migration.';
+  END IF;
+END
+$$;
+
+DO $$
+DECLARE
+  preflight_table text;
+BEGIN
+  FOREACH preflight_table IN ARRAY ARRAY[
+    'customer_addresses',
+    'organizations',
+    'customer_credit_policies',
+    'tenant_entitlements',
+    'customs_declarations',
+    'declaration_items',
+    'import_jobs',
+    'orders',
+    'quotes',
+    'waybills',
+    'rate_rules',
+    'shipping_channels',
+    'bills_of_lading',
+    'delivery_task_events',
+    'delivery_tasks',
+    'device_event_media_claims',
+    'device_event_receipts',
+    'device_sync_conflicts',
+    'device_sync_sessions',
+    'linehaul_bookings',
+    'load_unit_items',
+    'load_units',
+    'permission_simulations'
+  ]
+  LOOP
+    EXECUTE pg_catalog.format(
+      'DROP POLICY %I ON public.%I',
+      'rollback_0001_preflight_' || preflight_table || '_select',
+      preflight_table
+    );
+  END LOOP;
+END
+$$;
 
 -- Runtime roles never belong to a capability owner. The retained offline deploy ADMIN membership
 -- lets the same non-superuser schema owner return the named functions to the table owner so that
@@ -109,7 +332,7 @@ GRANT EXECUTE ON FUNCTION public.control_plane_set_tenant_status(
 ) TO zhili_control_plane;
 ALTER FUNCTION public.control_plane_set_tenant_status(
   text, text, text, bigint, text, text, text, text
-) SET search_path = pg_catalog, public;
+) SET search_path = pg_catalog;
 
 DROP FUNCTION IF EXISTS public.control_plane_create_tenant(
   text, text, text, text, text, text, text, text, text, text
@@ -122,11 +345,11 @@ GRANT EXECUTE ON FUNCTION public.control_plane_create_tenant(
 ) TO zhili_control_plane;
 ALTER FUNCTION public.control_plane_create_tenant(
   text, text, text, text, text, text, text, text
-) SET search_path = pg_catalog, public;
+) SET search_path = pg_catalog;
 ALTER FUNCTION public.control_plane_set_entitlement(
   text, text, text, text, text, integer, text, bigint,
   timestamptz, timestamptz, bigint, text, text, text
-) SET search_path = pg_catalog, public;
+) SET search_path = pg_catalog;
 DROP FUNCTION IF EXISTS public.auth_lookup_oauth_state(text);
 DROP FUNCTION IF EXISTS public.auth_resolve_tenant(text);
 
@@ -145,7 +368,7 @@ RETURNS TABLE (tenant_id text, user_id text, password_hash text)
 LANGUAGE sql
 SECURITY DEFINER
 STABLE
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
   WITH normalized_input AS (
     SELECT
@@ -493,3 +716,89 @@ ALTER TABLE load_units
   ALTER COLUMN destination_warehouse_id SET NOT NULL,
   ADD CONSTRAINT load_units_distinct_warehouses_check
     CHECK (origin_warehouse_id <> destination_warehouse_id);
+
+-- The restored 0001 SECURITY DEFINER functions are owned by the offline schema owner. FORCE RLS
+-- still applies to that owner, so narrowly scoped rollback policies keep the supported down-only
+-- state usable without granting any runtime role direct table access. 0002 up removes these first;
+-- 0001 down removes them with their tables.
+DO $$
+DECLARE
+  rollback_owner text;
+BEGIN
+  SELECT owner_role.rolname
+  INTO rollback_owner
+  FROM pg_catalog.pg_class table_row
+  JOIN pg_catalog.pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+  JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = table_row.relowner
+  WHERE namespace_row.nspname = 'public' AND table_row.relname = 'tenants';
+  IF rollback_owner IS NULL THEN
+    RAISE EXCEPTION 'rollback schema owner could not be resolved' USING ERRCODE = '42501';
+  END IF;
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_auth_tenants_select ON public.tenants FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_auth_users_select ON public.users FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_tenants_select ON public.tenants FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_tenants_insert ON public.tenants FOR INSERT TO %I WITH CHECK (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_tenants_update ON public.tenants FOR UPDATE TO %I USING (true) WITH CHECK (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_users_select ON public.users FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_assignments_select ON public.user_role_assignments FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_roles_select ON public.roles FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_role_grants_select ON public.role_grants FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_idempotency_select ON public.idempotency_records FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_idempotency_insert ON public.idempotency_records FOR INSERT TO %I WITH CHECK (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_idempotency_update ON public.idempotency_records FOR UPDATE TO %I USING (true) WITH CHECK (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_entitlements_select ON public.tenant_entitlements FOR SELECT TO %I USING (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_entitlements_insert ON public.tenant_entitlements FOR INSERT TO %I WITH CHECK (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_audit_insert ON public.audit_events FOR INSERT TO %I WITH CHECK (true)',
+    rollback_owner
+  );
+  EXECUTE pg_catalog.format(
+    'CREATE POLICY rollback_0001_control_outbox_insert ON public.outbox_events FOR INSERT TO %I WITH CHECK (true)',
+    rollback_owner
+  );
+END
+$$;
+
+COMMIT;

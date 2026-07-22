@@ -42,6 +42,26 @@ BEGIN
 END
 $$;
 
+-- A successful 0002 down leaves narrowly scoped policies for the ordinary offline schema owner
+-- so restored 0001 SECURITY DEFINER functions remain usable under FORCE RLS. They must not survive
+-- a 0002 re-apply because the final state delegates access only to isolated capability owners.
+DROP POLICY IF EXISTS rollback_0001_auth_tenants_select ON public.tenants;
+DROP POLICY IF EXISTS rollback_0001_auth_users_select ON public.users;
+DROP POLICY IF EXISTS rollback_0001_control_tenants_select ON public.tenants;
+DROP POLICY IF EXISTS rollback_0001_control_tenants_insert ON public.tenants;
+DROP POLICY IF EXISTS rollback_0001_control_tenants_update ON public.tenants;
+DROP POLICY IF EXISTS rollback_0001_control_users_select ON public.users;
+DROP POLICY IF EXISTS rollback_0001_control_assignments_select ON public.user_role_assignments;
+DROP POLICY IF EXISTS rollback_0001_control_roles_select ON public.roles;
+DROP POLICY IF EXISTS rollback_0001_control_role_grants_select ON public.role_grants;
+DROP POLICY IF EXISTS rollback_0001_control_idempotency_select ON public.idempotency_records;
+DROP POLICY IF EXISTS rollback_0001_control_idempotency_insert ON public.idempotency_records;
+DROP POLICY IF EXISTS rollback_0001_control_idempotency_update ON public.idempotency_records;
+DROP POLICY IF EXISTS rollback_0001_control_entitlements_select ON public.tenant_entitlements;
+DROP POLICY IF EXISTS rollback_0001_control_entitlements_insert ON public.tenant_entitlements;
+DROP POLICY IF EXISTS rollback_0001_control_audit_insert ON public.audit_events;
+DROP POLICY IF EXISTS rollback_0001_control_outbox_insert ON public.outbox_events;
+
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT USAGE, CREATE ON SCHEMA public
 TO zhili_auth_capability_owner, zhili_control_capability_owner;

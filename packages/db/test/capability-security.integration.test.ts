@@ -11,11 +11,19 @@ const legacyDummyTenantId = '01J0000000000000000000000A';
 const actorTenantId = '01J3000000000000000000000A';
 const targetTenantId = '01J3000000000000000000000B';
 const actorOrganizationId = '01J3000000000000000000010A';
+const targetOrganizationId = '01J3000000000000000000010B';
 const actorUserId = '01J3000000000000000000020A';
+const targetUserId = '01J3000000000000000000020B';
 const actorRoleId = '01J3000000000000000000030A';
 const actorGrantId = '01J3000000000000000000031A';
+const entitlementGrantId = '01J3000000000000000000031B';
 const actorAssignmentId = '01J3000000000000000000032A';
 const statusOperationId = '01J3000000000000000000040A';
+const rollbackTenantId = '01J3000000000000000000050A';
+const rollbackCreateOperationId = '01J3000000000000000000051A';
+const rollbackStatusOperationId = '01J3000000000000000000052A';
+const rollbackEntitlementId = '01J3000000000000000000053A';
+const rollbackEntitlementOperationId = '01J3000000000000000000054A';
 const realPasswordHash =
   '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1zZWN1cmU$MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY';
 
@@ -317,19 +325,29 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
     await databaseAdmin`
       INSERT INTO organizations (
         id, tenant_id, code, display_name, organization_type
-      ) VALUES (
-        ${actorOrganizationId}, ${actorTenantId}, 'SECURE-ROOT',
-        'Secure root', 'TENANT_ROOT'
-      )
+      ) VALUES
+        (
+          ${actorOrganizationId}, ${actorTenantId}, 'SECURE-ROOT',
+          'Secure root', 'TENANT_ROOT'
+        ),
+        (
+          ${targetOrganizationId}, ${targetTenantId}, 'TARGET-ROOT',
+          'Target root', 'TENANT_ROOT'
+        )
     `;
     await databaseAdmin`
       INSERT INTO users (
         id, tenant_id, organization_id, login_name_normalized,
         display_name, password_hash, status
-      ) VALUES (
-        ${actorUserId}, ${actorTenantId}, ${actorOrganizationId}, 'secure.user',
-        'Secure user', ${realPasswordHash}, 'ACTIVE'
-      )
+      ) VALUES
+        (
+          ${actorUserId}, ${actorTenantId}, ${actorOrganizationId}, 'secure.user',
+          'Secure user', ${realPasswordHash}, 'ACTIVE'
+        ),
+        (
+          ${targetUserId}, ${targetTenantId}, ${targetOrganizationId}, 'target.user',
+          'Target user', ${realPasswordHash}, 'ACTIVE'
+        )
     `;
     await databaseAdmin`
       INSERT INTO roles (id, tenant_id, role_code, display_name)
@@ -338,10 +356,15 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
     await databaseAdmin`
       INSERT INTO role_grants (
         id, tenant_id, role_id, action_code, effect, data_scope_kind
-      ) VALUES (
-        ${actorGrantId}, ${actorTenantId}, ${actorRoleId},
-        'platform.tenant.manage', 'ALLOW', 'PLATFORM'
-      )
+      ) VALUES
+        (
+          ${actorGrantId}, ${actorTenantId}, ${actorRoleId},
+          'platform.tenant.manage', 'ALLOW', 'PLATFORM'
+        ),
+        (
+          ${entitlementGrantId}, ${actorTenantId}, ${actorRoleId},
+          'platform.entitlement.write', 'ALLOW', 'PLATFORM'
+        )
     `;
     await databaseAdmin`
       INSERT INTO user_role_assignments (id, tenant_id, user_id, role_id)
@@ -416,6 +439,102 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
       await expect(
         control.unsafe('SET ROLE zhili_control_capability_owner')
       ).rejects.toMatchObject({ code: '42501' });
+
+      // Down-only is a supported operating state: the restored 0001 functions remain
+      // shadow-safe and can read/write through rollback-scoped policies for this offline owner.
+      await applySql(deploy, 'down/0002_b1_persistence_alignment.down.sql');
+      const restoredFunctions = await databaseAdmin<
+        { config: string[] | null; owner: string; proname: string }[]
+      >`
+        SELECT function_row.proname, owner_role.rolname AS owner,
+               function_row.proconfig AS config
+        FROM pg_proc function_row
+        JOIN pg_namespace namespace_row ON namespace_row.oid = function_row.pronamespace
+        JOIN pg_roles owner_role ON owner_role.oid = function_row.proowner
+        WHERE namespace_row.nspname = 'public'
+          AND function_row.proname IN (
+            'auth_lookup_password', 'control_plane_create_tenant',
+            'control_plane_set_tenant_status', 'control_plane_set_entitlement'
+          )
+        ORDER BY function_row.proname
+      `;
+      expect(restoredFunctions).toEqual([
+        {
+          proname: 'auth_lookup_password',
+          owner: 'b1_schema_deploy',
+          config: ['search_path=pg_catalog'],
+        },
+        {
+          proname: 'control_plane_create_tenant',
+          owner: 'b1_schema_deploy',
+          config: ['search_path=pg_catalog'],
+        },
+        {
+          proname: 'control_plane_set_entitlement',
+          owner: 'b1_schema_deploy',
+          config: ['search_path=pg_catalog'],
+        },
+        {
+          proname: 'control_plane_set_tenant_status',
+          owner: 'b1_schema_deploy',
+          config: ['search_path=pg_catalog'],
+        },
+      ]);
+      expect(
+        await auth`
+          SELECT tenant_id, user_id, password_hash
+          FROM public.auth_lookup_password('SECURE.USER', 'SECURE-ACTOR')
+        `
+      ).toEqual([
+        {
+          tenant_id: actorTenantId,
+          user_id: actorUserId,
+          password_hash: realPasswordHash,
+        },
+      ]);
+      expect(
+        await control`
+          SELECT tenant_id, status, version::text, replayed
+          FROM public.control_plane_create_tenant(
+            ${actorTenantId}, ${actorUserId}, ${rollbackTenantId}, 'rollback-created',
+            'Rollback created', ${rollbackCreateOperationId}, 'rollback-create',
+            ${'b'.repeat(64)}
+          )
+        `
+      ).toEqual([
+        { tenant_id: rollbackTenantId, status: 'ACTIVE', version: '1', replayed: false },
+      ]);
+      expect(
+        await control`
+          SELECT tenant_id, status, version::text, replayed
+          FROM public.control_plane_set_tenant_status(
+            ${actorTenantId}, ${actorUserId}, ${targetTenantId}, 2, 'ACTIVE',
+            ${rollbackStatusOperationId}, 'rollback-status', ${'c'.repeat(64)}
+          )
+        `
+      ).toEqual([
+        { tenant_id: targetTenantId, status: 'ACTIVE', version: '3', replayed: false },
+      ]);
+      expect(
+        await control`
+          SELECT tenant_id, module_code, entitlement_version,
+                 tenant_version::text, replayed
+          FROM public.control_plane_set_entitlement(
+            ${actorTenantId}, ${actorUserId}, ${targetTenantId}, ${targetUserId},
+            ${rollbackEntitlementId}, 1, 'ORDERS', 100,
+            '2026-07-23T00:00:00Z'::timestamptz, null, 3,
+            ${rollbackEntitlementOperationId}, 'rollback-entitlement', ${'d'.repeat(64)}
+          )
+        `
+      ).toEqual([
+        {
+          tenant_id: targetTenantId,
+          module_code: 'ORDERS',
+          entitlement_version: 1,
+          tenant_version: '4',
+          replayed: false,
+        },
+      ]);
     } finally {
       await Promise.all([auth.end(), control.end()]);
       await databaseAdmin.unsafe(`
@@ -424,9 +543,8 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
       `);
     }
 
-    // The same non-superuser schema owner can execute down/up and reconstruct the final owner
-    // boundary without adding any runtime or extra administrative member.
-    await applySql(deploy, 'down/0002_b1_persistence_alignment.down.sql');
+    // The same non-superuser schema owner can re-apply 0002 and reconstruct the final owner
+    // boundary without retaining rollback policies or adding another administrative member.
     await applySql(deploy, '0002_b1_persistence_alignment.sql');
     const reappliedFunctions = await capabilityFunctions(databaseAdmin);
     expect(reappliedFunctions).toEqual(functions);
@@ -446,10 +564,216 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
       { owner_role: 'zhili_auth_capability_owner', member_role: 'b1_schema_deploy' },
       { owner_role: 'zhili_control_capability_owner', member_role: 'b1_schema_deploy' },
     ]);
+    expect(
+      await databaseAdmin<{ count: number }[]>`
+        SELECT count(*)::int AS count
+        FROM pg_policy policy_row
+        WHERE policy_row.polname LIKE 'rollback_0001_%'
+      `
+    ).toEqual([{ count: 0 }]);
   } finally {
     await Promise.allSettled([
       attacker?.end(),
       deploy?.end(),
+      databaseAdmin?.end(),
+      clusterAdmin?.end(),
+    ]);
+    if (container) await container.stop();
+  }
+}, 120_000);
+
+it('rejects 0001-incompatible data before mutating the complete 0002 capability state', async () => {
+  let container: StartedPostgreSqlContainer | undefined;
+  let clusterAdmin: Sql | undefined;
+  let databaseAdmin: Sql | undefined;
+  let deploy: Sql | undefined;
+  let auth: Sql | undefined;
+  try {
+    container = await new PostgreSqlContainer('postgres:17-alpine')
+      .withStartupTimeout(120_000)
+      .start();
+    const baseUri = container.getConnectionUri();
+    clusterAdmin = postgres(baseUri, { max: 1 });
+    await clusterAdmin.unsafe(`
+      CREATE ROLE b1_preflight_deploy
+        LOGIN PASSWORD 'deploy-secret' NOSUPERUSER CREATEDB CREATEROLE NOINHERIT NOBYPASSRLS;
+    `);
+    await clusterAdmin.unsafe('CREATE DATABASE b1_rollback_preflight OWNER b1_preflight_deploy');
+    const deployUri = databaseUrl(
+      baseUri,
+      'b1_rollback_preflight',
+      'b1_preflight_deploy',
+      'deploy-secret'
+    );
+    const containerAdminUrl = new URL(baseUri);
+    const databaseAdminUri = databaseUrl(
+      baseUri,
+      'b1_rollback_preflight',
+      containerAdminUrl.username,
+      containerAdminUrl.password
+    );
+    deploy = postgres(deployUri, { max: 1 });
+    databaseAdmin = postgres(databaseAdminUri, { max: 2 });
+    await applySql(deploy, '0000_foundation.sql');
+    await applySql(deploy, '0001_b1_domains.sql');
+    await applySql(deploy, '0002_b1_persistence_alignment.sql');
+
+    const functionsBeforeRejectedDown = await capabilityFunctions(databaseAdmin);
+    const preflightTenantId = '01J4000000000000000000000A';
+    await databaseAdmin`
+      INSERT INTO public.tenants (id, slug, display_name)
+      VALUES (${preflightTenantId}, 'preflight-real', 'Preflight real tenant')
+    `;
+    await databaseAdmin`
+      INSERT INTO public.organizations (
+        id, tenant_id, code, display_name, organization_type
+      ) VALUES (
+        '01J4000000000000000000010A', ${preflightTenantId}, 'COMPANY-ROOT',
+        'Company root', 'COMPANY'
+      )
+    `;
+    await databaseAdmin.unsafe("ALTER ROLE zhili_auth WITH LOGIN PASSWORD 'auth-secret'");
+    auth = postgres(
+      databaseUrl(baseUri, 'b1_rollback_preflight', 'zhili_auth', 'auth-secret'),
+      { max: 1 }
+    );
+
+    let rollbackError: unknown;
+    try {
+      await applySql(deploy, 'down/0002_b1_persistence_alignment.down.sql');
+    } catch (error) {
+      rollbackError = error;
+    }
+    expect(rollbackError).toMatchObject({
+      code: '23514',
+      message: 'B1_ROLLBACK_PREFLIGHT_FAILED',
+    });
+    const rollbackDetail = (rollbackError as { detail?: string }).detail;
+    expect(rollbackDetail).toContain('"table": "organizations"');
+    expect(rollbackDetail).toContain(
+      '"field_or_constraint": "organization_type 0001 check"'
+    );
+    expect(rollbackDetail).toContain('"violating_count": 1');
+
+    expect(await capabilityFunctions(databaseAdmin)).toEqual(functionsBeforeRejectedDown);
+    expect(
+      await databaseAdmin<{ exists: boolean }[]>`
+        SELECT EXISTS (
+          SELECT 1 FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'tenants'
+            AND column_name = 'default_timezone'
+        ) AS exists
+      `
+    ).toEqual([{ exists: true }]);
+    expect(
+      await databaseAdmin<{ count: number }[]>`
+        SELECT count(*)::int AS count
+        FROM pg_policy policy_row
+        WHERE policy_row.polname LIKE 'rollback_0001_%'
+      `
+    ).toEqual([{ count: 0 }]);
+    expect(await auth`SELECT * FROM public.auth_resolve_tenant('PREFLIGHT-REAL')`).toEqual([
+      { tenant_id: preflightTenantId, found: true },
+    ]);
+  } finally {
+    await Promise.allSettled([
+      auth?.end(),
+      deploy?.end(),
+      databaseAdmin?.end(),
+      clusterAdmin?.end(),
+    ]);
+    if (container) await container.stop();
+  }
+}, 120_000);
+
+it('targets down-only policies at the non-super schema owner when a superuser runs down', async () => {
+  let container: StartedPostgreSqlContainer | undefined;
+  let clusterAdmin: Sql | undefined;
+  let databaseAdmin: Sql | undefined;
+  let schemaOwner: Sql | undefined;
+  let auth: Sql | undefined;
+  try {
+    container = await new PostgreSqlContainer('postgres:17-alpine')
+      .withStartupTimeout(120_000)
+      .start();
+    const baseUri = container.getConnectionUri();
+    clusterAdmin = postgres(baseUri, { max: 1 });
+    await clusterAdmin.unsafe(`
+      CREATE ROLE b1_external_schema_owner
+        LOGIN PASSWORD 'owner-secret' NOSUPERUSER CREATEDB CREATEROLE NOINHERIT NOBYPASSRLS;
+    `);
+    await clusterAdmin.unsafe(
+      'CREATE DATABASE b1_super_down OWNER b1_external_schema_owner'
+    );
+    const containerAdminUrl = new URL(baseUri);
+    databaseAdmin = postgres(
+      databaseUrl(
+        baseUri,
+        'b1_super_down',
+        containerAdminUrl.username,
+        containerAdminUrl.password
+      ),
+      { max: 1 }
+    );
+    schemaOwner = postgres(
+      databaseUrl(baseUri, 'b1_super_down', 'b1_external_schema_owner', 'owner-secret'),
+      { max: 1 }
+    );
+    await applySql(schemaOwner, '0000_foundation.sql');
+    await applySql(schemaOwner, '0001_b1_domains.sql');
+    await applySql(schemaOwner, '0002_b1_persistence_alignment.sql');
+
+    const tenantId = '01J5000000000000000000000A';
+    const organizationId = '01J5000000000000000000010A';
+    const userId = '01J5000000000000000000020A';
+    await databaseAdmin`
+      INSERT INTO public.tenants (id, slug, display_name)
+      VALUES (${tenantId}, 'super-down-real', 'Super down real tenant')
+    `;
+    await databaseAdmin`
+      INSERT INTO public.organizations (
+        id, tenant_id, code, display_name, organization_type
+      ) VALUES (
+        ${organizationId}, ${tenantId}, 'SUPER-DOWN-ROOT',
+        'Super down root', 'TENANT_ROOT'
+      )
+    `;
+    await databaseAdmin`
+      INSERT INTO public.users (
+        id, tenant_id, organization_id, login_name_normalized,
+        display_name, password_hash, status
+      ) VALUES (
+        ${userId}, ${tenantId}, ${organizationId}, 'super.down.user',
+        'Super down user', ${realPasswordHash}, 'ACTIVE'
+      )
+    `;
+    await databaseAdmin.unsafe("ALTER ROLE zhili_auth WITH LOGIN PASSWORD 'auth-secret'");
+    auth = postgres(databaseUrl(baseUri, 'b1_super_down', 'zhili_auth', 'auth-secret'), {
+      max: 1,
+    });
+
+    await applySql(databaseAdmin, 'down/0002_b1_persistence_alignment.down.sql');
+
+    expect(
+      await databaseAdmin<{ policy_role: string }[]>`
+        SELECT DISTINCT policy_role.rolname AS policy_role
+        FROM pg_policy policy_row
+        CROSS JOIN LATERAL unnest(policy_row.polroles) role_oid
+        JOIN pg_roles policy_role ON policy_role.oid = role_oid
+        WHERE policy_row.polname LIKE 'rollback_0001_%'
+        ORDER BY policy_role
+      `
+    ).toEqual([{ policy_role: 'b1_external_schema_owner' }]);
+    expect(
+      await auth`
+        SELECT tenant_id, user_id, password_hash
+        FROM public.auth_lookup_password('SUPER.DOWN.USER', 'SUPER-DOWN-REAL')
+      `
+    ).toEqual([{ tenant_id: tenantId, user_id: userId, password_hash: realPasswordHash }]);
+  } finally {
+    await Promise.allSettled([
+      auth?.end(),
+      schemaOwner?.end(),
       databaseAdmin?.end(),
       clusterAdmin?.end(),
     ]);

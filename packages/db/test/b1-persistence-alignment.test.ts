@@ -163,6 +163,11 @@ describe('B1 persistence alignment migration contract', () => {
     ]);
 
     expect(down).not.toBe('');
+    expect(down.trimStart()).toMatch(/^BEGIN;/);
+    expect(down.trimEnd()).toMatch(/COMMIT;$/);
+    expect(down).toContain('B1_ROLLBACK_PREFLIGHT_FAILED');
+    expect(down).toContain('rollback_0001_auth_tenants_select');
+    expect(down).toContain('rollback_0001_control_outbox_insert');
     expect(down).not.toMatch(/DROP SCHEMA/i);
     expect(down).not.toMatch(/DROP TABLE IF EXISTS "?(?:tenants|orders|waybills)"?/i);
     expect(journal).toContain('0002_b1_persistence_alignment');

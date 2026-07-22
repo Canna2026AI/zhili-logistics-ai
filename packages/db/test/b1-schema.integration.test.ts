@@ -1809,10 +1809,15 @@ describe('B1 ordered domain migration', () => {
     const beforeDownFingerprint = firstFingerprint || (await schemaFingerprint());
     const alignmentDownSql = await readFile(alignmentDownMigrationPath, 'utf8');
     const domainDownSql = await readFile(domainDownMigrationPath, 'utf8');
-    for (const downSql of [alignmentDownSql, domainDownSql]) {
-      expect(downSql).not.toMatch(/DROP\s+SCHEMA/i);
-      expect(downSql).not.toMatch(/DROP\s+(?:OWNED|ROLE|EXTENSION)/i);
-      await admin.unsafe(downSql);
+    const migrationConnection = await admin.reserve();
+    try {
+      for (const downSql of [alignmentDownSql, domainDownSql]) {
+        expect(downSql).not.toMatch(/DROP\s+SCHEMA/i);
+        expect(downSql).not.toMatch(/DROP\s+(?:OWNED|ROLE|EXTENSION)/i);
+        await migrationConnection.unsafe(downSql);
+      }
+    } finally {
+      migrationConnection.release();
     }
 
     const remainingTables = await admin<{ table_name: string }[]>`
