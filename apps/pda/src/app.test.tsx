@@ -9,6 +9,7 @@ import { MemoryPdaPort } from './ports/memory-pda-port';
 import { OfflineQueue } from './offline/offline-queue';
 import { MediaQueue } from './offline/media-queue';
 import { SessionGuard } from './session/session-guard';
+import type { DeviceTask } from './domain/types';
 
 const bind = async () => {
   await userEvent.click(await screen.findByRole('button', { name: '绑定设备并登录' }));
@@ -170,6 +171,102 @@ describe('PDA application', () => {
         '签收 / POD',
       ])
     );
+  });
+
+  it('queues the complete second selected task snapshot instead of the first task of that type', async () => {
+    const store = new MemoryQueueStore();
+    const port = new MemoryPdaPort();
+    const tasks = [
+      {
+        id: '01JPDATASK0000000000000001',
+        type: 'LAST_MILE_DELIVERY',
+        reference: 'LM-FIRST',
+        status: 'LOADED',
+        priority: 'HIGH',
+        version: 4,
+      },
+      {
+        id: '01JPDATASK0000000000000002',
+        type: 'LAST_MILE_DELIVERY',
+        reference: 'LM-SECOND',
+        status: 'LOADED',
+        priority: 'HIGH',
+        version: 9,
+      },
+    ] satisfies DeviceTask[];
+    vi.spyOn(port, 'getDeviceTasks').mockResolvedValue(tasks);
+    render(<App store={store} port={port} />);
+    await bind();
+
+    await userEvent.click(screen.getByRole('button', { name: /LM-SECOND/ }));
+    await userEvent.selectOptions(screen.getByLabelText('作业动作'), 'LAST_MILE_DELIVER');
+    await userEvent.click(screen.getByRole('button', { name: '确认作业' }));
+    await screen.findByText(/LM-SECOND .* 已本地排队/);
+
+    const events = (await new OfflineQueue(store).restore()).events;
+    expect(events).toHaveLength(1);
+    expect(events[0]?.envelope).toMatchObject({
+      entityRef: 'LM-SECOND',
+      baseVersion: 9,
+      payload: { taskId: '01JPDATASK0000000000000002' },
+    });
+  });
+
+  it('rejects empty action fields before writing the local queue', async () => {
+    const store = new MemoryQueueStore();
+    render(<App store={store} port={new MemoryPdaPort()} />);
+    await bind();
+    await userEvent.click(screen.getByRole('button', { name: /S2505120004/ }));
+    await userEvent.selectOptions(screen.getByLabelText('作业动作'), 'MEASURE_DIMENSIONS');
+    await userEvent.click(screen.getByRole('button', { name: '确认作业' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('不能为空');
+    expect((await new OfflineQueue(store).restore()).events).toHaveLength(0);
+  });
+
+  it('disables task-incompatible actions with an explanation', async () => {
+    render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
+    await bind();
+    await userEvent.click(screen.getByRole('button', { name: /S2505120004/ }));
+
+    const option = screen.getByRole('option', { name: /派送/ });
+    expect(option).toBeDisabled();
+    expect(option).toHaveTextContent('不适用于 RECEIVE 任务类型');
+  });
+
+  it('disables permission-bound options, camera, file, location and submit controls', async () => {
+    const port = new MemoryPdaPort();
+    vi.spyOn(port, 'bindDevice').mockImplementation(async (deviceId, body) => ({
+      deviceId,
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: body.warehouseId,
+      subjectId: body.subjectId,
+      permissions: [],
+      expiresAt: '2099-12-31T23:59:59.000Z',
+    }));
+    vi.spyOn(port, 'getDeviceTasks').mockResolvedValue([
+      {
+        id: '01JPDATASK0000000000000002',
+        type: 'LAST_MILE_DELIVERY',
+        reference: 'LM-POD',
+        status: 'OUT_FOR_DELIVERY',
+        priority: 'HIGH',
+        version: 11,
+      },
+    ]);
+    render(<App store={new MemoryQueueStore()} port={port} />);
+    await bind();
+    await userEvent.click(screen.getByRole('button', { name: /LM-POD/ }));
+
+    const podOption = screen.getByRole('option', { name: /签收 \/ POD/ });
+    expect(podOption).toBeDisabled();
+    expect(podOption).toHaveTextContent('缺少 lastmile.pod.write 权限');
+    fireEvent.change(screen.getByLabelText('作业动作'), { target: { value: 'CAPTURE_POD' } });
+    expect(screen.getByRole('button', { name: '打开相机扫码' })).toBeDisabled();
+    expect(screen.getByLabelText('拍照或选择图片')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '获取当前位置（可选）' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '确认作业' })).toBeDisabled();
+    expect(screen.getByRole('alert')).toHaveTextContent('缺少 lastmile.pod.write 权限');
   });
 
   it('locks the composition root when persisted event context differs from the bound session', async () => {

@@ -3,7 +3,11 @@ import { Camera, ScanLine } from 'lucide-react';
 import { Button } from '@zhili/ui';
 import {
   DEVICE_TASK_ACTIONS,
+  actionUnavailableReason,
+  assertTaskActionAllowed,
   buildTaskPayload,
+  resolveTaskForAction,
+  taskActionSupportsTask,
   type DeviceTaskAction,
 } from '../domain/task-actions';
 import type { LocalDeviceSession } from '../session/session-guard';
@@ -41,16 +45,20 @@ function feedbackPulse() {
   }
 }
 
-function requiredPermission(action: DeviceTaskAction): LocalDeviceSession['permissions'][number] {
-  if (action === 'CAPTURE_POD') return 'lastmile.pod.write';
-  if (action.startsWith('LAST_MILE_')) return 'lastmile.delivery.execute';
-  return 'pda.use';
-}
-
-function isoDateTime(value?: string) {
-  if (!value) return new Date().toISOString();
+function isoDateTime(value: string) {
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString();
+}
+
+function initialActionForTask(task: DeviceTask | undefined, permissions: readonly string[]) {
+  const compatible = DEVICE_TASK_ACTIONS.filter(
+    (candidate) => !task || taskActionSupportsTask(candidate.id, task)
+  );
+  return (
+    compatible.find((candidate) => !actionUnavailableReason(candidate.id, task, permissions)) ??
+    compatible[0] ??
+    DEVICE_TASK_ACTIONS[0]
+  ).id;
 }
 
 function canonicalDeliveryStatus(value: string): DeliveryStatus {
@@ -79,6 +87,7 @@ export function ScannerScreen({
   port,
   online,
   tasks,
+  selectedTask,
   initialCode,
   assertBusinessAllowed,
   onChanged,
@@ -91,15 +100,18 @@ export function ScannerScreen({
   port: PdaPort;
   online: boolean;
   tasks: DeviceTask[];
+  selectedTask?: DeviceTask;
   initialCode: string;
   assertBusinessAllowed: () => void;
   onChanged: () => void;
   onTaskUpdated: (taskId: string, status: string, version: number) => void;
   onUnauthorized: (error: unknown) => Promise<void>;
 }) {
-  const [action, setAction] = useState<DeviceTaskAction>('WAREHOUSE_RECEIVE');
+  const [action, setAction] = useState<DeviceTaskAction>(() =>
+    initialActionForTask(selectedTask, session.permissions)
+  );
   const [code, setCode] = useState(initialCode);
-  const [values, setValues] = useState<Record<string, string>>({ weight: '123.50' });
+  const [values, setValues] = useState<Record<string, string>>({});
   const [file, setFile] = useState<File>();
   const [message, setMessage] = useState('等待扫描');
   const [tone, setTone] = useState<'neutral' | 'queued' | 'success' | 'danger'>('neutral');
@@ -110,15 +122,17 @@ export function ScannerScreen({
   const update = (key: string, value: string) =>
     setValues((current) => ({ ...current, [key]: value }));
 
+  const unavailableReason = actionUnavailableReason(action, selectedTask, session.permissions);
+
   const submit = async (overrideCode?: string) => {
     const entityRef = (overrideCode ?? code).trim();
-    if (!entityRef || busy) return;
+    if (busy) return;
     setBusy(true);
     try {
+      if (!entityRef) throw new Error('扫描码 / 运单号不能为空，本地队列未写入。');
       assertBusinessAllowed();
-      const permission = requiredPermission(action);
-      if (!session.permissions.includes(permission))
-        throw new Error(`缺少 ${permission} 权限；本地队列未写入。`);
+      const resourceTask = resolveTaskForAction(tasks, action, entityRef, selectedTask);
+      assertTaskActionAllowed(action, resourceTask, session.permissions);
       if (
         (action === 'CAPTURE_RECEIPT_PHOTO' ||
           action === 'CAPTURE_POD' ||
@@ -126,13 +140,6 @@ export function ScannerScreen({
         !file
       )
         throw new Error('此动作要求拍照或签名证据，请先采集图片。');
-      if (action === 'CAPTURE_POD' && !values.recipientName?.trim())
-        throw new Error('POD 必须填写签收姓名。');
-      if (
-        action === 'LAST_MILE_EXCEPTION' &&
-        (!values.exceptionCode || Array.from(values.note?.trim() ?? '').length < 2)
-      )
-        throw new Error('异常上报必须选择类型并填写说明。');
       const payload = buildTaskPayload(action, { ...values, scannedCode: entityRef });
       const id = eventId();
       const mediaRefs: string[] = [];
@@ -148,16 +155,7 @@ export function ScannerScreen({
         'LAST_MILE_DELIVER',
         'LAST_MILE_EXCEPTION',
       ].includes(action);
-      const deliveryTask = tasks.find((task) => task.type === 'LAST_MILE_DELIVERY');
-      const resourceTask =
-        action.startsWith('LAST_MILE_') || action === 'CAPTURE_POD'
-          ? deliveryTask
-          : tasks.find((task) => task.type !== 'LAST_MILE_DELIVERY');
-      if (action === 'LAST_MILE_PALLETIZE')
-        throw new Error(
-          '尾程打托状态尚未进入 OpenAPI canonical states，当前 fail closed，等待契约扩展。'
-        );
-      if (!resourceTask) throw new Error('无法取得当前作业任务版本，请刷新任务后重试。');
+      const deliveryTask = resourceTask.type === 'LAST_MILE_DELIVERY' ? resourceTask : undefined;
       const outcome = await queue.enqueue(session, {
         eventId: id,
         action,
@@ -241,7 +239,7 @@ export function ScannerScreen({
         });
         await service.capturePod(
           {
-            recipientName: values.recipientName || '',
+            recipientName: values.recipientName,
             signedAt: isoDateTime(values.signedAt),
             latitude: values.latitude ? Number(values.latitude) : undefined,
             longitude: values.longitude ? Number(values.longitude) : undefined,
@@ -349,6 +347,15 @@ export function ScannerScreen({
           <p>扫码枪 Enter、广播、相机与手工输入共用同一入队逻辑。</p>
         </div>
       </div>
+      {selectedTask && (
+        <div className="pda-selected-task" data-testid="selected-task">
+          <strong>{selectedTask.reference}</strong>
+          <span>
+            {selectedTask.type} · {selectedTask.status} · v{selectedTask.version}
+          </span>
+          <small>{selectedTask.id}</small>
+        </div>
+      )}
       <div className="pda-form pda-operation-form">
         <label>
           作业动作
@@ -356,12 +363,15 @@ export function ScannerScreen({
             value={action}
             onChange={(event) => setAction(event.target.value as DeviceTaskAction)}
           >
-            {DEVICE_TASK_ACTIONS.map((item) => (
-              <option key={item.id} value={item.id} disabled={item.id === 'LAST_MILE_PALLETIZE'}>
-                {item.label}
-                {item.id === 'LAST_MILE_PALLETIZE' ? '（契约待扩展）' : ''}
-              </option>
-            ))}
+            {DEVICE_TASK_ACTIONS.map((item) => {
+              const reason = actionUnavailableReason(item.id, selectedTask, session.permissions);
+              return (
+                <option key={item.id} value={item.id} disabled={Boolean(reason)}>
+                  {item.label}
+                  {reason ? `（${item.id === 'LAST_MILE_PALLETIZE' ? '契约待扩展' : reason}）` : ''}
+                </option>
+              );
+            })}
           </select>
         </label>
         <label>
@@ -435,12 +445,33 @@ export function ScannerScreen({
               ? '目标滑槽码'
               : action === 'PICK'
                 ? '来源库位码'
-                : action === 'LAST_MILE_LOAD'
-                  ? '车辆码'
-                  : '目标容器 / 作业码'}
+                : action === 'BAG'
+                  ? '袋码'
+                  : action === 'PALLETIZE'
+                    ? '托盘码'
+                    : action === 'CONTAINERIZE'
+                      ? '柜码'
+                      : action === 'DISPATCH'
+                        ? '出库作业码'
+                        : action === 'LAST_MILE_INTAKE'
+                          ? '站点码'
+                          : action === 'LAST_MILE_LOAD'
+                            ? '车辆码'
+                            : '目标容器 / 作业码'}
             <input
               value={values.operationCode ?? ''}
               onChange={(event) => update('operationCode', event.target.value)}
+            />
+          </label>
+        )}
+        {action === 'PICK' && (
+          <label>
+            拣货数量
+            <input
+              type="number"
+              min="1"
+              value={values.quantity ?? ''}
+              onChange={(event) => update('quantity', event.target.value)}
             />
           </label>
         )}
@@ -513,7 +544,7 @@ export function ScannerScreen({
                 />
               </label>
             </div>
-            <Button variant="secondary" onClick={locate}>
+            <Button variant="secondary" onClick={locate} disabled={Boolean(unavailableReason)}>
               获取当前位置（可选）
             </Button>
             {locationError && (
@@ -532,13 +563,23 @@ export function ScannerScreen({
           </>
         )}
         <div className="pda-media-row">
-          <Button variant="secondary" onClick={() => void openCamera()}>
+          <Button
+            variant="secondary"
+            onClick={() => void openCamera()}
+            disabled={Boolean(unavailableReason)}
+          >
             <Camera aria-hidden="true" />
             打开相机扫码
           </Button>
-          <label className="pda-file-button">
+          <label className="pda-file-button" aria-disabled={Boolean(unavailableReason)}>
             拍照或选择图片
-            <input type="file" accept="image/*" capture="environment" onChange={chooseFile} />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              onChange={chooseFile}
+              disabled={Boolean(unavailableReason)}
+            />
           </label>
         </div>
         {file && (
@@ -552,20 +593,16 @@ export function ScannerScreen({
             {cameraError}
           </div>
         )}
-        {!session.permissions.includes(requiredPermission(action)) && (
+        {unavailableReason && (
           <div className="pda-message pda-message--danger" role="alert">
-            当前账号缺少 {requiredPermission(action)} 权限，此动作不可提交。
+            {unavailableReason}，此动作不可提交，本地队列不会写入。
           </div>
         )}
         <Button
           size="large"
           onClick={() => void submit()}
           loading={busy}
-          disabled={
-            busy ||
-            queue.snapshot().full ||
-            !session.permissions.includes(requiredPermission(action))
-          }
+          disabled={busy || queue.snapshot().full || Boolean(unavailableReason)}
         >
           确认作业
         </Button>

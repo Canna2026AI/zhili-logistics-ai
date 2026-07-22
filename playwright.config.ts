@@ -61,7 +61,7 @@ export default defineConfig({
     },
     {
       name: 'pda',
-      testMatch: /pda\.spec\.ts/,
+      testMatch: /pda(?:-task-safety\.pda)?\.spec\.ts$/,
       use: {
         ...devices['Desktop Chrome'],
         baseURL: 'http://127.0.0.1:4102',

@@ -204,6 +204,25 @@ textarea {
   border-radius: 10px;
   background: #fff;
 }
+.pda-selected-task {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid #99f6e4;
+  border-radius: 8px;
+  color: #115e59;
+  background: #f0fdfa;
+}
+.pda-selected-task strong,
+.pda-selected-task small {
+  overflow-wrap: anywhere;
+  font-family: var(--zl-font-data);
+}
+.pda-selected-task span,
+.pda-selected-task small {
+  font-size: 11px;
+}
 .pda-scan-input {
   display: flex;
   align-items: center;
@@ -266,6 +285,14 @@ textarea {
   inset: 0;
   opacity: 0;
   cursor: pointer;
+}
+.pda-file-button[aria-disabled='true'] {
+  color: #94a3b8;
+  background: #f1f5f9;
+  cursor: not-allowed;
+}
+.pda-file-button[aria-disabled='true'] input {
+  cursor: not-allowed;
 }
 .pda-file-state {
   display: flex;

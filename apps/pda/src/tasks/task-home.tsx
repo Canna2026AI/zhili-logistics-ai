@@ -16,7 +16,7 @@ export function TaskHome({
   onScan,
 }: {
   tasks: DeviceTask[];
-  onScan: (reference: string) => void;
+  onScan: (task: DeviceTask) => void;
 }) {
   return (
     <section className="pda-page" aria-labelledby="task-title">
@@ -36,7 +36,7 @@ export function TaskHome({
       ) : (
         <div className="pda-task-list">
           {tasks.map((task) => (
-            <button key={task.id} className="pda-task-row" onClick={() => onScan(task.reference)}>
+            <button key={task.id} className="pda-task-row" onClick={() => onScan(task)}>
               <span className="pda-task-icon">
                 {task.type === 'LAST_MILE_DELIVERY' ? (
                   <Truck />

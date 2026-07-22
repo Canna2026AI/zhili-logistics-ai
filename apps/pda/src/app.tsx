@@ -69,6 +69,7 @@ export function App({
   const [tasks, setTasks] = useState<DeviceTask[]>([]);
   const [tab, setTab] = useState<Tab>('tasks');
   const [scanCode, setScanCode] = useState('');
+  const [selectedTask, setSelectedTask] = useState<DeviceTask>();
   const [revision, setRevision] = useState(0);
   const [online, setOnline] = useState(() => navigator.onLine);
   const [busy, setBusy] = useState(false);
@@ -198,6 +199,7 @@ export function App({
       setBindingMismatchLocked(false);
       const loadedTasks = await port.getDeviceTasks(next.deviceId);
       setTasks(loadedTasks);
+      setSelectedTask(undefined);
       await queue.setMeta('device-tasks', loadedTasks);
       setPhase('ready');
       setTab('tasks');
@@ -352,20 +354,23 @@ export function App({
         {tab === 'tasks' && (
           <TaskHome
             tasks={tasks}
-            onScan={(reference) => {
-              setScanCode(reference);
+            onScan={(task) => {
+              setSelectedTask(task);
+              setScanCode(task.reference);
               setTab('scan');
             }}
           />
         )}
         {tab === 'scan' && (
           <ScannerScreen
+            key={selectedTask?.id ?? 'manual-scan'}
             session={session}
             queue={queue}
             media={media}
             port={port}
             online={online}
             tasks={tasks}
+            selectedTask={selectedTask}
             initialCode={scanCode}
             assertBusinessAllowed={() => guard.assertAllowed('NEW_BUSINESS_EVENT')}
             onChanged={changed}
@@ -374,11 +379,14 @@ export function App({
               setError(explain(caught));
               setPhase('login');
             }}
-            onTaskUpdated={(taskId, status, version) =>
+            onTaskUpdated={(taskId, status, version) => {
               setTasks((current) =>
                 current.map((task) => (task.id === taskId ? { ...task, status, version } : task))
-              )
-            }
+              );
+              setSelectedTask((current) =>
+                current?.id === taskId ? { ...current, status, version } : current
+              );
+            }}
           />
         )}
         {tab === 'offline' && (
@@ -464,7 +472,13 @@ export function App({
           <button
             key={id}
             aria-current={tab === id ? 'page' : undefined}
-            onClick={() => setTab(id)}
+            onClick={() => {
+              if (id === 'scan') {
+                setSelectedTask(undefined);
+                setScanCode('');
+              }
+              setTab(id);
+            }}
           >
             <Icon aria-hidden="true" />
             <span>{label}</span>
