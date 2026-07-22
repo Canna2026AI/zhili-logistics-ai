@@ -33,6 +33,24 @@ export default defineConfig({
       },
     },
     {
+      name: 'ops-integration',
+      testMatch: /ops-integration\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://127.0.0.1:4100',
+        viewport: { width: 1440, height: 900 },
+      },
+    },
+    {
+      name: 'ops-orders',
+      testMatch: /ops-orders\.spec\.ts/,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: 'http://127.0.0.1:6006',
+        viewport: { width: 1586, height: 992 },
+      },
+    },
+    {
       name: 'customer',
       testMatch: /customer\.spec\.ts/,
       use: {
@@ -105,6 +123,12 @@ export default defineConfig({
     {
       command: 'pnpm --filter @zhili/website dev --host 127.0.0.1',
       url: 'http://127.0.0.1:4104',
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command:
+        'pnpm --filter @zhili/storybook exec storybook dev -p 6006 --no-open --host 127.0.0.1',
+      url: 'http://127.0.0.1:6006',
       reuseExistingServer: !process.env.CI,
     },
   ],

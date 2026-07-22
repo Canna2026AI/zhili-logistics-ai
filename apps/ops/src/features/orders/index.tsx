@@ -121,12 +121,14 @@ export interface OpsOrdersWorkspaceProps {
   initialPage?: OrdersPage;
   showPermissionController?: boolean;
   ports?: Partial<OpsOrdersPorts>;
+  onNavigateOutside?: (navigationId: string) => void;
 }
 
 export function OpsOrdersWorkspace({
   initialPage = 'waybills',
   showPermissionController = false,
   ports,
+  onNavigateOutside,
 }: OpsOrdersWorkspaceProps) {
   const [page, setPage] = useState<OrdersPage>(initialPage);
   const [openPages, setOpenPages] = useState<OrdersPage[]>(
@@ -197,6 +199,7 @@ export function OpsOrdersWorkspace({
       activeTabId={page}
       onNavigate={(id) => {
         if (id in labels) open(id as OrdersPage);
+        else onNavigateOutside?.(id);
       }}
       onTabChange={(id) => open(id as OrdersPage)}
     >

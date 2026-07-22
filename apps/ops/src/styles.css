@@ -80,3 +80,36 @@
   color: var(--zl-color-text-secondary);
   background: var(--zl-color-graphite-50);
 }
+.ops-integrated-app {
+  min-height: 100vh;
+  background: var(--zl-color-page);
+}
+.ops-module-switcher {
+  position: sticky;
+  top: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 38px;
+  padding: 4px 12px;
+  color: #fff;
+  background: var(--zl-color-graphite-950);
+}
+.ops-module-switcher strong {
+  margin-right: 12px;
+  font-size: 13px;
+}
+.ops-module-switcher a {
+  padding: 5px 10px;
+  border-radius: var(--zl-radius-control);
+  color: #d1d5db;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.ops-module-switcher a:hover,
+.ops-module-switcher a[aria-current='page'] {
+  color: #fff;
+  background: var(--zl-color-teal-700);
+}

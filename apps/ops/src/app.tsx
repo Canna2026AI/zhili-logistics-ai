@@ -1,186 +1,126 @@
-import { useMemo, useState } from 'react';
-import { AppShell, Button, DataTable, Drawer, StatusTag, type DataTableColumn } from '@zhili/ui';
+import { useEffect, useMemo, useState, type MouseEvent } from 'react';
+import { createZhiliClient } from '@zhili/api-client';
+import {
+  FulfillmentFinanceApplication,
+  type FulfillmentFinanceCommandPort,
+  type FulfillmentSection,
+} from './features/fulfillment-finance';
+import { OpsOrdersWorkspace } from './features/orders';
+import {
+  createApiOpsOrdersPorts,
+  defaultOpsOrdersPorts,
+  type OpsOrdersPorts,
+} from './features/orders/ports';
 
-type Waybill = {
-  id: string;
-  no: string;
-  customer: string;
-  route: string;
-  expected: string;
-  actual: string;
-  state: string;
-};
+type OperationsArea = { id: 'orders' } | { id: 'fulfillment'; section: FulfillmentSection };
 
-const rows: Waybill[] = [
-  {
-    id: '1',
-    no: 'S2505120004',
-    customer: '深圳鑫源贸易有限公司',
-    route: 'CN-SZX → US-LAX',
-    expected: '122.00 kg',
-    actual: '123.50 kg',
-    state: '已收货',
-  },
-  {
-    id: '2',
-    no: 'S2505120005',
-    customer: '广州远航供应链',
-    route: 'CN-CAN → US-ONT',
-    expected: '86.00 kg',
-    actual: '86.20 kg',
-    state: '待分货',
-  },
-  {
-    id: '3',
-    no: 'S2505120006',
-    customer: '东莞新锐电子有限公司',
-    route: 'CN-SZX → DE-FRA',
-    expected: '42.00 kg',
-    actual: '—',
-    state: '待收货',
-  },
-];
+export interface AppProps {
+  ordersPorts?: OpsOrdersPorts;
+  fulfillmentCommandPort?: FulfillmentFinanceCommandPort;
+}
 
-export function App() {
-  const [query, setQuery] = useState('');
-  const [selected, setSelected] = useState<string[]>([]);
-  const [opened, setOpened] = useState<Waybill | null>(null);
-  const visibleRows = useMemo(
-    () =>
-      rows.filter((row) => `${row.no}${row.customer}`.toLowerCase().includes(query.toLowerCase())),
-    [query]
+const fulfillmentSections = new Set<FulfillmentSection>([
+  'warehouse',
+  'linehaul',
+  'tracking',
+  'finance',
+]);
+
+function resolveArea(pathname: string): OperationsArea {
+  const section = pathname.split('/').filter(Boolean).at(-1);
+  if (
+    pathname.startsWith('/operations/fulfillment-finance') &&
+    fulfillmentSections.has(section as FulfillmentSection)
+  ) {
+    return { id: 'fulfillment', section: section as FulfillmentSection };
+  }
+  if (pathname.startsWith('/operations/fulfillment-finance')) {
+    return { id: 'fulfillment', section: 'warehouse' };
+  }
+  return { id: 'orders' };
+}
+
+function browserApiBaseUrl() {
+  if (typeof document === 'undefined') return 'http://localhost/api/v1';
+  return new URL('/api/v1', document.baseURI).toString();
+}
+
+export function App({ ordersPorts, fulfillmentCommandPort }: AppProps = {}) {
+  const [area, setArea] = useState<OperationsArea>(() => resolveArea(window.location.pathname));
+  const explicitMock =
+    import.meta.env.DEV && new URLSearchParams(window.location.search).get('mock') === '1';
+  const apiPorts = useMemo(
+    () => createApiOpsOrdersPorts(createZhiliClient({ baseUrl: browserApiBaseUrl() })),
+    []
   );
-  const columns: DataTableColumn<Waybill>[] = [
-    {
-      key: 'no',
-      header: '运单号',
-      render: (row) => (
-        <button className="ops-link" onClick={() => setOpened(row)}>
-          {row.no}
-        </button>
-      ),
-    },
-    { key: 'customer', header: '客户', width: 240, render: (row) => row.customer },
-    { key: 'route', header: '路由', render: (row) => row.route },
-    { key: 'expected', header: '预报重', align: 'right', render: (row) => row.expected },
-    { key: 'actual', header: '实收重', align: 'right', render: (row) => row.actual },
-    {
-      key: 'state',
-      header: '状态',
-      render: (row) => (
-        <StatusTag tone={row.state === '已收货' ? 'success' : 'warning'}>{row.state}</StatusTag>
-      ),
-    },
-  ];
+  const activeOrdersPorts = ordersPorts ?? (explicitMock ? defaultOpsOrdersPorts : apiPorts);
+  const query = explicitMock ? '?mock=1' : '';
+
+  useEffect(() => {
+    const updateFromHistory = () => setArea(resolveArea(window.location.pathname));
+    window.addEventListener('popstate', updateFromHistory);
+    return () => window.removeEventListener('popstate', updateFromHistory);
+  }, []);
+
+  const navigate = (next: OperationsArea) => {
+    const path =
+      next.id === 'orders'
+        ? '/operations/orders'
+        : `/operations/fulfillment-finance/${next.section}`;
+    window.history.pushState({}, '', `${path}${query}`);
+    setArea(next);
+  };
+
+  const follow = (next: OperationsArea) => (event: MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    navigate(next);
+  };
+
+  const navigateFromOrders = (id: string) => {
+    const mapping: Record<string, FulfillmentSection> = {
+      warehouse: 'warehouse',
+      booking: 'linehaul',
+      'last-mile': 'linehaul',
+      tracking: 'tracking',
+      finance: 'finance',
+    };
+    const section = mapping[id];
+    if (section) navigate({ id: 'fulfillment', section });
+  };
 
   return (
-    <AppShell
-      brand="智立科技物流AI系统"
-      tenant="智立科技（深圳）有限公司"
-      navigation={[
-        { label: '运营', items: [{ id: 'dashboard', label: '运营工作台' }] },
-        {
-          label: '基础资料',
-          items: [
-            { id: 'customers', label: '客户管理' },
-            { id: 'rates', label: '渠道报价' },
-          ],
-        },
-        {
-          label: '订单履约',
-          items: [
-            { id: 'waybills', label: '订单运单' },
-            { id: 'warehouse', label: '仓库作业' },
-            { id: 'linehaul', label: '订舱与提单' },
-            { id: 'last-mile', label: '尾程配送' },
-          ],
-        },
-        {
-          label: '服务结算',
-          items: [
-            { id: 'support', label: '轨迹客服' },
-            { id: 'finance', label: '财务结算' },
-          ],
-        },
-        {
-          label: '系统',
-          items: [
-            { id: 'automation', label: '自动化集成' },
-            { id: 'settings', label: '系统设置' },
-          ],
-        },
-      ]}
-      activeNavigationId="waybills"
-      tabs={[
-        { id: 'home', label: '运营工作台' },
-        { id: 'waybills', label: '运单' },
-      ]}
-      activeTabId="waybills"
-      onSearch={setQuery}
-    >
-      <div className="ops-page-header">
-        <div>
-          <h1>运单管理</h1>
-          <p>管理预报、收货、分货、运输与交付状态</p>
-        </div>
-        <Button>新建预报</Button>
-      </div>
-      <div className="ops-counters" aria-label="运单状态统计">
-        <button>
-          <strong>128</strong>
-          <span>待收货</span>
-        </button>
-        <button>
-          <strong>36</strong>
-          <span>待分货</span>
-        </button>
-        <button>
-          <strong>204</strong>
-          <span>运输中</span>
-        </button>
-        <button>
-          <strong>9</strong>
-          <span>问题件</span>
-        </button>
-      </div>
-      <div className="ops-toolbar">
-        <span>共 {visibleRows.length} 条</span>
-        <Button variant="secondary" disabled={selected.length === 0}>
-          批量操作（{selected.length}）
-        </Button>
-      </div>
-      <DataTable
-        ariaLabel="运单列表"
-        columns={columns}
-        rows={visibleRows}
-        rowKey={(row) => row.id}
-        selectedKeys={selected}
-        onSelectionChange={setSelected}
-      />
-      <Drawer
-        open={Boolean(opened)}
-        title="运单详情"
-        subheader={opened ? <StatusTag tone="success">{opened.state}</StatusTag> : null}
-        footer={<Button onClick={() => setOpened(null)}>完成</Button>}
-        onOpenChange={(open) => !open && setOpened(null)}
-      >
-        {opened ? (
-          <dl className="ops-detail">
-            <dt>运单号</dt>
-            <dd>{opened.no}</dd>
-            <dt>客户</dt>
-            <dd>{opened.customer}</dd>
-            <dt>路由</dt>
-            <dd>{opened.route}</dd>
-            <dt>预报重</dt>
-            <dd>{opened.expected}</dd>
-            <dt>实收/计费重</dt>
-            <dd>{opened.actual}</dd>
-            <dt>体积</dt>
-            <dd>0.48 m³</dd>
-          </dl>
-        ) : null}
-      </Drawer>
-    </AppShell>
+    <div className="ops-integrated-app">
+      <nav className="ops-module-switcher" aria-label="运营模块切换">
+        <strong>智立运营中心</strong>
+        <a
+          href={`/operations/orders${query}`}
+          aria-current={area.id === 'orders' ? 'page' : undefined}
+          onClick={follow({ id: 'orders' })}
+        >
+          订单与报价
+        </a>
+        <a
+          href={`/operations/fulfillment-finance/warehouse${query}`}
+          aria-current={area.id === 'fulfillment' ? 'page' : undefined}
+          onClick={follow({ id: 'fulfillment', section: 'warehouse' })}
+        >
+          履约与财务
+        </a>
+      </nav>
+      {area.id === 'orders' ? (
+        <OpsOrdersWorkspace
+          initialPage="dashboard"
+          showPermissionController
+          ports={activeOrdersPorts}
+          onNavigateOutside={navigateFromOrders}
+        />
+      ) : (
+        <FulfillmentFinanceApplication
+          key={area.section}
+          initialSection={area.section}
+          commandPort={fulfillmentCommandPort}
+        />
+      )}
+    </div>
   );
 }

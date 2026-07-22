@@ -125,6 +125,15 @@ importers:
       '@zhili/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@zhili/feature-identity-masterdata':
+        specifier: workspace:*
+        version: link:../../packages/features/identity-masterdata
+      '@zhili/feature-rates-routing':
+        specifier: workspace:*
+        version: link:../../packages/features/rates-routing
+      '@zhili/feature-waybills':
+        specifier: workspace:*
+        version: link:../../packages/features/waybills
       '@zhili/mocks':
         specifier: workspace:*
         version: link:../../packages/mocks
@@ -197,6 +206,18 @@ importers:
 
   apps/storybook:
     dependencies:
+      '@zhili/feature-identity-masterdata':
+        specifier: workspace:*
+        version: link:../../packages/features/identity-masterdata
+      '@zhili/feature-rates-routing':
+        specifier: workspace:*
+        version: link:../../packages/features/rates-routing
+      '@zhili/feature-waybills':
+        specifier: workspace:*
+        version: link:../../packages/features/waybills
+      '@zhili/ops':
+        specifier: workspace:*
+        version: link:../ops
       '@zhili/ui':
         specifier: workspace:*
         version: link:../../packages/ui
