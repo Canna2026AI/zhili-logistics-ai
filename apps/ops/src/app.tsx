@@ -110,7 +110,8 @@ export function App({ ordersPorts, fulfillmentCommandPort }: AppProps = {}) {
       {area.id === 'orders' ? (
         <OpsOrdersWorkspace
           initialPage="dashboard"
-          showPermissionController
+          showPermissionController={explicitMock}
+          showScenarioControls={explicitMock}
           ports={activeOrdersPorts}
           onNavigateOutside={navigateFromOrders}
         />
@@ -119,6 +120,7 @@ export function App({ ordersPorts, fulfillmentCommandPort }: AppProps = {}) {
           key={area.section}
           initialSection={area.section}
           commandPort={fulfillmentCommandPort}
+          showScenarioControls={explicitMock}
           onSectionChange={(section) => navigate({ id: 'fulfillment', section })}
         />
       )}

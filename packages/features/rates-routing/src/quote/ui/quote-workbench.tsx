@@ -6,6 +6,7 @@ import {
   memoryQuotePort,
   quoteInputFixture,
   type QuoteExplanationView,
+  type CalculatedQuote,
   type QuotePort,
   type QuoteWorkflowRequest,
 } from '../model/quote';
@@ -19,6 +20,10 @@ export interface QuoteWorkbenchProps {
   port?: QuotePort;
   readOnly?: boolean;
   onSubmitForecast?: () => void | Promise<void>;
+  draft?: QuoteWorkflowRequest;
+  onDraftChange?: (draft: QuoteWorkflowRequest) => void;
+  snapshot?: CalculatedQuote;
+  onSnapshotChange?: (snapshot: CalculatedQuote) => void;
 }
 
 interface QuoteFormState {
@@ -85,50 +90,96 @@ const initialForm: QuoteFormState = {
   fbaFulfillmentCenter: 'LAX9',
 };
 
+function workflowToForm(workflow: QuoteWorkflowRequest): QuoteFormState {
+  const firstPackage = workflow.quote.packages[0];
+  return {
+    ...initialForm,
+    customerId: workflow.quote.customerId,
+    orderType: workflow.orderContext.orderType,
+    currency: workflow.quote.currency,
+    origin: {
+      ...workflow.quote.origin,
+      contactName: workflow.quote.origin.contactName ?? '',
+      phone: workflow.quote.origin.phone ?? '',
+    },
+    destination: {
+      ...workflow.quote.destination,
+      state: workflow.quote.destination.state ?? '',
+      contactName: workflow.quote.destination.contactName ?? '',
+      phone: workflow.quote.destination.phone ?? '',
+    },
+    pieces: String(workflow.quote.packages.length || 1),
+    weightKg: firstPackage?.weightKg ?? '0',
+    lengthCm: firstPackage?.lengthCm ?? '0',
+    widthCm: firstPackage?.widthCm ?? '0',
+    heightCm: firstPackage?.heightCm ?? '0',
+    commodityDescription: firstPackage?.commodityDescription ?? '',
+    fbaShipmentId: workflow.orderContext.fba?.shipmentId ?? initialForm.fbaShipmentId,
+    fbaBoxCount: String(workflow.orderContext.fba?.boxCount ?? initialForm.fbaBoxCount),
+    fbaFulfillmentCenter:
+      workflow.orderContext.fba?.fulfillmentCenter ?? initialForm.fbaFulfillmentCenter,
+  };
+}
+
+function formToWorkflow(form: QuoteFormState, quoteDate: string): QuoteWorkflowRequest {
+  const pieceCount = Math.max(1, Math.floor(Number(form.pieces) || 1));
+  return {
+    quote: {
+      customerId: form.customerId,
+      origin: form.origin,
+      destination: form.destination,
+      packages: Array.from({ length: pieceCount }, (_, index) => ({
+        packageRef: `PKG-${String(index + 1).padStart(2, '0')}`,
+        weightKg: form.weightKg,
+        lengthCm: form.lengthCm,
+        widthCm: form.widthCm,
+        heightCm: form.heightCm,
+        commodityDescription:
+          form.orderType === 'FBA'
+            ? `Amazon FBA ${form.commodityDescription} / ${form.fbaShipmentId} / ${form.fbaFulfillmentCenter}`
+            : form.commodityDescription,
+      })),
+      quoteDate,
+      currency: form.currency,
+    },
+    orderContext: {
+      orderType: form.orderType,
+      ...(form.orderType === 'FBA'
+        ? {
+            fba: {
+              shipmentId: form.fbaShipmentId,
+              boxCount: Number(form.fbaBoxCount) || 0,
+              fulfillmentCenter: form.fbaFulfillmentCenter,
+            },
+          }
+        : {}),
+    },
+  };
+}
+
 export function QuoteWorkbench({
   state = 'normal',
   port = memoryQuotePort,
   readOnly = false,
   onSubmitForecast,
+  draft,
+  onDraftChange,
+  snapshot,
+  onSnapshotChange,
 }: QuoteWorkbenchProps) {
-  const [form, setForm] = useState<QuoteFormState>(initialForm);
-  const request = useMemo<QuoteWorkflowRequest>(() => {
-    const pieceCount = Math.max(1, Math.floor(Number(form.pieces) || 1));
-    return {
-      quote: {
-        customerId: form.customerId,
-        origin: form.origin,
-        destination: form.destination,
-        packages: Array.from({ length: pieceCount }, (_, index) => ({
-          packageRef: `PKG-${String(index + 1).padStart(2, '0')}`,
-          weightKg: form.weightKg,
-          lengthCm: form.lengthCm,
-          widthCm: form.widthCm,
-          heightCm: form.heightCm,
-          commodityDescription:
-            form.orderType === 'FBA'
-              ? `Amazon FBA ${form.commodityDescription} / ${form.fbaShipmentId} / ${form.fbaFulfillmentCenter}`
-              : form.commodityDescription,
-        })),
-        quoteDate: quoteInputFixture.request.quoteDate,
-        currency: form.currency,
-      },
-      orderContext: {
-        orderType: form.orderType,
-        ...(form.orderType === 'FBA'
-          ? {
-              fba: {
-                shipmentId: form.fbaShipmentId,
-                boxCount: Number(form.fbaBoxCount) || 0,
-                fulfillmentCenter: form.fbaFulfillmentCenter,
-              },
-            }
-          : {}),
-      },
-    };
-  }, [form]);
-  const [quote, setQuote] = useState(() => calculateQuote(quoteInputFixture));
-  const [quoteDirty, setQuoteDirty] = useState(false);
+  const [localForm, setLocalForm] = useState<QuoteFormState>(() =>
+    draft ? workflowToForm(draft) : initialForm
+  );
+  const form = useMemo(() => (draft ? workflowToForm(draft) : localForm), [draft, localForm]);
+  const request = useMemo(
+    () => formToWorkflow(form, draft?.quote.quoteDate ?? quoteInputFixture.request.quoteDate),
+    [draft?.quote.quoteDate, form]
+  );
+  const [localQuote, setLocalQuote] = useState(() => calculateQuote(quoteInputFixture));
+  const quote = snapshot ?? localQuote;
+  const quoteKey = `${quote.id}:v${quote.version}`;
+  const [dirtySnapshotKey, setDirtySnapshotKey] = useState<string | null>(null);
+  const quoteDirty = dirtySnapshotKey === quoteKey;
   const [selectedId, setSelectedId] = useState('dhl-express');
   const [explanation, setExplanation] = useState<QuoteExplanationView | null>(null);
   const [pending, setPending] = useState<'quote' | 'explain' | 'accept' | 'save' | 'submit' | null>(
@@ -137,11 +188,17 @@ export function QuoteWorkbench({
   const [actionError, setActionError] = useState('');
   const [actionStatus, setActionStatus] = useState('');
   const commodityCount = 1;
-  const selected = quote.options.find((option) => option.id === selectedId) ?? quote.options[0]!;
+  const effectiveSelectedId = quote.options.some((option) => option.id === selectedId)
+    ? selectedId
+    : (quote.options.find((option) => option.available)?.id ?? quote.options[0]?.id ?? '');
+  const selected =
+    quote.options.find((option) => option.id === effectiveSelectedId) ?? quote.options[0]!;
 
   const updateForm = (update: (current: QuoteFormState) => QuoteFormState) => {
-    setForm(update);
-    setQuoteDirty(true);
+    const next = update(form);
+    if (onDraftChange) onDraftChange(formToWorkflow(next, request.quote.quoteDate));
+    else setLocalForm(next);
+    setDirtySnapshotKey(quoteKey);
     setExplanation(null);
     setActionStatus('输入已更改；刷新报价后可解释或接受新快照。');
   };
@@ -167,8 +224,9 @@ export function QuoteWorkbench({
   const refreshQuote = async () => {
     const next = await run('quote', () => port.create(request));
     if (next) {
-      setQuote(next);
-      setQuoteDirty(false);
+      if (onSnapshotChange) onSnapshotChange(next);
+      else setLocalQuote(next);
+      setDirtySnapshotKey(null);
       setExplanation(null);
       setSelectedId(
         next.options.find((option) => option.available)?.id ?? next.options[0]?.id ?? ''
@@ -671,14 +729,14 @@ export function QuoteWorkbench({
           {quote.options.map((option) => (
             <label
               key={option.id}
-              data-selected={selectedId === option.id || undefined}
+              data-selected={effectiveSelectedId === option.id || undefined}
               data-disabled={!option.available || undefined}
             >
               <input
                 type="radio"
                 name="channel"
                 aria-label={`${option.product} ${formatMoney(option.total)}`}
-                checked={selectedId === option.id}
+                checked={effectiveSelectedId === option.id}
                 disabled={!option.available}
                 onChange={() => {
                   setSelectedId(option.id);

@@ -54,6 +54,7 @@ export type FulfillmentFinanceOperationId =
   | 'settleClaim'
   | 'placeShipmentHold'
   | 'releaseShipmentHold'
+  | 'requestShipmentHoldReleaseApproval'
   | 'generateCharges'
   | 'reviewCharge'
   | 'unreviewCharge'
@@ -103,6 +104,7 @@ export interface FulfillmentFinanceWorkbenchProps {
   initialViewState?: WorkbenchViewState;
   commandPort: FulfillmentFinanceCommandPort;
   onSectionChange?: (section: FulfillmentSection) => void;
+  showScenarioControls?: boolean;
 }
 
 type RunCommand = (
@@ -1322,9 +1324,11 @@ const financeRows: FinanceRow[] = [
 function FinanceWorkbench({
   runCommand,
   scenario,
+  commandPending,
 }: {
   runCommand: RunCommand;
   scenario: OpsFlowSelection;
+  commandPending: boolean;
 }) {
   const [selected, setSelected] = useState(['4']);
   const [dangerOpen, setDangerOpen] = useState(false);
@@ -1792,12 +1796,16 @@ function FinanceWorkbench({
         onOpenChange={setDangerOpen}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDangerOpen(false)}>
+            <Button
+              variant="secondary"
+              disabled={commandPending}
+              onClick={() => setDangerOpen(false)}
+            >
               取消
             </Button>
             <Button
               variant="danger"
-              disabled={reason.trim().length < 5}
+              disabled={reason.trim().length < 5 || commandPending}
               onClick={() => {
                 const validated = buildDangerousFinanceCommand({
                   action: 'UNREVIEW_CHARGE',
@@ -1856,6 +1864,7 @@ export function FulfillmentFinanceWorkbench({
   initialViewState = 'normal',
   commandPort,
   onSectionChange,
+  showScenarioControls = false,
 }: FulfillmentFinanceWorkbenchProps) {
   const [section, setSection] = useState<FulfillmentSection>(initialSection);
   const [viewState, setViewState] = useState<WorkbenchViewState>(initialViewState);
@@ -1881,6 +1890,9 @@ export function FulfillmentFinanceWorkbench({
   const [dispatchChecklistConfirmed, setDispatchChecklistConfirmed] = useState(false);
   const [scenarioUnreviewOpen, setScenarioUnreviewOpen] = useState(false);
   const [scenarioUnreviewReason, setScenarioUnreviewReason] = useState('');
+  const [commandPending, setCommandPending] = useState(false);
+  const commandPendingRef = useRef(false);
+  const auditedCommandKeysRef = useRef(new Set<string>());
   const active = navItems.find((item) => item.id === section)!;
   const scenarioFlows: OpsFlowId[] =
     section === 'warehouse'
@@ -1892,11 +1904,17 @@ export function FulfillmentFinanceWorkbench({
           : ['F06', 'F07'];
 
   const runCommand: RunCommand = async (nextCommand, successMessage, onResolved) => {
+    if (commandPendingRef.current) return;
+    commandPendingRef.current = true;
+    setCommandPending(true);
     setFeedback({ kind: 'pending', message: `正在提交 ${nextCommand.operationId}` });
     try {
       const result = await commandPort.execute(nextCommand);
       onResolved?.();
-      setAuditCount((count) => count + 1);
+      if (!auditedCommandKeysRef.current.has(nextCommand.idempotencyKey)) {
+        auditedCommandKeysRef.current.add(nextCommand.idempotencyKey);
+        setAuditCount((count) => count + 1);
+      }
       setFeedback({
         kind: 'success',
         message: `${successMessage} · 审计 ${result.auditId}`,
@@ -1904,6 +1922,9 @@ export function FulfillmentFinanceWorkbench({
     } catch (error) {
       const message = error instanceof Error ? error.message : '命令执行失败';
       setFeedback({ kind: 'error', message: `操作失败：${message}。输入与幂等键已保留，可重试。` });
+    } finally {
+      commandPendingRef.current = false;
+      setCommandPending(false);
     }
   };
 
@@ -1911,13 +1932,27 @@ export function FulfillmentFinanceWorkbench({
     nextCommand: FulfillmentFinanceCommand,
     message: string
   ): Promise<FlowStateActionResult> => {
-    const result = await commandPort.execute(nextCommand);
-    setAuditCount((count) => count + 1);
-    return {
-      message,
-      auditId: result.auditId,
-      operationId: nextCommand.operationId,
-    };
+    if (commandPendingRef.current) throw new Error('已有命令正在执行，请等待完成');
+    commandPendingRef.current = true;
+    setCommandPending(true);
+    try {
+      const result = await commandPort.execute(nextCommand);
+      if (!auditedCommandKeysRef.current.has(nextCommand.idempotencyKey)) {
+        auditedCommandKeysRef.current.add(nextCommand.idempotencyKey);
+        setAuditCount((count) => count + 1);
+      }
+      return {
+        message,
+        evidence: {
+          kind: 'server',
+          auditId: result.auditId,
+          operationId: nextCommand.operationId,
+        },
+      };
+    } finally {
+      commandPendingRef.current = false;
+      setCommandPending(false);
+    }
   };
 
   const runScenarioAction = async (
@@ -1942,8 +1977,7 @@ export function FulfillmentFinanceWorkbench({
       case 'download-load-report':
         return {
           message: 'clientAction 已生成装载兼容失败报告',
-          auditId: 'CLIENT-F04-REPORT',
-          operationId: 'clientAction',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F04-REPORT' },
           download: {
             filename: 'load-compatibility-errors.csv',
             mimeType: 'text/csv',
@@ -1953,7 +1987,7 @@ export function FulfillmentFinanceWorkbench({
         };
       case 'request-release-approval':
         return executeScenarioCommand(
-          command('tracking', 'placeShipmentHold', 'HOLD-S2505120004', 2, {
+          command('tracking', 'requestShipmentHoldReleaseApproval', 'HOLD-S2505120004', 2, {
             reason: '信用扣货待财务放货审批',
             requestedAction: 'RELEASE',
           }),
@@ -1964,8 +1998,7 @@ export function FulfillmentFinanceWorkbench({
         setDispatchConfirmationOpen(true);
         return {
           message: 'clientAction 已打开出仓二次确认',
-          auditId: 'CLIENT-F04-DISPATCH-CHECK',
-          operationId: 'clientAction',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F04-DISPATCH-CHECK' },
         };
       case 'retry-carrier-sync':
         return executeScenarioCommand(
@@ -1987,14 +2020,12 @@ export function FulfillmentFinanceWorkbench({
         setScenarioUnreviewOpen(true);
         return {
           message: 'clientAction 已加载反审核影响范围',
-          auditId: 'CLIENT-F06-UNREVIEW-IMPACT',
-          operationId: 'clientAction',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F06-UNREVIEW-IMPACT' },
         };
       case 'download-payable-report':
         return {
           message: 'clientAction 已生成应付导入错误报告',
-          auditId: 'CLIENT-F07-REPORT',
-          operationId: 'clientAction',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F07-REPORT' },
           download: {
             filename: 'payable-import-errors.csv',
             mimeType: 'text/csv',
@@ -2020,7 +2051,13 @@ export function FulfillmentFinanceWorkbench({
     if (section === 'linehaul')
       return <LinehaulWorkbench runCommand={runCommand} scenario={scenario} />;
     if (section === 'tracking') return <TrackingWorkbench runCommand={runCommand} />;
-    return <FinanceWorkbench runCommand={runCommand} scenario={scenario} />;
+    return (
+      <FinanceWorkbench
+        runCommand={runCommand}
+        scenario={scenario}
+        commandPending={commandPending}
+      />
+    );
   };
 
   return (
@@ -2072,37 +2109,42 @@ export function FulfillmentFinanceWorkbench({
             <span>运营工作台 / {active.label}</span>
             <strong>{active.description}</strong>
           </div>
-          <label>
-            验收状态
-            <select
-              aria-label="验收状态"
-              value={viewState}
-              onChange={(event) => setViewState(event.target.value as WorkbenchViewState)}
-            >
-              {[
-                ['normal', '正常'],
-                ['loading', '加载'],
-                ['empty', '空'],
-                ['failed', '失败'],
-                ['forbidden', '无权限'],
-                ['stale', '过期'],
-                ['partial', '部分成功'],
-              ].map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {showScenarioControls ? (
+            <label>
+              验收状态
+              <select
+                aria-label="验收状态"
+                value={viewState}
+                onChange={(event) => setViewState(event.target.value as WorkbenchViewState)}
+              >
+                {[
+                  ['normal', '正常'],
+                  ['loading', '加载'],
+                  ['empty', '空'],
+                  ['failed', '失败'],
+                  ['forbidden', '无权限'],
+                  ['stale', '过期'],
+                  ['partial', '部分成功'],
+                ].map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </header>
         <div className="ff-content">
-          <FlowStatePanel
-            key={`${section}:${scenario.flowId}:${scenario.stateId}`}
-            flows={scenarioFlows as [OpsFlowId, ...OpsFlowId[]]}
-            value={scenario}
-            onChange={setScenario}
-            onAction={runScenarioAction}
-          />
+          {showScenarioControls || scenario.stateId !== 'normal' ? (
+            <FlowStatePanel
+              key={`${section}:${scenario.flowId}:${scenario.stateId}`}
+              flows={scenarioFlows as [OpsFlowId, ...OpsFlowId[]]}
+              value={scenario}
+              onChange={setScenario}
+              onAction={runScenarioAction}
+              controlsVisible={showScenarioControls}
+            />
+          ) : null}
           {renderSection()}
         </div>
         {feedback ? (
@@ -2132,12 +2174,16 @@ export function FulfillmentFinanceWorkbench({
         onOpenChange={setDispatchConfirmationOpen}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDispatchConfirmationOpen(false)}>
+            <Button
+              variant="secondary"
+              disabled={commandPending}
+              onClick={() => setDispatchConfirmationOpen(false)}
+            >
               返回检查
             </Button>
             <Button
               variant="danger"
-              disabled={!dispatchChecklistConfirmed}
+              disabled={!dispatchChecklistConfirmed || commandPending}
               onClick={() =>
                 runCommand(
                   command('linehaul', 'dispatchLoadUnit', 'CNT-SZX-260722-01', 4, {
@@ -2184,12 +2230,16 @@ export function FulfillmentFinanceWorkbench({
         onOpenChange={setScenarioUnreviewOpen}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setScenarioUnreviewOpen(false)}>
+            <Button
+              variant="secondary"
+              disabled={commandPending}
+              onClick={() => setScenarioUnreviewOpen(false)}
+            >
               取消
             </Button>
             <Button
               variant="danger"
-              disabled={scenarioUnreviewReason.trim().length < 5}
+              disabled={scenarioUnreviewReason.trim().length < 5 || commandPending}
               onClick={() =>
                 runCommand(
                   command('finance', 'unreviewCharge', 'CHG-S2505120004', 11, {

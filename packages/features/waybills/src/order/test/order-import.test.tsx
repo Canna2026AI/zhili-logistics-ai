@@ -296,6 +296,13 @@ describe('waybill import', () => {
   it('uses generated import create, validate, commit and rollback paths', async () => {
     const POST = vi.fn(async (path: string) => {
       if (path === '/imports') return { data: { data: { id: 'import-1', version: 1 } } };
+      if (path === '/ai/imports/{importId}/mapping-proposals:apply')
+        return {
+          data: {
+            data: { id: 'import-1', version: 2, status: 'MAPPING' },
+            meta: { requestId: 'REQ-MAPPING-1' },
+          },
+        };
       if (path === '/imports/{importId}:commit')
         return {
           data: {
@@ -312,6 +319,12 @@ describe('waybill import', () => {
     });
     const api = createImportApi({ POST } as never, () => 'idem-import');
     await api.create('file-ref');
+    await expect(api.applyMapping('import-1', 1, ['01JMAP0000000000000000002'])).resolves.toEqual({
+      id: 'import-1',
+      version: 2,
+      status: 'MAPPING',
+      auditId: 'REQ-MAPPING-1',
+    });
     await api.validate('import-1', 1);
     await api.commit('import-1', 2, true);
     await api.rollback('import-1', 3, '客户确认本批次全部作废');
@@ -322,6 +335,18 @@ describe('waybill import', () => {
           header: { 'Idempotency-Key': 'idem-import', 'If-Match': '"3"' },
         }),
         body: expect.objectContaining({ reason: '客户确认本批次全部作废' }),
+      })
+    );
+    expect(POST).toHaveBeenCalledWith(
+      '/ai/imports/{importId}/mapping-proposals:apply',
+      expect.objectContaining({
+        params: expect.objectContaining({
+          header: { 'Idempotency-Key': 'idem-import', 'If-Match': '"1"' },
+        }),
+        body: {
+          proposalVersion: 1,
+          acceptedMappingIds: ['01JMAP0000000000000000002'],
+        },
       })
     );
   });

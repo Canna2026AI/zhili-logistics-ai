@@ -7,6 +7,20 @@ import { FlowStatePanel, type FlowStateActionResult } from './flow-state-panel';
 afterEach(cleanup);
 
 describe('FlowStatePanel', () => {
+  it('keeps production rendering read-only and constrains an invalid value to the allowed flow', () => {
+    render(
+      <FlowStatePanel
+        flows={['F03']}
+        value={{ flowId: 'F10', stateId: 'low-confidence' }}
+        onChange={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('region', { name: 'F03 交互状态' })).toBeVisible();
+    expect(screen.queryByRole('combobox', { name: '业务流程' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '返回正常流程' })).not.toBeInTheDocument();
+  });
+
   it('reports flow and state changes instead of owning business state', () => {
     const onChange = vi.fn();
     render(
@@ -14,6 +28,7 @@ describe('FlowStatePanel', () => {
         flows={['F06', 'F07']}
         value={{ flowId: 'F06', stateId: 'normal' }}
         onChange={onChange}
+        controlsVisible
       />
     );
 
@@ -53,8 +68,11 @@ describe('FlowStatePanel', () => {
 
     resolveAction?.({
       message: '通知 Job 已重新排队',
-      auditId: 'AUD-retryNotificationDelivery',
-      operationId: 'retryNotificationDelivery',
+      evidence: {
+        kind: 'server',
+        auditId: 'AUD-retryNotificationDelivery',
+        operationId: 'retryNotificationDelivery',
+      },
     });
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(
@@ -74,11 +92,31 @@ describe('FlowStatePanel', () => {
         value={{ flowId: 'F05', stateId: 'failed-carrier' }}
         onChange={vi.fn()}
         onAction={onAction}
+        controlsVisible
       />
     );
 
     fireEvent.click(screen.getByRole('button', { name: '立即重试' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('409 版本冲突');
     expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('failed-carrier');
+  });
+
+  it('labels a client-only result as local evidence instead of server audit', async () => {
+    render(
+      <FlowStatePanel
+        flows={['F04']}
+        value={{ flowId: 'F04', stateId: 'failed-incompatible' }}
+        onChange={vi.fn()}
+        onAction={async () => ({
+          message: '失败报告已生成',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F04-REPORT' },
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '下载失败报告' }));
+    const status = await screen.findByRole('status');
+    expect(status).toHaveTextContent('本地证据');
+    expect(status).not.toHaveTextContent('审计');
   });
 });

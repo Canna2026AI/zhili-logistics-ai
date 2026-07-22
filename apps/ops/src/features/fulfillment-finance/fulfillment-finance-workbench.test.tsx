@@ -25,7 +25,7 @@ describe('fulfillment and finance workbench', () => {
           resolveCommand = resolve;
         })
     );
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} />);
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     expect(screen.getByRole('heading', { name: '收货扫描' })).toBeVisible();
     expect(screen.getAllByText('123.50 kg', { exact: true })).toHaveLength(2);
@@ -60,7 +60,13 @@ describe('fulfillment and finance workbench', () => {
           rejectCommand = reject;
         })
     );
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="tracking" />);
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="tracking"
+      />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: '解决问题' }));
     expect(screen.getByText('正在提交 resolveIssue')).toBeVisible();
@@ -80,7 +86,7 @@ describe('fulfillment and finance workbench', () => {
     const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
       auditId: `AUD-${command.operationId}`,
     }));
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} />);
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     for (const [label, operationId] of [
       ['记录测量', 'recordMeasurement'],
@@ -126,7 +132,7 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('keeps warehouse scan evidence and finance table dense enough for desktop operations', () => {
-    render(<FulfillmentFinanceWorkbench commandPort={successfulPort()} />);
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={successfulPort()} />);
     expect(
       screen.getByRole('table', { name: '最近扫描记录' }).getElementsByTagName('tr')
     ).toHaveLength(5);
@@ -140,7 +146,7 @@ describe('fulfillment and finance workbench', () => {
 
   it('announces the current domain and updates the selected route only after resolve', async () => {
     const port = successfulPort();
-    render(<FulfillmentFinanceWorkbench commandPort={port} />);
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={port} />);
 
     expect(screen.getByRole('button', { name: /仓库作业/ })).toHaveAttribute(
       'aria-current',
@@ -163,13 +169,25 @@ describe('fulfillment and finance workbench', () => {
     ['stale', '本地版本 10 / 服务器版本 11'],
     ['partial', '成功 8 条，失败 2 条'],
   ] as const)('renders the %s state with a recovery explanation', (state, evidence) => {
-    render(<FulfillmentFinanceWorkbench commandPort={successfulPort()} initialViewState={state} />);
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={successfulPort()}
+        initialViewState={state}
+      />
+    );
     expect(screen.getByText((content) => content.includes(evidence))).toBeVisible();
   });
 
   it('dispatches dangerous unreview with reason, If-Match version and stable idempotency', async () => {
     const execute = vi.fn(async () => ({ auditId: 'AUD-FIN-0098' }));
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="finance" />);
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="finance"
+      />
+    );
 
     fireEvent.click(screen.getByRole('button', { name: '反审核' }));
     const dialog = screen.getByRole('dialog', { name: '反审核费用' });
@@ -202,7 +220,7 @@ describe('fulfillment and finance workbench', () => {
     const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
       auditId: `AUD-${command.operationId}`,
     }));
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} />);
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打印交接单' }));
     await waitFor(() =>
@@ -252,7 +270,13 @@ describe('fulfillment and finance workbench', () => {
           resolveCommand = resolve;
         })
     );
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="linehaul" />);
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="linehaul"
+      />
+    );
 
     expect(screen.getByRole('combobox', { name: '业务流程' })).toHaveValue('F04');
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
@@ -283,7 +307,13 @@ describe('fulfillment and finance workbench', () => {
 
   it('gates F04 release and produces a real downloadable failure report', async () => {
     const execute = vi.fn(async () => ({ auditId: 'AUD-F04-APPROVAL' }));
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="linehaul" />);
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="linehaul"
+      />
+    );
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
       target: { value: 'failed-incompatible' },
     });
@@ -302,9 +332,9 @@ describe('fulfillment and finance workbench', () => {
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
         domain: 'tracking',
-        operationId: 'placeShipmentHold',
+        operationId: 'requestShipmentHoldReleaseApproval',
         entityRef: 'HOLD-S2505120004',
-        idempotencyKey: 'placeShipmentHold:HOLD-S2505120004:v2',
+        idempotencyKey: 'requestShipmentHoldReleaseApproval:HOLD-S2505120004:v2',
       })
     );
     expect(screen.getByRole('status')).toHaveTextContent('AUD-F04-APPROVAL');
@@ -315,7 +345,7 @@ describe('fulfillment and finance workbench', () => {
       .fn<(command: FulfillmentFinanceCommand) => Promise<{ auditId: string }>>()
       .mockResolvedValueOnce({ auditId: 'AUD-F03-MEDIA' })
       .mockRejectedValueOnce(new Error('409 承运商版本冲突'));
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} />);
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
       target: { value: 'failed-missing-evidence' },
@@ -348,7 +378,7 @@ describe('fulfillment and finance workbench', () => {
     const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
       auditId: `AUD-${command.entityRef}`,
     }));
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} />);
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
       target: { value: 'partial-notify' },
     });
@@ -381,7 +411,13 @@ describe('fulfillment and finance workbench', () => {
     const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
       auditId: `AUD-${command.operationId}`,
     }));
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="finance" />);
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="finance"
+      />
+    );
 
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
       target: { value: 'stale-allocate' },
@@ -423,7 +459,13 @@ describe('fulfillment and finance workbench', () => {
 
   it('routes F06 danger unreview through an impact dialog and exact audited command', async () => {
     const execute = vi.fn(async () => ({ auditId: 'AUD-F06-UNREVIEW' }));
-    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="finance" />);
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="finance"
+      />
+    );
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
       target: { value: 'danger-unreview' },
     });
@@ -444,5 +486,47 @@ describe('fulfillment and finance workbench', () => {
       })
     );
     expect(await screen.findByRole('status')).toHaveTextContent('AUD-F06-UNREVIEW');
+  });
+
+  it('prevents repeated danger submissions while pending and counts one server audit', async () => {
+    let resolveCommand: ((value: { auditId: string }) => void) | undefined;
+    const execute = vi.fn(
+      () =>
+        new Promise<{ auditId: string }>((resolve) => {
+          resolveCommand = resolve;
+        })
+    );
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="linehaul"
+      />
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'danger-dispatch' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '进入二次确认' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '已核对未关闭问题与打印清单' }));
+    const confirm = screen.getByRole('button', { name: '确认出库并记录审计' });
+    fireEvent.click(confirm);
+    fireEvent.click(confirm);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(confirm).toBeDisabled();
+    resolveCommand?.({ auditId: 'AUD-ONE' });
+    await waitFor(() => expect(screen.getByText('审计事件').parentElement).toHaveTextContent('1'));
+  });
+
+  it('does not count an idempotent server replay as a second audit event', async () => {
+    const execute = vi.fn(async () => ({ auditId: 'AUD-confirmReceipt-REPLAY' }));
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
+    const confirmReceipt = screen.getByRole('button', { name: '确认收货' });
+
+    fireEvent.click(confirmReceipt);
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    fireEvent.click(confirmReceipt);
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByText('审计事件').parentElement).toHaveTextContent('1');
   });
 });

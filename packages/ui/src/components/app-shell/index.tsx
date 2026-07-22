@@ -94,6 +94,8 @@ export function AppShell({
                 <button
                   key={item.id}
                   type="button"
+                  aria-label={item.label}
+                  title={item.label}
                   data-active={item.id === activeNavigationId || undefined}
                   onClick={() => onNavigate?.(item.id)}
                 >

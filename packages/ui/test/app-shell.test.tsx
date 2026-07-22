@@ -25,6 +25,10 @@ describe('AppShell', () => {
     );
     expect(screen.getByText('智立科技（深圳）有限公司')).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: '业务导航' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '运单管理' })).toHaveAttribute(
+      'aria-label',
+      '运单管理'
+    );
     await user.type(screen.getByRole('searchbox', { name: '全局搜索' }), 'S2505120004{enter}');
     expect(onSearch).toHaveBeenCalledWith('S2505120004');
   });

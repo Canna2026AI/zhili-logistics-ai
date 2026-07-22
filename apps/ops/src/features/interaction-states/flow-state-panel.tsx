@@ -16,8 +16,9 @@ export interface FlowStateActionRequest {
 
 export interface FlowStateActionResult {
   message: string;
-  auditId: string;
-  operationId?: string;
+  evidence:
+    | { kind: 'server'; operationId: string; auditId?: string; resourceId?: string }
+    | { kind: 'local'; evidenceId: string };
   recoverToStateId?: string;
   details?: { title: string; items: string[] };
   download?: { filename: string; mimeType: string; content: string };
@@ -31,6 +32,7 @@ export interface FlowStatePanelProps {
   onChange: (value: OpsFlowSelection) => void;
   onAction?: (request: FlowStateActionRequest) => Promise<FlowStateActionResult>;
   stateLabel?: string;
+  controlsVisible?: boolean;
 }
 
 type Outcome =
@@ -42,17 +44,19 @@ export function FlowStatePanel({
   onChange,
   onAction,
   stateLabel,
+  controlsVisible = false,
 }: FlowStatePanelProps) {
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const pendingRef = useRef(false);
-  const flow = opsFlowCatalog[value.flowId] ?? opsFlowCatalog[flows[0]];
+  const selectedFlowId = flows.includes(value.flowId) ? value.flowId : flows[0];
+  const flow = opsFlowCatalog[selectedFlowId];
   const state = flow.states.find((candidate) => candidate.id === value.stateId) ?? flow.states[0];
 
   const resetOutcome = () => setOutcome(null);
   const reset = () => {
     resetOutcome();
-    onChange({ flowId: value.flowId, stateId: 'normal' });
+    onChange({ flowId: selectedFlowId, stateId: 'normal' });
   };
   const executeAction = async () => {
     if (!state.action || !onAction || pendingRef.current) return;
@@ -61,13 +65,13 @@ export function FlowStatePanel({
     setOutcome(null);
     try {
       const result = await onAction({
-        selection: value,
+        selection: { flowId: selectedFlowId, stateId: state.id },
         actionId: state.action.id,
         kind: state.action.kind,
       });
       setOutcome({ kind: 'success', result });
       if (result.recoverToStateId) {
-        onChange({ flowId: value.flowId, stateId: result.recoverToStateId });
+        onChange({ flowId: selectedFlowId, stateId: result.recoverToStateId });
       }
     } catch (error) {
       setOutcome({
@@ -87,44 +91,46 @@ export function FlowStatePanel({
           <strong>{flow.label}</strong>
           <span>正常、失败、权限、并发与恢复路径</span>
         </div>
-        <div className="ops-flow-state__selectors">
-          <label>
-            业务流程
-            <select
-              aria-label="业务流程"
-              value={value.flowId}
-              disabled={pending}
-              onChange={(event) => {
-                resetOutcome();
-                onChange({ flowId: event.target.value as OpsFlowId, stateId: 'normal' });
-              }}
-            >
-              {flows.map((id) => (
-                <option key={id} value={id}>
-                  {opsFlowCatalog[id].label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            {stateLabel ?? '流程状态'}
-            <select
-              aria-label={stateLabel ?? '流程状态'}
-              value={state.id}
-              disabled={pending}
-              onChange={(event) => {
-                resetOutcome();
-                onChange({ flowId: value.flowId, stateId: event.target.value });
-              }}
-            >
-              {flow.states.map((candidate) => (
-                <option key={candidate.id} value={candidate.id}>
-                  {candidate.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        {controlsVisible ? (
+          <div className="ops-flow-state__selectors">
+            <label>
+              业务流程
+              <select
+                aria-label="业务流程"
+                value={selectedFlowId}
+                disabled={pending}
+                onChange={(event) => {
+                  resetOutcome();
+                  onChange({ flowId: event.target.value as OpsFlowId, stateId: 'normal' });
+                }}
+              >
+                {flows.map((id) => (
+                  <option key={id} value={id}>
+                    {opsFlowCatalog[id].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {stateLabel ?? '流程状态'}
+              <select
+                aria-label={stateLabel ?? '流程状态'}
+                value={state.id}
+                disabled={pending}
+                onChange={(event) => {
+                  resetOutcome();
+                  onChange({ flowId: selectedFlowId, stateId: event.target.value });
+                }}
+              >
+                {flow.states.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        ) : null}
       </header>
 
       {state.id !== 'normal' ? (
@@ -144,9 +150,11 @@ export function FlowStatePanel({
             </ul>
           </div>
           <div className="ops-flow-state__actions">
-            <Button variant="secondary" size="compact" disabled={pending} onClick={reset}>
-              返回正常流程
-            </Button>
+            {controlsVisible ? (
+              <Button variant="secondary" size="compact" disabled={pending} onClick={reset}>
+                返回正常流程
+              </Button>
+            ) : null}
             {state.action ? (
               <Button
                 size="compact"
@@ -163,8 +171,12 @@ export function FlowStatePanel({
       {outcome?.kind === 'success' ? (
         <section className="ops-flow-state__result" aria-label="操作结果">
           <p className="ops-flow-state__feedback" role="status" aria-live="polite">
-            {outcome.result.message} · 审计 {outcome.result.auditId} ·{' '}
-            {outcome.result.operationId ?? 'clientAction'}
+            {outcome.result.message} ·{' '}
+            {outcome.result.evidence.kind === 'server'
+              ? outcome.result.evidence.auditId
+                ? `审计 ${outcome.result.evidence.auditId} · ${outcome.result.evidence.operationId}`
+                : `服务端资源 ${outcome.result.evidence.resourceId ?? '已更新'} · ${outcome.result.evidence.operationId}`
+              : `本地证据 ${outcome.result.evidence.evidenceId}`}
           </p>
           {outcome.result.details ? (
             <section aria-label={outcome.result.details.title}>

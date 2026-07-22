@@ -1782,6 +1782,25 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/shipment-holds/{holdId}:request-release-approval': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        holdId: components['schemas']['Ulid'];
+      };
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Request approval to release a shipment hold */
+    post: operations['requestShipmentHoldReleaseApproval'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/rates/channel-products:upsert': {
     parameters: {
       query?: never;
@@ -5312,6 +5331,11 @@ export interface components {
     Device: components['schemas']['DomainRecord'];
     /** @description Audited shipment hold or authorized release command. */
     ShipmentHold: components['schemas']['DomainRecord'];
+    ShipmentHoldReleaseApprovalRequest: {
+      reason: string;
+      /** @constant */
+      requestedAction: 'RELEASE';
+    };
     /** @description Idempotent warehouse scan event and matched forecast. */
     WarehouseScan: components['schemas']['DomainRecord'];
     /** @description Chosen channel, alternatives and unavailable explanation. */
@@ -8890,6 +8914,32 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['ShipmentHold'];
+      };
+    };
+    responses: {
+      200: components['responses']['CommandSucceeded'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['StaleVersion'];
+      422: components['responses']['StateTransitionFailed'];
+    };
+  };
+  requestShipmentHoldReleaseApproval: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable key for the same intended command, retained for at least 24 hours. */
+        'Idempotency-Key': components['parameters']['IdempotencyKey'];
+        /** @description ETag returned by the latest resource representation. */
+        'If-Match': components['parameters']['IfMatch'];
+      };
+      path: {
+        holdId: components['schemas']['Ulid'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ShipmentHoldReleaseApprovalRequest'];
       };
     };
     responses: {

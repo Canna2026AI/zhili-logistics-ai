@@ -12,6 +12,7 @@ export interface ImportJobRef {
   failed?: number;
   status?: string;
   jobId?: string;
+  auditId?: string;
 }
 
 export interface ImportPort {
@@ -19,6 +20,11 @@ export interface ImportPort {
   validate(importId: string, version: number): Promise<ImportJobRef>;
   commit(importId: string, version: number, acknowledgePartial: boolean): Promise<ImportJobRef>;
   rollback(importId: string, version: number, reason: string): Promise<ImportJobRef>;
+  applyMapping(
+    importId: string,
+    version: number,
+    acceptedMappingIds: string[]
+  ): Promise<ImportJobRef>;
 }
 
 export const memoryImportPort: ImportPort = {
@@ -39,6 +45,14 @@ export const memoryImportPort: ImportPort = {
   },
   async rollback(importId, version) {
     return { id: importId, version: version + 1, status: 'ROLLED_BACK' };
+  },
+  async applyMapping(importId, version) {
+    return {
+      id: importId,
+      version: version + 1,
+      status: 'MAPPING',
+      auditId: `AUD-AI-MAPPING-${importId}`,
+    };
   },
 };
 

@@ -128,6 +128,11 @@ export const fulfillmentFinanceApiRoutes = {
     path: '/shipment-holds/{holdId}:release',
     pathParam: 'holdId',
   },
+  requestShipmentHoldReleaseApproval: {
+    method: 'POST',
+    path: '/shipment-holds/{holdId}:request-release-approval',
+    pathParam: 'holdId',
+  },
   generateCharges: { method: 'POST', path: '/finance/charges:generate' },
   reviewCharge: {
     method: 'POST',

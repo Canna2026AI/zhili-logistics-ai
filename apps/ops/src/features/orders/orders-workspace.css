@@ -149,3 +149,34 @@
   color: var(--zl-color-text-primary);
   font: inherit;
 }
+
+.orders-manual-mapping__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.orders-mapping-receipt {
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid #99d5cf;
+  border-radius: 4px;
+  color: #115e59;
+  background: #f0fdfa;
+  font-size: 12px;
+}
+
+@media (max-width: 600px) {
+  .orders-manual-mapping > header {
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .orders-manual-mapping label {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .orders-manual-mapping select {
+    width: 100%;
+    min-width: 0;
+  }
+}

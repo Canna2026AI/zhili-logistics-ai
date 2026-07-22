@@ -60,5 +60,19 @@ export function createImportApi(
         status: response.data.data.status,
       };
     },
+    async applyMapping(importId, version, acceptedMappingIds) {
+      const response = await client.POST('/ai/imports/{importId}/mapping-proposals:apply', {
+        params: { path: { importId }, header: headers(version) },
+        body: { proposalVersion: version, acceptedMappingIds },
+      });
+      if (response.error) throw response.error;
+      if (!response.data) throw new Error('IMPORT_MAPPING_RESULT_EMPTY');
+      return {
+        id: response.data.data.id,
+        version: response.data.data.version,
+        status: response.data.data.status,
+        auditId: response.data.meta.requestId,
+      };
+    },
   };
 }

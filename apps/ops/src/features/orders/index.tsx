@@ -1,13 +1,22 @@
 import { AppShell, Button, StatusTag, type NavigationGroup, type WorkspaceTab } from '@zhili/ui';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { MasterDataPanel } from '@zhili/feature-identity-masterdata';
 import {
   QuoteWorkbench,
   RateCatalogPanel,
+  calculateQuote,
   quoteInputFixture,
+  quoteWorkflowFixture,
+  type CalculatedQuote,
+  type QuoteWorkflowRequest,
   type QuoteViewState,
 } from '@zhili/feature-rates-routing';
-import { ImportWorkbench, OrderDraftPanel, WaybillList } from '@zhili/feature-waybills';
+import {
+  ImportWorkbench,
+  OrderDraftPanel,
+  WaybillList,
+  type ImportJobRef,
+} from '@zhili/feature-waybills';
 import { defaultOpsOrdersPorts, type OpsOrdersPorts } from './ports';
 import {
   FlowStatePanel,
@@ -131,6 +140,7 @@ function OperationsDashboard({ onOpen }: { onOpen: (page: OrdersPage) => void })
 export interface OpsOrdersWorkspaceProps {
   initialPage?: OrdersPage;
   showPermissionController?: boolean;
+  showScenarioControls?: boolean;
   ports?: Partial<OpsOrdersPorts>;
   onNavigateOutside?: (navigationId: string) => void;
 }
@@ -138,6 +148,7 @@ export interface OpsOrdersWorkspaceProps {
 export function OpsOrdersWorkspace({
   initialPage = 'waybills',
   showPermissionController = false,
+  showScenarioControls = false,
   ports,
   onNavigateOutside,
 }: OpsOrdersWorkspaceProps) {
@@ -154,8 +165,17 @@ export function OpsOrdersWorkspace({
     flowId: 'F10',
     stateId: 'normal',
   });
-  const [quoteRevision, setQuoteRevision] = useState(0);
+  const [quoteDraft, setQuoteDraft] = useState<QuoteWorkflowRequest>(quoteWorkflowFixture);
+  const [quoteSnapshot, setQuoteSnapshot] = useState<CalculatedQuote>(() =>
+    calculateQuote(quoteInputFixture)
+  );
   const [manualMappingOpen, setManualMappingOpen] = useState(false);
+  const [manualMappingId, setManualMappingId] = useState('01JMAP0000000000000000001');
+  const [manualMappingJob, setManualMappingJob] = useState<ImportJobRef | null>(null);
+  const [mappingPending, setMappingPending] = useState(false);
+  const [mappingError, setMappingError] = useState('');
+  const [mappingReceipt, setMappingReceipt] = useState<ImportJobRef | null>(null);
+  const mappingPendingRef = useRef(false);
   const activePorts = { ...defaultOpsOrdersPorts, ...ports };
 
   const open = (next: OrdersPage) => {
@@ -165,6 +185,7 @@ export function OpsOrdersWorkspace({
     if (page !== next && next === 'imports') {
       setImportFlow({ flowId: 'F10', stateId: 'normal' });
       setManualMappingOpen(false);
+      setMappingError('');
     }
     setPage(next);
     setOpenPages((pages) => (pages.includes(next) ? pages : [...pages, next]));
@@ -173,15 +194,15 @@ export function OpsOrdersWorkspace({
   const runFlowAction = async (request: FlowStateActionRequest): Promise<FlowStateActionResult> => {
     switch (request.actionId) {
       case 'requote-current-rules': {
-        const quote = await activePorts.quotes.create({
-          quote: quoteInputFixture.request,
-          orderContext: { orderType: 'STANDARD' },
-        });
-        setQuoteRevision((revision) => revision + 1);
+        const quote = await activePorts.quotes.create(quoteDraft);
+        setQuoteSnapshot(quote);
         return {
           message: `已生成新报价 ${quote.quoteNo}`,
-          auditId: `quote:${quote.id}:v${quote.version}`,
-          operationId: 'quote.create',
+          evidence: {
+            kind: 'server',
+            operationId: 'quote.create',
+            resourceId: `quote:${quote.id}:v${quote.version}`,
+          },
           recoverToStateId: 'normal',
           details: {
             title: '新报价快照',
@@ -193,14 +214,12 @@ export function OpsOrdersWorkspace({
         setManualMappingOpen(true);
         return {
           message: 'clientAction 已进入人工字段映射，AI 建议保持可追溯',
-          auditId: 'CLIENT-F10-MAP',
-          operationId: 'clientAction',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F10-MAP' },
         };
       case 'locate-quote-fields':
         return {
           message: '已定位缺失字段并保留当前报价输入',
-          auditId: 'CLIENT-F02-FIELDS',
-          operationId: 'clientAction',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F02-FIELDS' },
           details: {
             title: '需要补充的字段',
             items: ['目的地邮编末段', '包裹重量或替代渠道'],
@@ -209,8 +228,7 @@ export function OpsOrdersWorkspace({
       case 'compare-rate-rules':
         return {
           message: '已生成价卡规则差异，未覆盖当前报价快照',
-          auditId: 'CLIENT-F02-RATE-DIFF',
-          operationId: 'clientAction',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F02-RATE-DIFF' },
           details: {
             title: 'v18 → v19 规则差异',
             items: ['销售价预计变化 +2.4%', '燃油附加费版本已更新'],
@@ -219,8 +237,7 @@ export function OpsOrdersWorkspace({
       case 'inspect-import-rollback':
         return {
           message: '已列出可回滚范围，当前批次尚未改变',
-          auditId: 'CLIENT-F10-ROLLBACK',
-          operationId: 'clientAction',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F10-ROLLBACK' },
           details: {
             title: '导入回滚影响',
             items: ['仅回滚本批次创建的可逆记录', '外部已消费记录将逐项拒绝'],
@@ -243,6 +260,35 @@ export function OpsOrdersWorkspace({
             : 'normal';
   const quoteReadOnly =
     simulation || ['expired', 'stale-rate', 'failed-no-rate'].includes(quoteFlow.stateId);
+  const importBlocked =
+    simulation ||
+    ['low-confidence', 'failed-model', 'forbidden'].includes(importFlow.stateId) ||
+    manualMappingOpen ||
+    mappingPending;
+
+  const confirmManualMapping = async () => {
+    if (mappingPendingRef.current) return;
+    mappingPendingRef.current = true;
+    setMappingPending(true);
+    setMappingError('');
+    try {
+      const currentJob =
+        manualMappingJob ?? (await activePorts.imports.create('ai-mapping://current-import'));
+      setManualMappingJob(currentJob);
+      const applied = await activePorts.imports.applyMapping(currentJob.id, currentJob.version, [
+        manualMappingId,
+      ]);
+      setManualMappingJob(applied);
+      setMappingReceipt(applied);
+      setManualMappingOpen(false);
+      setImportFlow({ flowId: 'F10', stateId: 'normal' });
+    } catch (error) {
+      setMappingError(error instanceof Error ? error.message : '人工映射提交失败，请重试');
+    } finally {
+      mappingPendingRef.current = false;
+      setMappingPending(false);
+    }
+  };
 
   const tabs: WorkspaceTab[] = openPages.map((id) => ({
     id,
@@ -270,15 +316,22 @@ export function OpsOrdersWorkspace({
           onChange={setQuoteFlow}
           onAction={runFlowAction}
           stateLabel="报价状态"
+          controlsVisible={showScenarioControls}
         />
-        {quoteFlow.stateId === 'expired' || quoteFlow.stateId === 'failed-no-rate' ? null : (
-          <QuoteWorkbench
-            key={`quote-${quoteRevision}`}
-            port={activePorts.quotes}
-            state={quoteViewState}
-            readOnly={quoteReadOnly}
-          />
-        )}
+        <QuoteWorkbench
+          port={activePorts.quotes}
+          state={quoteViewState}
+          readOnly={quoteReadOnly}
+          draft={quoteDraft}
+          onDraftChange={setQuoteDraft}
+          snapshot={quoteSnapshot}
+          onSnapshotChange={(snapshot) => {
+            setQuoteSnapshot(snapshot);
+            if (quoteFlow.stateId === 'stale-rate') {
+              setQuoteFlow({ flowId: 'F02', stateId: 'normal' });
+            }
+          }}
+        />
       </>
     ) : page === 'orders' ? (
       <OrderDraftPanel port={activePorts.orders} readOnly={simulation} />
@@ -293,6 +346,7 @@ export function OpsOrdersWorkspace({
           }}
           onAction={runFlowAction}
           stateLabel="AI 导入状态"
+          controlsVisible={showScenarioControls}
         />
         {manualMappingOpen ? (
           <section className="orders-manual-mapping" role="region" aria-label="AI 人工字段映射">
@@ -305,19 +359,34 @@ export function OpsOrdersWorkspace({
             </header>
             <label>
               收件州候选字段
-              <select aria-label="收件州候选字段" defaultValue="receiver_state">
-                <option value="receiver_state">receiver_state（置信度 61%）</option>
-                <option value="province">province（置信度 32%）</option>
-                <option value="ignore">忽略此列</option>
+              <select
+                aria-label="收件州候选字段"
+                value={manualMappingId}
+                disabled={mappingPending}
+                onChange={(event) => setManualMappingId(event.target.value)}
+              >
+                <option value="01JMAP0000000000000000001">receiver_state（置信度 61%）</option>
+                <option value="01JMAP0000000000000000002">province（置信度 32%）</option>
+                <option value="01JMAP0000000000000000003">忽略此列（人工结论）</option>
               </select>
             </label>
-            <p>审计引用 CLIENT-F10-MAP · 原始列名与人工结论均保留</p>
+            <div className="orders-manual-mapping__actions">
+              <Button disabled={mappingPending} onClick={() => void confirmManualMapping()}>
+                {mappingPending ? '提交中…' : '确认人工映射'}
+              </Button>
+            </div>
+            {mappingError ? (
+              <p role="alert">提交失败：{mappingError}。当前批次、版本与人工选择已保留。</p>
+            ) : null}
           </section>
         ) : null}
-        <ImportWorkbench
-          port={activePorts.imports}
-          readOnly={simulation || importFlow.stateId === 'forbidden'}
-        />
+        {mappingReceipt ? (
+          <p className="orders-mapping-receipt" role="status">
+            人工映射已应用 · 批次 {mappingReceipt.id} · v{mappingReceipt.version} · 审计{' '}
+            {mappingReceipt.auditId ?? '服务端未返回审计号'}
+          </p>
+        ) : null}
+        <ImportWorkbench port={activePorts.imports} readOnly={importBlocked} />
       </>
     ) : (
       <WaybillList

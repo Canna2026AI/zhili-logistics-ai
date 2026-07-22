@@ -9,6 +9,17 @@ import { App } from './app';
 afterEach(cleanup);
 
 describe('integrated operations application', () => {
+  it('keeps demo permission and scenario selectors out of production rendering', () => {
+    window.history.replaceState({}, '', '/operations/orders');
+    render(<App ordersPorts={defaultOpsOrdersPorts} />);
+    expect(screen.queryByRole('button', { name: '模拟只读权限' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '报价管理' }));
+    expect(screen.queryByRole('combobox', { name: '报价状态' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('link', { name: '履约与财务' }));
+    expect(screen.queryByRole('combobox', { name: '流程状态' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: '验收状态' })).not.toBeInTheDocument();
+  });
+
   it('routes from the real orders entry to fulfillment and back', () => {
     window.history.replaceState({}, '', '/operations/orders?mock=1');
     render(
