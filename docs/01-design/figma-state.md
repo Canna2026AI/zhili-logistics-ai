@@ -26,7 +26,7 @@
 - 主文件已建立 13 个分区页面，Cover、Getting Started、Foundations 与 Components 页面均为可编辑节点，不再是空白文件。
 - 已同步 4 个变量集合、61 个变量、9 个文字样式与 2 个阴影样式；变量包含 WEB code syntax 和控件边界宽度。
 - Foundations 已完成颜色、排版、间距、控件/表格/壳层尺寸、圆角与阴影文档，并通过节点边界和截图检查。
-- Components 已完成 Button/Primary、Button/Secondary、Button/Quiet、Button/Danger 四个组件集，共 72 个变体；每组包含 Compact/Default/Large 与 Default/Hover/Focus/Pressed/Disabled/Loading，且暴露可编辑 `Label` 属性。
+- Components 已完成首批 7 个代码同名核心组件。Button 按类型拆为 4 个组件集；加上 Input、StatusTag、DataTable、Dialog、Drawer 与 AppShell，共 10 个组件集、95 个变体，并保留可编辑文本属性和真实嵌套 Button 实例。
 - 已订阅 Material 3、Simple Design System 和 Apple 官方设备库。
 - Simple Design System 可检索到 Button、Input Field、Table、Dialog、Tag、Sidebar，以及颜色、边界、间距、圆角和排版变量。
 - 复用决策：智立需要 28/32px 高密控件、4–6px 圆角、石墨导航、青绿主操作和物流专用数据组件；公共库 API 与视觉均不完全匹配，因此本地创建智立组件。外部库只作图标、可访问性和组件结构参考。
@@ -76,11 +76,11 @@
 | 项目 | 代码 | Figma | 处理 |
 | --- | --- | --- | --- |
 | 令牌 | 已实现并测试 | 4 集合、61 变量、11 样式已同步 | Foundations 已完成；继续在组件与页面中验证绑定 |
-| 组件 | 7 个共享核心组件已实现 | Button 四种类型、72 变体已完成；Input 进行中 | 继续完成 Input、StatusTag、DataTable、Dialog、Drawer、AppShell 与 Code Connect |
+| 组件 | 7 个共享核心组件已实现 | 10 个组件集、95 变体已完成，首批核心组件闭环 | 继续物流专用组件、关键状态与 Code Connect |
 | 页面 | 五端主要页面已实现 | 空白 | Phase 3 以真实浏览器捕获作参考并组件化重建 |
 | 状态 | 自动化已覆盖大量错误、离线和冲突状态 | 空白 | 依 `interaction-state-matrix.md` 建状态板和原型 |
 | 竞品一致性 | 视觉与交互已在浏览器实现 | Foundations 与 Button 已有节点、截图和元数据证据 | Figma 负责团队评审、标注、映射和后续改版，不反向覆盖已验证代码语义 |
 
 ## Phase gate
 
-Phase 0 与 Phase 1 已满足退出条件。稳定证据包括：Cover `8:2`、Getting Started `8:8`、Foundations `9:2`、Components Catalog `19:2`；Button sets 为 Primary `21:56`、Secondary `24:3`、Quiet `26:39`、Danger `28:39`。当前继续完成其余核心组件；在 Components、五端页面、10 条 Flow 与独立设计复审全部闭环前，Figma Gate 保持 `IN_PROGRESS`。
+Phase 0、Phase 1 与首批核心组件子门槛已满足退出条件。稳定证据包括：Cover `8:2`、Getting Started `8:8`、Foundations `9:2`、Components Catalog `19:2`；Button sets 为 Primary `21:56`、Secondary `24:3`、Quiet `26:39`、Danger `28:39`，Input `33:18`、StatusTag `34:33`、Dialog `35:61`、Drawer `36:58`、AppShell `38:109`、DataTable `41:25`。所有组件区段边界检查无溢出，组件总览截图为 `/tmp/zhili-figma-components-core.png`。在物流专用组件、五端页面、10 条 Flow、Code Connect 与独立设计复审全部闭环前，Figma Gate 保持 `IN_PROGRESS`。

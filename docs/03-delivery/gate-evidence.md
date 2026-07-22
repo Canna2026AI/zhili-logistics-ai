@@ -6,7 +6,7 @@
 | ------------ | ----------- | ------------------------ | ---------------------------------------------------------------------------- | ----------------------------------------------------------------- |
 | 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题 | 无                                                                |
 | 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过  | 无                                                                |
-| Figma 同步   | IN_PROGRESS | `Mn56UdJSFmLZSmvOZSLIoX` | Foundations、61 变量、11 样式、Button 72 变体已有可编辑节点和截图证据        | 其余核心组件、五端页面、10 条 Flow、Code Connect 与独立复审待完成 |
+| Figma 同步   | IN_PROGRESS | `Mn56UdJSFmLZSmvOZSLIoX` | Foundations、61 变量、11 样式、10 个核心组件集与 95 变体已有节点和截图证据   | 物流专用组件、五端页面、10 条 Flow、Code Connect 与独立复审待完成 |
 | 前端         | PASSED      | `063a90f`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、35 项 Playwright/axe 全部通过 | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                |
 | 后端         | OPEN        | —                        | 待 API、DB、Worker、RLS 和集成报告                                           | 前端门槛已通过；下一波从 Backend Foundation 开始                  |
 | 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                          | 前置门槛未通过                                                    |
@@ -49,7 +49,7 @@ Figma 同步完成时仍需补齐以下证据：
 - 客户端用“预存款与未分配收款”，不再用通用钱包语义；平台模块含尾程/POD 与微信支付。
 - PDA 图增加媒体补传、队列接近上限、会话过期安全、版本对比和三类冲突决策。
 - 独立复审报告：`/tmp/zhili-ui-spec-local-final-pass.md`；仓库内文档、契约与本地 8 图子门槛为 `PASS`，无剩余 Critical/Important 本地问题。
-- Figma Pro 写入已恢复；Foundations 与 Button 组件族已完成可编辑 node、变量绑定、元数据和截图验证。其余组件、页面与原型仍在补录，因此当前为 `IN_PROGRESS`，不提前标记通过。
+- Figma Pro 写入已恢复；Foundations 与首批 7 个代码同名核心组件已完成可编辑 node、变量绑定、属性、元数据和截图验证，共 10 个组件集、95 个变体。物流专用组件、页面与原型仍在补录，因此当前为 `IN_PROGRESS`，不提前标记通过。
 
 ## 2026-07-22 UI0 代码基座证据
 
