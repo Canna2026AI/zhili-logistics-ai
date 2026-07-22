@@ -19,11 +19,13 @@ describe('平台控制台', () => {
     await user.click(screen.getAllByRole('button', { name: '新建租户' })[0]);
     await user.type(screen.getByLabelText('租户名称'), '厦门远海物流有限公司');
     await user.type(screen.getByLabelText('租户 SLUG'), 'yuanhai-xm');
+    await user.selectOptions(screen.getByLabelText('默认套餐'), '企业版');
     await user.click(screen.getByRole('button', { name: '确认创建租户' }));
     expect(await screen.findByRole('status')).toHaveTextContent('租户已创建');
     expect(screen.getByRole('table', { name: '租户列表' })).toHaveTextContent(
       '厦门远海物流有限公司'
     );
+    expect(screen.getByRole('table', { name: '租户列表' })).toHaveTextContent('企业版');
   });
 
   it('租户详情包含套餐、模块、配额和到期信息', async () => {
@@ -92,7 +94,33 @@ describe('平台控制台', () => {
     await user.type(screen.getByLabelText('租户到期日'), '2027-08-31');
     await user.click(screen.getByRole('button', { name: '保存租户配置' }));
     expect(await screen.findByRole('status')).toHaveTextContent('ENT-0002');
-    expect(screen.getByText(/320,000 \/ 600,000/)).toBeVisible();
+    expect(screen.getAllByText(/320,000 \/ 600,000/)[0]).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '租户管理' }));
+    await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
+    const updated = screen.getByRole('dialog', { name: '租户详情' });
+    expect(updated).toHaveTextContent('专业版');
+    expect(updated).toHaveTextContent('320,000 / 600,000');
+    expect(updated).toHaveTextContent('2027-08-31');
+  });
+
+  it('配置页修改当前选中的租户而不是固定的默认租户', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '配额与用量' }));
+    await user.selectOptions(screen.getByLabelText('配置租户'), '2');
+    expect(screen.getByRole('heading', { name: '深圳海运通物流有限公司' })).toBeVisible();
+    await user.selectOptions(screen.getByLabelText('租户套餐'), '企业版');
+    await user.clear(screen.getByLabelText('运单配额上限'));
+    await user.type(screen.getByLabelText('运单配额上限'), '260000');
+    await user.clear(screen.getByLabelText('租户到期日'));
+    await user.type(screen.getByLabelText('租户到期日'), '2027-02-01');
+    await user.click(screen.getByRole('button', { name: '保存租户配置' }));
+    await user.click(screen.getByRole('button', { name: '租户管理' }));
+    await user.click(screen.getByRole('button', { name: '查看租户 深圳海运通物流有限公司' }));
+    const detail = screen.getByRole('dialog', { name: '租户详情' });
+    expect(detail).toHaveTextContent('企业版');
+    expect(detail).toHaveTextContent('120,000 / 260,000');
+    expect(detail).toHaveTextContent('2027-02-01');
   });
 
   it('可管理套餐模块、公告和运行中心', async () => {
@@ -130,6 +158,26 @@ describe('平台控制台', () => {
         expect(screen.queryByRole('table', { name: '运行作业' })).not.toBeInTheDocument();
       }
     }
+  });
+
+  it('运行中心比较过期版本且失败项重试拒绝时不丢失失败状态', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '运行中心' }));
+    await user.selectOptions(screen.getByLabelText('运行状态'), 'stale');
+    await user.click(screen.getByRole('button', { name: '刷新运行快照' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '版本差异：snapshotAt 10:18 → 10:21'
+    );
+
+    vi.spyOn(platformPort, 'retryRuntimeJobs').mockRejectedValueOnce(
+      new Error('失败项重试被拒绝；job-pay-382、job-pay-384 仍保持失败。')
+    );
+    await user.selectOptions(screen.getByLabelText('运行状态'), 'partial');
+    expect(screen.getByRole('status')).toHaveTextContent('失败项 job-pay-382、job-pay-384');
+    await user.click(screen.getByRole('button', { name: '仅重试 2 个失败项' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('失败项重试被拒绝');
+    expect(screen.getByRole('button', { name: '仅重试 2 个失败项' })).toBeVisible();
   });
 
   it('租户创建失败时保留对话框输入且不写列表', async () => {

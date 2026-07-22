@@ -18,16 +18,39 @@ const mockFetch: typeof fetch = async (input) => {
       }),
       { status: 200, headers: { 'content-type': 'application/json' } }
     );
-  return new Response(
-    JSON.stringify({
-      data: { resourceId: '01JDEMO00000000000000001', status: 'SUCCEEDED', version: 1 },
-      meta,
-    }),
-    { status: 200, headers: { 'content-type': 'application/json' } }
-  );
+  if (path.endsWith('/auth/wechat/authorization'))
+    return new Response(
+      JSON.stringify({
+        data: { resourceId: '01JWECHAT000000000000001', status: 'SUCCEEDED', version: 1 },
+        meta,
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    );
+  return new Response(JSON.stringify({ message: `No typed mock route for ${path}` }), {
+    status: 404,
+    headers: { 'content-type': 'application/json' },
+  });
 };
 const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: mockFetch });
 const key = () => `f1c-${crypto.randomUUID?.() ?? Date.now()}`;
+
+type DemoRequest = { company: string; phone: string; source: 'PUBLIC_WEBSITE' };
+const websiteCommandFetch = async (request: Request) => {
+  const path = new URL(request.url).pathname;
+  if (path !== '/api/v1/public/demo-requests')
+    return new Response(JSON.stringify({ message: `Unknown public command ${path}` }), {
+      status: 404,
+    });
+  const body = (await request.json()) as DemoRequest;
+  if (!body.company.trim() || !body.phone.trim())
+    return new Response(JSON.stringify({ message: 'company and phone are required' }), {
+      status: 422,
+    });
+  return new Response(
+    JSON.stringify({ data: { id: 'DEMO-20260722-01', status: 'SUBMITTED', version: 1 } }),
+    { status: 201, headers: { 'content-type': 'application/json' } }
+  );
+};
 
 export const websitePort = {
   async login(account: string, password: string) {
@@ -36,11 +59,14 @@ export const websitePort = {
     return response.data.data;
   },
   async requestDemo(company: string, phone: string) {
-    const response = await client.POST('/portal/api-access-requests', {
-      params: { header: { 'Idempotency-Key': key(), 'If-Match': '"1"' } },
-      body: { kind: 'DEMO_REQUEST', company, phone },
+    // Public demo requests are not in shared OpenAPI yet; keep a semantic app-local DTO/path.
+    const request = new Request('http://localhost/api/v1/public/demo-requests', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'Idempotency-Key': key() },
+      body: JSON.stringify({ company, phone, source: 'PUBLIC_WEBSITE' }),
     });
-    if (!response.data || response.error) throw new Error('预约提交失败，输入已保留。');
+    const response = await websiteCommandFetch(request);
+    if (!response.ok) throw new Error('预约提交失败，输入已保留。');
   },
   async startWechat() {
     const response = await client.POST('/auth/wechat/authorization', {

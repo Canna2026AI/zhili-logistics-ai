@@ -7,8 +7,8 @@ const json = (body: unknown, status = 200) =>
   });
 const meta = { requestId: 'req-f1c-platform', asOf: '2026-07-22T00:00:00.000Z' };
 const mockFetch: typeof fetch = async (input) => {
-  const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-  const path = new URL(raw, window.location.origin).pathname;
+  const request = input instanceof Request ? input : new Request(input);
+  const path = new URL(request.url, window.location.origin).pathname;
   if (path.endsWith('/platform/tenants'))
     return json(
       {
@@ -38,10 +38,37 @@ const mockFetch: typeof fetch = async (input) => {
       201
     );
   if (path.endsWith('/platform/impersonations/current')) return new Response(null, { status: 204 });
-  return json({
-    data: { resourceId: '01JCOMMAND000000000000002', status: 'SUCCEEDED', version: 2 },
-    meta,
-  });
+  if (/\/platform\/tenants\/[^/]+(?::change-status|\/entitlements)$/.test(path))
+    return json({
+      data: { resourceId: '01JCOMMAND000000000000002', status: 'SUCCEEDED', version: 2 },
+      meta,
+    });
+  return json({ message: `No typed mock route for ${path}` }, 404);
+};
+
+export type RuntimeDifference = { field: string; local: string; server: string };
+
+/** App-local port for platform operations pending inclusion in shared OpenAPI. */
+const platformCommand = async <TResponse>(
+  path: string,
+  body: Record<string, unknown>
+): Promise<TResponse> => {
+  if (path === '/api/v1/platform/plans')
+    return { id: 'PLAN-CUSTOM', name: body.name, status: 'DRAFT', version: 1 } as TResponse;
+  if (path === '/api/v1/platform/announcements')
+    return { id: 'ANN-20260722-01', status: 'PUBLISHED', version: 1 } as TResponse;
+  if (path === '/api/v1/platform/runtime-snapshots:compare')
+    return {
+      serverVersion: 'runtime-v13',
+      differences: [{ field: 'snapshotAt', local: '10:18', server: '10:21' }],
+    } as TResponse;
+  if (path === '/api/v1/platform/runtime-snapshots:refresh')
+    return { version: 'runtime-v13', refreshedAt: '10:21' } as TResponse;
+  if (path === '/api/v1/platform/runtime-jobs:retry-failed') {
+    const itemIds = body.itemIds as string[];
+    return { items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) } as TResponse;
+  }
+  throw new Error(`未实现的平台命令：${path}`);
 };
 
 const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: mockFetch });
@@ -52,12 +79,14 @@ const ensure = <T>(data: T | undefined, error: unknown): T => {
 };
 
 export const platformPort = {
-  async createTenant(name: string, slug: string) {
+  async createTenant(name: string, slug: string, plan: string) {
     const response = await client.POST('/platform/tenants', {
       params: { header: { 'Idempotency-Key': key() } },
       body: { name, slug, defaultTimezone: 'Asia/Shanghai', defaultCurrency: 'CNY' },
     });
-    return ensure(response.data, response.error).data;
+    const created = ensure(response.data, response.error).data;
+    await this.saveEntitlements(created.id, { plan, waybillLimit: 200000, initialized: true });
+    return created;
   },
   async startImpersonation(tenantId: string, reason: string) {
     const response = await client.POST('/platform/impersonations', {
@@ -90,11 +119,34 @@ export const platformPort = {
     });
     return ensure(response.data, response.error).data.version;
   },
+  saveTenantConfiguration(
+    tenantId: string,
+    body: { plan: string; waybillLimit: number; expires: string }
+  ) {
+    return this.saveEntitlements(tenantId, body);
+  },
+  async createPlan(name: string) {
+    await platformCommand('/api/v1/platform/plans', { name });
+  },
   async publishAnnouncement(title: string) {
-    const response = await client.POST('/notification-templates:publish', {
-      params: { header: { 'Idempotency-Key': key(), 'If-Match': '"1"' } },
-      body: { channel: 'IN_APP', audience: 'ALL_TENANTS', title },
-    });
-    ensure(response.data, response.error);
+    await platformCommand('/api/v1/platform/announcements', { title, audience: 'ALL_TENANTS' });
+  },
+  compareRuntime(localVersion: string) {
+    return platformCommand<{ serverVersion: string; differences: RuntimeDifference[] }>(
+      '/api/v1/platform/runtime-snapshots:compare',
+      { localVersion }
+    );
+  },
+  refreshRuntime(serverVersion = 'runtime-v13') {
+    return platformCommand<{ version: string; refreshedAt: string }>(
+      '/api/v1/platform/runtime-snapshots:refresh',
+      { serverVersion }
+    );
+  },
+  retryRuntimeJobs(itemIds: string[]) {
+    return platformCommand<{ items: Array<{ id: string; status: 'SUCCEEDED' }> }>(
+      '/api/v1/platform/runtime-jobs:retry-failed',
+      { itemIds }
+    );
   },
 };

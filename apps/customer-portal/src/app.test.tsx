@@ -2,6 +2,7 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentType } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
 import { customerPort } from './api';
@@ -28,7 +29,9 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '隐藏 提交付款凭证' }));
     expect(await screen.findByRole('status')).toHaveTextContent('快捷入口布局已保存');
     expect(screen.queryByRole('button', { name: '隐藏 提交付款凭证' })).not.toBeInTheDocument();
-    expect(localStorage.getItem('zhili.customer.shortcuts')).not.toContain('账单与付款');
+    expect(
+      localStorage.getItem('zhili.customer.tenant-xinyuan.customer-xinyuan.shortcuts')
+    ).not.toContain('账单与付款');
   });
 
   it('完成查价并把报价带入新建预报', async () => {
@@ -43,6 +46,37 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '选择此报价' }));
     expect(screen.getByRole('heading', { name: '新建运单' })).toBeVisible();
     expect(screen.getByText('已选择：智立海运专线 · CNY 5,320.00')).toBeVisible();
+  });
+
+  it('查价端口消费用户输入并回显本次请求快照', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '立即查价' }));
+    await user.clear(screen.getByLabelText('始发地'));
+    await user.type(screen.getByLabelText('始发地'), 'CN-XMN');
+    await user.type(screen.getByLabelText('目的地邮编'), '33101');
+    await user.clear(screen.getByLabelText('实重（kg）'));
+    await user.type(screen.getByLabelText('实重（kg）'), '77.25');
+    await user.clear(screen.getByLabelText('体积（m³）'));
+    await user.type(screen.getByLabelText('体积（m³）'), '0.66');
+    await user.click(screen.getByRole('button', { name: '获取报价' }));
+
+    expect(await screen.findByRole('region', { name: '报价 Q2505120042' })).toHaveTextContent(
+      'CN-XMN → 33101 · 77.25 kg · 0.66 m³'
+    );
+  });
+
+  it('过期报价不能接受并明确要求重新查价', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '立即查价' }));
+    await user.type(screen.getByLabelText('目的地邮编'), 'EXPIRED');
+    await user.click(screen.getByRole('button', { name: '获取报价' }));
+
+    const quote = await screen.findByRole('region', { name: '报价 Q2505120042' });
+    expect(quote).toHaveTextContent('已过期');
+    expect(within(quote).getByRole('button', { name: '选择此报价' })).toBeDisabled();
+    expect(within(quote).getByRole('button', { name: '按当前规则重新查价' })).toBeVisible();
   });
 
   it('提交预报后可在本企业运单与轨迹中查询', async () => {
@@ -64,6 +98,45 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '查看轨迹 S2505120006' }));
     expect(screen.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
     expect(screen.getByText('预报已提交 · 等待仓库收货')).toBeVisible();
+  });
+
+  it('新建订单把实际地址和包裹数据传给端口并持久化', async () => {
+    const create = vi.spyOn(customerPort, 'createOrder');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(
+      within(screen.getByRole('navigation', { name: '客户门户导航' })).getByRole('button', {
+        name: '新建运单',
+      })
+    );
+    await user.clear(screen.getByLabelText('发货地'));
+    await user.type(screen.getByLabelText('发货地'), 'CN-XMN 361000');
+    await user.type(screen.getByLabelText('收件人'), 'Mia Receiver');
+    await user.type(screen.getByLabelText('目的地'), 'US-MIA 33101');
+    await user.clear(screen.getByLabelText('联系电话'));
+    await user.type(screen.getByLabelText('联系电话'), '+1 305 555 0188');
+    await user.clear(screen.getByLabelText('品名'));
+    await user.type(screen.getByLabelText('品名'), '精密仪器');
+    await user.clear(screen.getByLabelText('件数'));
+    await user.type(screen.getByLabelText('件数'), '7');
+    await user.clear(screen.getByLabelText('预报重（kg）'));
+    await user.type(screen.getByLabelText('预报重（kg）'), '77.25');
+    await user.click(screen.getByRole('button', { name: '提交预报' }));
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        origin: 'CN-XMN 361000',
+        recipient: 'Mia Receiver',
+        destination: 'US-MIA 33101',
+        phone: '+1 305 555 0188',
+        commodity: '精密仪器',
+        pieces: 7,
+        weightKg: 77.25,
+      })
+    );
+    const saved = localStorage.getItem('zhili.customer.tenant-xinyuan.customer-xinyuan.orders');
+    expect(saved).toContain('US-MIA 33101');
+    expect(saved).toContain('77.25');
   });
 
   it('付款需要危险确认，成功后写入付款记录', async () => {
@@ -171,6 +244,67 @@ describe('客户门户', () => {
     expect(screen.getByText(/当前筛选没有数据/)).toBeVisible();
   });
 
+  it('过期快照先调用比较端口并展示字段级版本差异', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.selectOptions(screen.getByLabelText('演示状态'), 'stale');
+    await user.click(screen.getByRole('button', { name: '刷新并比较' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '版本差异：snapshotAt 10:18 → 10:21'
+    );
+    expect(screen.getByRole('button', { name: '应用服务器版本' })).toBeVisible();
+  });
+
+  it('部分失败只重试失败项并在端口拒绝时保留失败状态', async () => {
+    vi.spyOn(customerPort, 'retryFailedNotifications').mockRejectedValueOnce(
+      new Error('notification-5 重试失败；失败状态已保留。')
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await user.selectOptions(screen.getByLabelText('演示状态'), 'partial');
+    expect(screen.getByRole('status')).toHaveTextContent('失败项 notification-5');
+    await user.click(screen.getByRole('button', { name: '仅重试失败项' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('notification-5 重试失败');
+    expect(screen.getByRole('button', { name: '仅重试失败项' })).toBeVisible();
+  });
+
+  it('部分失败成功恢复时只提交失败 ID 并合并回正常数据', async () => {
+    const retry = vi.spyOn(customerPort, 'retryFailedNotifications');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.selectOptions(screen.getByLabelText('演示状态'), 'partial');
+    await user.click(screen.getByRole('button', { name: '仅重试失败项' }));
+    expect(retry).toHaveBeenCalledWith(['notification-5']);
+    expect(await screen.findByRole('status')).toHaveTextContent('notification-5 已合并成功');
+    expect(screen.getByRole('heading', { name: /下午好/ })).toBeVisible();
+  });
+
+  it('本地持久化按租户和客户隔离，切换客户不会串读', async () => {
+    const ScopedApp = App as ComponentType<{
+      tenantId: string;
+      customerId: string;
+      companyName: string;
+    }>;
+    const user = userEvent.setup();
+    const first = render(
+      <ScopedApp tenantId="tenant-a" customerId="customer-a" companyName="A 客户" />
+    );
+    await user.click(screen.getByRole('button', { name: '地址簿' }));
+    await user.type(screen.getByLabelText('地址名称'), 'A 客户专属仓');
+    await user.click(screen.getByRole('button', { name: '保存地址' }));
+    first.unmount();
+
+    render(<ScopedApp tenantId="tenant-a" customerId="customer-b" companyName="B 客户" />);
+    await user.click(screen.getByRole('button', { name: '地址簿' }));
+    expect(screen.getByRole('table', { name: '地址列表' })).not.toHaveTextContent('A 客户专属仓');
+    expect(localStorage.getItem('zhili.customer.tenant-a.customer-a.addresses')).toContain(
+      'A 客户专属仓'
+    );
+    expect(
+      localStorage.getItem('zhili.customer.tenant-a.customer-b.addresses') ?? ''
+    ).not.toContain('A 客户专属仓');
+  });
+
   it('API 写失败时保留输入且不伪造运单', async () => {
     vi.spyOn(customerPort, 'createOrder').mockRejectedValueOnce(new Error('网关失败，请重试'));
     const user = userEvent.setup();
@@ -185,6 +319,8 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '提交预报' }));
     expect(await screen.findByRole('status')).toHaveTextContent('网关失败');
     expect(screen.getByLabelText('收件人')).toHaveValue('保留的收件人');
-    expect(localStorage.getItem('zhili.customer.waybills')).not.toContain('S2505120006');
+    expect(
+      localStorage.getItem('zhili.customer.tenant-xinyuan.customer-xinyuan.waybills') ?? ''
+    ).not.toContain('S2505120006');
   });
 });

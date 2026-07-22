@@ -35,10 +35,28 @@ test('客户从查价进入新建运单并查看租户内轨迹', async ({ page 
   await page.getByRole('button', { name: '提交预报' }).click();
   await expect(page.getByRole('status')).toContainText('预报已提交');
   await page.getByRole('button', { name: '我的运单' }).click();
-  await expect(page.getByRole('table', { name: '我的运单列表' })).toContainText('S2505120006');
+  const waybills = page.getByRole('table', { name: '我的运单列表' });
+  await expect(waybills).toContainText('S2505120006');
+  await expect(waybills).toContainText('US-LAX');
+  await expect(waybills).toContainText('122.00');
   await page.getByRole('button', { name: '查看轨迹 S2505120006' }).click();
   await expect(page.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
   await expect(page.getByText('预报已提交 · 等待仓库收货')).toBeVisible();
+});
+
+test('客户过期报价被阻止且陈旧快照展示服务端版本差异', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: '立即查价', exact: true }).click();
+  await page.getByLabel('目的地邮编').fill('EXPIRED');
+  await page.getByRole('button', { name: '获取报价' }).click();
+  const quote = page.getByRole('region', { name: '报价 Q2505120042' });
+  await expect(quote).toContainText('已过期');
+  await expect(quote.getByRole('button', { name: '选择此报价' })).toBeDisabled();
+  await expect(quote.getByRole('button', { name: '按当前规则重新查价' })).toBeVisible();
+
+  await page.getByLabel('演示状态').selectOption('stale');
+  await page.getByRole('button', { name: '刷新并比较' }).click();
+  await expect(page.getByRole('alert')).toContainText('snapshotAt 10:18 → 10:21');
 });
 
 test('客户门户 390px 无页面级横向溢出且触控导航可用', async ({ page }) => {

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Button, Dialog, StatusTag } from '@zhili/ui';
-import { customerPort } from './api';
+import { customerPort, type OrderInput, type QuoteResult, type VersionDifference } from './api';
 
 type Page =
   | '工作台'
@@ -36,15 +36,31 @@ const waybillSeed: WaybillRow[] = [
   ['S2505120004', 'HBL2505120004', '已收货，待分货', '澳大利亚/悉尼', '18', '123.50', '已收货'],
   ['S2505120005', 'HBL2505120005', '运输中', '俄罗斯/莫斯科', '12', '6,500.00', '中转中'],
 ];
-const readRows = () => {
+const storageKey = (tenantId: string, customerId: string, area: string) =>
+  `zhili.customer.${tenantId}.${customerId}.${area}`;
+const readRows = (key: string) => {
   try {
-    return JSON.parse(localStorage.getItem('zhili.customer.waybills') ?? '') as WaybillRow[];
+    return JSON.parse(localStorage.getItem(key) ?? '') as WaybillRow[];
   } catch {
     return waybillSeed;
   }
 };
 
-function ScenarioNotice({ scenario, recover }: { scenario: Scenario; recover: () => void }) {
+function ScenarioNotice({
+  scenario,
+  recoveryMessage,
+  differences,
+  recovering,
+  recover,
+  applyServerVersion,
+}: {
+  scenario: Scenario;
+  recoveryMessage: string;
+  differences: VersionDifference[];
+  recovering: boolean;
+  recover: () => void;
+  applyServerVersion: () => void;
+}) {
   if (scenario === 'normal') return null;
   const notices: Record<Exclude<Scenario, 'normal'>, { role: 'alert' | 'status'; text: string }> = {
     loading: { role: 'status', text: '正在加载最新数据，请稍候。' },
@@ -55,15 +71,47 @@ function ScenarioNotice({ scenario, recover }: { scenario: Scenario; recover: ()
       text: '缺少 ticket.read 权限；可联系企业管理员申请，数据未被当作空结果。',
     },
     stale: { role: 'alert', text: '页面数据已过期：本地 v12，服务器 v13。刷新后可继续操作。' },
-    partial: { role: 'status', text: '部分成功：4 项完成、1 项通知失败。仅重试失败项。' },
+    partial: {
+      role: 'status',
+      text: '部分成功：4 项完成、1 项失败；失败项 notification-5。仅重试失败项。',
+    },
   };
   const notice = notices[scenario];
   return (
     <div className={`portal-notice portal-notice--${scenario}`} role={notice.role}>
-      <span>{notice.text}</span>
-      <button onClick={recover}>
-        {scenario === 'partial' ? '仅重试失败项' : scenario === 'stale' ? '刷新并比较' : '重试'}
-      </button>
+      <span>
+        {notice.text}
+        {differences.length ? (
+          <span>
+            {' '}
+            版本差异：
+            {differences.map((difference) => (
+              <span key={difference.field}>
+                {difference.field} {difference.local} → {difference.server}
+              </span>
+            ))}
+          </span>
+        ) : null}
+        {recoveryMessage ? ` ${recoveryMessage}` : ''}
+      </span>
+      {scenario === 'stale' && differences.length ? (
+        <button disabled={recovering} onClick={applyServerVersion}>
+          应用服务器版本
+        </button>
+      ) : (
+        <button
+          disabled={recovering || scenario === 'loading' || scenario === 'empty'}
+          onClick={recover}
+        >
+          {recovering
+            ? '处理中…'
+            : scenario === 'partial'
+              ? '仅重试失败项'
+              : scenario === 'stale'
+                ? '刷新并比较'
+                : '重试'}
+        </button>
+      )}
     </div>
   );
 }
@@ -99,17 +147,18 @@ function Dashboard({
   navigate,
   rows,
   notify,
+  shortcutsKey,
 }: {
   navigate: (page: Page) => void;
   rows: WaybillRow[];
   notify: (message: string) => void;
+  shortcutsKey: string;
 }) {
   const [editingShortcuts, setEditingShortcuts] = useState(false);
   const [shortcutPages, setShortcutPages] = useState<Page[]>(() => {
     try {
       return JSON.parse(
-        localStorage.getItem('zhili.customer.shortcuts') ??
-          JSON.stringify(shortcutSeed.map(([p]) => p))
+        localStorage.getItem(shortcutsKey) ?? JSON.stringify(shortcutSeed.map(([p]) => p))
       ) as Page[];
     } catch {
       return shortcutSeed.map(([page]) => page);
@@ -119,7 +168,7 @@ function Dashboard({
     void customerPort
       .saveShortcuts(next)
       .then(() => {
-        localStorage.setItem('zhili.customer.shortcuts', JSON.stringify(next));
+        localStorage.setItem(shortcutsKey, JSON.stringify(next));
         setShortcutPages(next);
         notify('快捷入口布局已保存。');
       })
@@ -275,8 +324,13 @@ function Dashboard({
   );
 }
 
-function QuotePage({ choose }: { choose: () => void }) {
-  const [quoted, setQuoted] = useState(false);
+function QuotePage({ choose }: { choose: (quote: QuoteResult) => void }) {
+  const [quote, setQuote] = useState<QuoteResult | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const expired = quote
+    ? new Date(quote.validUntil).getTime() <= new Date(quote.evaluatedAt).getTime()
+    : false;
   return (
     <>
       <SectionHeader
@@ -287,63 +341,94 @@ function QuotePage({ choose }: { choose: () => void }) {
         className="portal-form portal-form--quote"
         onSubmit={(event) => {
           event.preventDefault();
-          setQuoted(true);
+          const form = new FormData(event.currentTarget);
+          setSubmitting(true);
+          setError('');
+          void customerPort
+            .quote({
+              origin: String(form.get('origin')),
+              destinationPostalCode: String(form.get('destinationPostalCode')) || '90001',
+              weightKg: Number(form.get('weightKg')),
+              volumeM3: Number(form.get('volumeM3')),
+            })
+            .then(setQuote)
+            .catch((reason: Error) => setError(reason.message))
+            .finally(() => setSubmitting(false));
         }}
       >
         <label>
           始发地
-          <input defaultValue="CN-SZX" />
+          <input name="origin" defaultValue="CN-SZX" required />
         </label>
         <label>
           目的地邮编
-          <input aria-label="目的地邮编" />
+          <input name="destinationPostalCode" aria-label="目的地邮编" />
         </label>
         <label>
           实重（kg）
-          <input defaultValue="123.50" inputMode="decimal" />
+          <input name="weightKg" defaultValue="123.50" inputMode="decimal" required />
         </label>
         <label>
           体积（m³）
-          <input defaultValue="0.48" inputMode="decimal" />
+          <input name="volumeM3" defaultValue="0.48" inputMode="decimal" required />
         </label>
-        <Button type="submit">获取报价</Button>
+        <Button type="submit" disabled={submitting}>
+          {submitting ? '查价中…' : '获取报价'}
+        </Button>
       </form>
-      {quoted ? (
+      {error ? <p role="alert">{error}</p> : null}
+      {quote ? (
         <section
           className="portal-panel portal-quote-result"
-          aria-label="报价 Q2505120042"
+          aria-label={`报价 ${quote.quoteNo}`}
           aria-live="polite"
         >
           <div>
-            <StatusTag tone="success">可用</StatusTag>
-            <h2>智立海运专线</h2>
-            <p>计费重 123.50 kg · US-LAX 4 区 · 价卡 v2026.05</p>
+            <StatusTag tone={expired ? 'danger' : 'success'}>
+              {expired ? '已过期' : '可用'}
+            </StatusTag>
+            <h2>{quote.channel}</h2>
+            <p>
+              {quote.request.origin} → {quote.request.destinationPostalCode} ·{' '}
+              {quote.request.weightKg.toFixed(2)} kg · {quote.request.volumeM3.toFixed(2)} m³
+            </p>
+            <p>
+              计费重 {quote.chargeableWeightKg.toFixed(2)} kg · {quote.zone} · 价卡{' '}
+              {quote.rateCardVersion}
+            </p>
           </div>
           <dl>
             <div>
               <dt>基础运费</dt>
-              <dd>CNY 4,680.00</dd>
+              <dd>CNY {quote.charges.base}</dd>
             </div>
             <div>
               <dt>燃油附加费</dt>
-              <dd>CNY 514.80</dd>
+              <dd>CNY {quote.charges.fuel}</dd>
             </div>
             <div>
               <dt>偏远附加费</dt>
-              <dd>CNY 80.00</dd>
+              <dd>CNY {quote.charges.remote}</dd>
             </div>
             <div>
               <dt>操作费</dt>
-              <dd>CNY 45.20</dd>
+              <dd>CNY {quote.charges.handling}</dd>
             </div>
             <div>
               <dt>合计</dt>
-              <dd>CNY 5,320.00</dd>
+              <dd>CNY {quote.charges.total}</dd>
             </div>
           </dl>
           <div>
-            <small>报价有效至 2026-05-12 18:00</small>
-            <Button onClick={choose}>选择此报价</Button>
+            <small>报价有效至 {quote.validUntil.slice(0, 16).replace('T', ' ')}</small>
+            <Button disabled={expired} onClick={() => choose(quote)}>
+              选择此报价
+            </Button>
+            {expired ? (
+              <Button variant="secondary" onClick={() => setQuote(null)}>
+                按当前规则重新查价
+              </Button>
+            ) : null}
           </div>
         </section>
       ) : null}
@@ -355,14 +440,27 @@ function OrderPage({
   selectedQuote,
   onSubmitted,
   onDraft,
+  draftKey,
 }: {
-  selectedQuote: boolean;
-  onSubmitted: () => Promise<void>;
-  onDraft: () => Promise<void>;
+  selectedQuote: QuoteResult | null;
+  onSubmitted: (input: OrderInput) => Promise<void>;
+  onDraft: (input: Partial<OrderInput>) => Promise<void>;
+  draftKey: string;
 }) {
-  const [draftSaved, setDraftSaved] = useState(
-    () => localStorage.getItem('zhili.customer.draft') === 'saved'
-  );
+  const [draftSaved, setDraftSaved] = useState(() => localStorage.getItem(draftKey) === 'saved');
+  const readInput = (form: HTMLFormElement): OrderInput => {
+    const data = new FormData(form);
+    return {
+      origin: String(data.get('origin')),
+      recipient: String(data.get('recipient')),
+      destination: String(data.get('destination')),
+      phone: String(data.get('phone')),
+      commodity: String(data.get('commodity')),
+      pieces: Number(data.get('pieces')),
+      weightKg: Number(data.get('weightKg')),
+      quoteNo: selectedQuote?.quoteNo,
+    };
+  };
   return (
     <>
       <SectionHeader
@@ -373,11 +471,13 @@ function OrderPage({
         className="portal-form portal-order-form"
         onSubmit={(event) => {
           event.preventDefault();
-          onSubmitted();
+          void onSubmitted(readInput(event.currentTarget));
         }}
       >
         {selectedQuote ? (
-          <p className="portal-selected-quote">已选择：智立海运专线 · CNY 5,320.00</p>
+          <p className="portal-selected-quote">
+            已选择：{selectedQuote.channel} · CNY {selectedQuote.charges.total}
+          </p>
         ) : null}
         {draftSaved ? (
           <p className="portal-selected-quote">草稿已保存，可继续编辑后提交。</p>
@@ -385,41 +485,50 @@ function OrderPage({
         <fieldset>
           <legend>收件信息</legend>
           <label>
+            发货地
+            <input
+              name="origin"
+              defaultValue={selectedQuote?.request.origin ?? 'CN-SZX 518000'}
+              required
+            />
+          </label>
+          <label>
             收件人
-            <input aria-label="收件人" required />
+            <input name="recipient" aria-label="收件人" required />
           </label>
           <label>
             目的地
-            <input aria-label="目的地" required />
+            <input name="destination" aria-label="目的地" required />
           </label>
           <label>
             联系电话
-            <input defaultValue="+1 213 555 0108" />
+            <input name="phone" defaultValue="+1 213 555 0108" />
           </label>
         </fieldset>
         <fieldset>
           <legend>货物信息</legend>
           <label>
             品名
-            <input defaultValue="服装样品" />
+            <input name="commodity" defaultValue="服装样品" />
           </label>
           <label>
             件数
-            <input defaultValue="18" inputMode="numeric" />
+            <input name="pieces" defaultValue="18" inputMode="numeric" />
           </label>
           <label>
             预报重（kg）
-            <input defaultValue="122.00" inputMode="decimal" />
+            <input name="weightKg" defaultValue="122.00" inputMode="decimal" />
           </label>
         </fieldset>
         <div className="portal-form-actions">
           <Button
             variant="secondary"
             type="button"
-            onClick={() =>
-              void onDraft()
+            onClick={(event) =>
+              event.currentTarget.form &&
+              void onDraft(readInput(event.currentTarget.form))
                 .then(() => {
-                  localStorage.setItem('zhili.customer.draft', 'saved');
+                  localStorage.setItem(draftKey, 'saved');
                   setDraftSaved(true);
                 })
                 .catch(() => undefined)
@@ -495,10 +604,12 @@ function WaybillsPage({
   rows,
   onTrack,
   notify,
+  companyName,
 }: {
   rows: WaybillRow[];
   onTrack: (waybillNo: string) => void;
   notify: (message: string) => void;
+  companyName: string;
 }) {
   const [query, setQuery] = useState('');
   const [appliedQuery, setAppliedQuery] = useState('');
@@ -507,7 +618,7 @@ function WaybillsPage({
     <>
       <SectionHeader
         title="我的运单"
-        description="仅显示深圳鑫源贸易有限公司的数据范围，共 1,248 条。"
+        description={`仅显示${companyName}的数据范围，共 1,248 条。`}
         action={
           <Button
             onClick={() =>
@@ -591,15 +702,15 @@ function FinancePage({
   requestPayment,
   paymentCreated,
   notify,
+  receiptKey,
 }: {
   requestPayment: () => void;
   paymentCreated: boolean;
   notify: (message: string) => void;
+  receiptKey: string;
 }) {
   const [receipt, setReceipt] = useState<File | null>(null);
-  const [receiptName, setReceiptName] = useState(
-    () => localStorage.getItem('zhili.customer.receipt') ?? ''
-  );
+  const [receiptName, setReceiptName] = useState(() => localStorage.getItem(receiptKey) ?? '');
   return (
     <>
       <SectionHeader
@@ -636,7 +747,7 @@ function FinancePage({
               void customerPort
                 .uploadReceipt(receipt.name)
                 .then(() => {
-                  localStorage.setItem('zhili.customer.receipt', receipt.name);
+                  localStorage.setItem(receiptKey, receipt.name);
                   setReceiptName(receipt.name);
                   notify('付款凭证已关联至 ST202605-0008。');
                 })
@@ -843,13 +954,19 @@ function ImportPage({ notify }: { notify: (message: string) => void }) {
   );
 }
 
-function AddressPage({ notify }: { notify: (message: string) => void }) {
+function AddressPage({
+  notify,
+  addressesKey,
+  companyName,
+}: {
+  notify: (message: string) => void;
+  addressesKey: string;
+  companyName: string;
+}) {
   const [name, setName] = useState('');
   const [addresses, setAddresses] = useState<string[]>(() => {
     try {
-      return JSON.parse(
-        localStorage.getItem('zhili.customer.addresses') ?? '["深圳南山发货仓"]'
-      ) as string[];
+      return JSON.parse(localStorage.getItem(addressesKey) ?? '["深圳南山发货仓"]') as string[];
     } catch {
       return ['深圳南山发货仓'];
     }
@@ -866,7 +983,7 @@ function AddressPage({ notify }: { notify: (message: string) => void }) {
             .then(() => {
               setAddresses((items) => {
                 const next = [...items, name];
-                localStorage.setItem('zhili.customer.addresses', JSON.stringify(next));
+                localStorage.setItem(addressesKey, JSON.stringify(next));
                 return next;
               });
               setName('');
@@ -891,7 +1008,7 @@ function AddressPage({ notify }: { notify: (message: string) => void }) {
           {addresses.map((address) => (
             <tr key={address}>
               <td>{address}</td>
-              <td>深圳鑫源贸易有限公司</td>
+              <td>{companyName}</td>
             </tr>
           ))}
         </tbody>
@@ -912,33 +1029,94 @@ function PlaceholderPage({ page }: { page: Page }) {
   );
 }
 
-export function App() {
+type CustomerPortalProps = {
+  tenantId?: string;
+  customerId?: string;
+  companyName?: string;
+};
+
+function CustomerPortalApp({
+  tenantId = 'tenant-xinyuan',
+  customerId = 'customer-xinyuan',
+  companyName = '深圳鑫源贸易有限公司',
+}: CustomerPortalProps) {
+  const waybillsKey = storageKey(tenantId, customerId, 'waybills');
+  const shortcutsKey = storageKey(tenantId, customerId, 'shortcuts');
+  const draftKey = storageKey(tenantId, customerId, 'draft');
+  const receiptKey = storageKey(tenantId, customerId, 'receipt');
+  const addressesKey = storageKey(tenantId, customerId, 'addresses');
+  const paymentKey = storageKey(tenantId, customerId, 'payment');
+  const ordersKey = storageKey(tenantId, customerId, 'orders');
   const [page, setPage] = useState<Page>('工作台');
   const [scenario, setScenario] = useState<Scenario>('normal');
-  const [selectedQuote, setSelectedQuote] = useState(false);
+  const [selectedQuote, setSelectedQuote] = useState<QuoteResult | null>(null);
   const [toast, setToast] = useState('');
+  const [recoveryMessage, setRecoveryMessage] = useState('');
+  const [differences, setDifferences] = useState<VersionDifference[]>([]);
+  const [recovering, setRecovering] = useState(false);
   const [paymentOpen, setPaymentOpen] = useState(false);
-  const [rows, setRows] = useState<WaybillRow[]>(readRows);
+  const [rows, setRows] = useState<WaybillRow[]>(() => readRows(waybillsKey));
   const [paymentCreated, setPaymentCreated] = useState(
-    () => localStorage.getItem('zhili.customer.payment') === 'created'
+    () => localStorage.getItem(paymentKey) === 'created'
   );
   const [trackingNo, setTrackingNo] = useState('S2505120004');
-  useEffect(() => localStorage.setItem('zhili.customer.waybills', JSON.stringify(rows)), [rows]);
+  useEffect(() => localStorage.setItem(waybillsKey, JSON.stringify(rows)), [rows, waybillsKey]);
   useEffect(() => {
-    if (paymentCreated) localStorage.setItem('zhili.customer.payment', 'created');
-  }, [paymentCreated]);
+    if (paymentCreated) localStorage.setItem(paymentKey, 'created');
+  }, [paymentCreated, paymentKey]);
 
   const navigate = (next: Page) => {
     setPage(next);
     setScenario('normal');
+    setRecoveryMessage('');
+    setDifferences([]);
+  };
+  const recover = async () => {
+    setRecovering(true);
+    setRecoveryMessage('');
+    try {
+      if (scenario === 'stale') {
+        const result = await customerPort.compareDashboard('v12');
+        setDifferences(result.differences);
+      } else if (scenario === 'partial') {
+        const result = await customerPort.retryFailedNotifications(['notification-5']);
+        setScenario('normal');
+        setToast(`仅重试失败项：${result.items.map((item) => item.id).join('、')} 已合并成功。`);
+      } else {
+        await customerPort.refreshDashboard();
+        setScenario('normal');
+        setToast('数据已从服务端重新加载。');
+      }
+    } catch (error) {
+      setRecoveryMessage(error instanceof Error ? error.message : '恢复请求失败；原状态已保留。');
+    } finally {
+      setRecovering(false);
+    }
+  };
+  const applyServerVersion = async () => {
+    setRecovering(true);
+    setRecoveryMessage('');
+    try {
+      const result = await customerPort.refreshDashboard('v13');
+      setScenario('normal');
+      setDifferences([]);
+      setToast(`已应用服务器版本 ${result.version}。`);
+    } catch (error) {
+      setRecoveryMessage(error instanceof Error ? error.message : '刷新失败；本地版本未覆盖。');
+    } finally {
+      setRecovering(false);
+    }
   };
   let content: ReactNode;
-  if (page === '工作台') content = <Dashboard navigate={navigate} rows={rows} notify={setToast} />;
+  if (page === '工作台')
+    content = (
+      <Dashboard navigate={navigate} rows={rows} notify={setToast} shortcutsKey={shortcutsKey} />
+    );
   else if (page === '查价')
     content = (
       <QuotePage
-        choose={() => {
-          setSelectedQuote(true);
+        choose={(quote) => {
+          setSelectedQuote(quote);
           navigate('新建运单');
         }}
       />
@@ -947,29 +1125,41 @@ export function App() {
     content = (
       <OrderPage
         selectedQuote={selectedQuote}
-        onDraft={async () => {
+        draftKey={draftKey}
+        onDraft={async (input) => {
           try {
-            await customerPort.saveDraft();
+            await customerPort.saveDraft(input);
             setToast('草稿已保存：DRAFT-S2505120006。');
           } catch (error) {
             setToast(error instanceof Error ? error.message : '草稿保存失败。');
             throw error;
           }
         }}
-        onSubmitted={async () => {
+        onSubmitted={async (input) => {
           try {
-            const order = await customerPort.createOrder();
+            const order = await customerPort.createOrder(input);
             const newRow: WaybillRow = [
               order.orderNo,
               'HBL2505120006',
               '待收货',
-              '美国/洛杉矶',
-              '18',
-              '123.50',
+              input.destination,
+              String(input.pieces),
+              input.weightKg.toFixed(2),
               '预报已提交',
             ];
             setRows((current) =>
               current.some((row) => row[0] === order.orderNo) ? current : [newRow, ...current]
+            );
+            const existing = (() => {
+              try {
+                return JSON.parse(localStorage.getItem(ordersKey) ?? '[]') as OrderInput[];
+              } catch {
+                return [];
+              }
+            })();
+            localStorage.setItem(
+              ordersKey,
+              JSON.stringify([{ ...input, orderNo: order.orderNo }, ...existing])
             );
             setToast(`预报已提交：${order.orderNo}，仓库将等待收货。`);
           } catch (error) {
@@ -983,6 +1173,7 @@ export function App() {
       <WaybillsPage
         rows={rows}
         notify={setToast}
+        companyName={companyName}
         onTrack={(waybillNo) => {
           setTrackingNo(waybillNo);
           navigate('轨迹查询');
@@ -996,12 +1187,16 @@ export function App() {
         requestPayment={() => setPaymentOpen(true)}
         paymentCreated={paymentCreated}
         notify={setToast}
+        receiptKey={receiptKey}
       />
     );
   else if (page === '问题工单') content = <TicketsPage notify={setToast} />;
   else if (page === 'API') content = <ApiPage notify={setToast} />;
   else if (page === '批量导入') content = <ImportPage notify={setToast} />;
-  else if (page === '地址簿') content = <AddressPage notify={setToast} />;
+  else if (page === '地址簿')
+    content = (
+      <AddressPage notify={setToast} addressesKey={addressesKey} companyName={companyName} />
+    );
   else content = <PlaceholderPage page={page} />;
 
   return (
@@ -1029,7 +1224,7 @@ export function App() {
           <span>张</span>
           <div>
             <strong>张伟</strong>
-            <small>深圳鑫源贸易有限公司</small>
+            <small>{companyName}</small>
           </div>
         </div>
       </aside>
@@ -1055,10 +1250,17 @@ export function App() {
               <option value="partial">部分成功</option>
             </select>
           </label>
-          <strong>深圳鑫源贸易有限公司</strong>
+          <strong>{companyName}</strong>
         </header>
         <main>
-          <ScenarioNotice scenario={scenario} recover={() => setScenario('normal')} />
+          <ScenarioNotice
+            scenario={scenario}
+            recoveryMessage={recoveryMessage}
+            differences={differences}
+            recovering={recovering}
+            recover={() => void recover()}
+            applyServerVersion={() => void applyServerVersion()}
+          />
           {scenario === 'normal' ? content : null}
         </main>
       </div>
@@ -1119,4 +1321,10 @@ export function App() {
       </nav>
     </div>
   );
+}
+
+export function App(props: CustomerPortalProps = {}) {
+  const tenantId = props.tenantId ?? 'tenant-xinyuan';
+  const customerId = props.customerId ?? 'customer-xinyuan';
+  return <CustomerPortalApp key={`${tenantId}:${customerId}`} {...props} />;
 }

@@ -419,7 +419,7 @@ function ModulesPage({ notify }: { notify: (text: string) => void }) {
           <Button
             onClick={() => {
               void platformPort
-                .saveEntitlements('plan-draft', { kind: 'PLAN_DRAFT', name: '定制版' })
+                .createPlan('定制版')
                 .then(() => {
                   if (!plans.includes('定制版')) setPlans((items) => [...items, '定制版']);
                   setPlan('定制版');
@@ -486,39 +486,53 @@ function ModulesPage({ notify }: { notify: (text: string) => void }) {
   );
 }
 
-function UsagePage({ notify }: { notify: (text: string) => void }) {
-  const saved = (() => {
-    try {
-      return JSON.parse(localStorage.getItem('zhili.platform.entitlements') ?? '') as {
-        plan: string;
-        limit: string;
-        expires: string;
-      };
-    } catch {
-      return { plan: '企业版', limit: '500000', expires: '2026-08-31' };
-    }
-  })();
-  const [plan, setPlan] = useState(saved.plan);
-  const [limit, setLimit] = useState(saved.limit);
-  const [expires, setExpires] = useState(saved.expires);
-  const [savedLimit, setSavedLimit] = useState(Number(saved.limit).toLocaleString('en-US'));
+function UsagePage({
+  tenants,
+  selectedTenantId,
+  selectTenant,
+  save,
+  notify,
+}: {
+  tenants: Tenant[];
+  selectedTenantId: string;
+  selectTenant: (id: string) => void;
+  save: (
+    tenantId: string,
+    config: { plan: string; limit: number; expires: string }
+  ) => Promise<number>;
+  notify: (text: string) => void;
+}) {
+  const tenant = tenants.find((item) => item.id === selectedTenantId) ?? tenants[0];
+  const tenantLimit = tenant?.waybill.split('/')[1]?.replaceAll(',', '').trim() ?? '0';
+  const [plan, setPlan] = useState(tenant?.plan ?? '基础版');
+  const [limit, setLimit] = useState(tenantLimit);
+  const [expires, setExpires] = useState(tenant?.expires ?? '');
+  if (!tenant) return null;
   return (
     <>
       <Header title="配额与用量" description="运单、API、用户与存储配额均按租户隔离。" />
       <section className="platform-panel platform-usage">
-        <h2>上海智立科技有限公司</h2>
+        <label>
+          配置租户
+          <select
+            aria-label="配置租户"
+            value={tenant.id}
+            onChange={(event) => selectTenant(event.target.value)}
+          >
+            {tenants.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <h2>{tenant.name}</h2>
         <form
           className="platform-create-form"
           onSubmit={(event) => {
             event.preventDefault();
-            void platformPort
-              .saveEntitlements('1', { plan, waybillLimit: Number(limit), expires })
+            void save(tenant.id, { plan, limit: Number(limit), expires })
               .then((version) => {
-                localStorage.setItem(
-                  'zhili.platform.entitlements',
-                  JSON.stringify({ plan, limit, expires })
-                );
-                setSavedLimit(Number(limit).toLocaleString('en-US'));
                 notify(`租户配置已保存，版本 ENT-${String(version).padStart(4, '0')}。`);
               })
               .catch((error: Error) => notify(error.message));
@@ -552,9 +566,9 @@ function UsagePage({ notify }: { notify: (text: string) => void }) {
           </label>
           <Button type="submit">保存租户配置</Button>
         </form>
-        <Quota label="运单配额" value={`320,000 / ${savedLimit}`} percent={64} />
-        <Quota label="API 用量" value="2.45M / 10M" percent={24} />
-        <Quota label="活跃用户" value="86 / 120" percent={72} />
+        <Quota label="运单配额" value={tenant.waybill} percent={64} />
+        <Quota label="API 用量" value={tenant.api} percent={24} />
+        <Quota label="活跃用户" value={`${tenant.users} / 120`} percent={72} />
         <Quota label="存储用量" value="182 GB / 500 GB" percent={36} />
         <p>用量阈值 80% 预警、100% 限制写入；查看和导出仍保持可用。</p>
       </section>
@@ -677,7 +691,15 @@ function AuditPage({ auditReason }: { auditReason: string }) {
   );
 }
 
-function RuntimeNotice({ state }: { state: RuntimeState }) {
+function RuntimeNotice({
+  state,
+  message,
+  differences,
+}: {
+  state: RuntimeState;
+  message: string;
+  differences: Array<{ field: string; local: string; server: string }>;
+}) {
   if (state === 'normal') return null;
   const map: Record<Exclude<RuntimeState, 'normal'>, [string, 'status' | 'alert']> = {
     loading: ['正在加载运行数据，超过 8 秒可转为后台任务。', 'status'],
@@ -685,7 +707,10 @@ function RuntimeNotice({ state }: { state: RuntimeState }) {
     failed: ['运行数据请求失败：网关超时；请求号 REQ-P-384。', 'alert'],
     forbidden: ['缺少 platform.operations.read 权限，可向平台安全管理员申请。', 'status'],
     stale: ['运行快照已过期：本地 10:18，服务器 10:21。', 'status'],
-    partial: ['部分作业执行失败：382 成功、2 失败，仅可重试失败项。', 'status'],
+    partial: [
+      '部分作业执行失败：382 成功、2 失败；失败项 job-pay-382、job-pay-384，仅可重试失败项。',
+      'status',
+    ],
   };
   return (
     <div
@@ -693,12 +718,55 @@ function RuntimeNotice({ state }: { state: RuntimeState }) {
       className={`platform-runtime-notice platform-runtime-notice--${state}`}
     >
       {map[state][0]}
+      {differences.length
+        ? ` 版本差异：${differences
+            .map((item) => `${item.field} ${item.local} → ${item.server}`)
+            .join('；')}`
+        : ''}
+      {message ? ` ${message}` : ''}
     </div>
   );
 }
 
 function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
   const [state, setState] = useState<RuntimeState>('normal');
+  const [message, setMessage] = useState('');
+  const [differences, setDifferences] = useState<
+    Array<{ field: string; local: string; server: string }>
+  >([]);
+  const [recovering, setRecovering] = useState(false);
+  const selectState = (next: RuntimeState) => {
+    setState(next);
+    setMessage('');
+    setDifferences([]);
+  };
+  const recover = async () => {
+    setRecovering(true);
+    setMessage('');
+    try {
+      if (state === 'stale') {
+        if (differences.length) {
+          await platformPort.refreshRuntime('runtime-v13');
+          setState('normal');
+          setDifferences([]);
+        } else {
+          const result = await platformPort.compareRuntime('runtime-v12');
+          setDifferences(result.differences);
+        }
+      } else if (state === 'partial') {
+        const result = await platformPort.retryRuntimeJobs(['job-pay-382', 'job-pay-384']);
+        setState('normal');
+        setMessage(`${result.items.map((item) => item.id).join('、')} 已合并为成功。`);
+      } else {
+        await platformPort.refreshRuntime();
+        setState('normal');
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : '恢复失败；原状态已保留。');
+    } finally {
+      setRecovering(false);
+    }
+  };
   return (
     <>
       <Header
@@ -710,7 +778,7 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
             <select
               aria-label="运行状态"
               value={state}
-              onChange={(event) => setState(event.target.value as RuntimeState)}
+              onChange={(event) => selectState(event.target.value as RuntimeState)}
             >
               <option value="normal">正常</option>
               <option value="loading">加载</option>
@@ -723,17 +791,17 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
           </label>
         }
       />
-      <RuntimeNotice state={state} />
+      <RuntimeNotice state={state} message={message} differences={differences} />
       {state === 'stale' ? (
-        <Button disabled={readOnly} onClick={() => setState('normal')}>
-          刷新运行快照
+        <Button disabled={readOnly || recovering} onClick={() => void recover()}>
+          {differences.length ? '应用服务器快照' : '刷新运行快照'}
         </Button>
       ) : state === 'partial' ? (
-        <Button disabled={readOnly} onClick={() => setState('normal')}>
+        <Button disabled={readOnly || recovering} onClick={() => void recover()}>
           仅重试 2 个失败项
         </Button>
       ) : state === 'failed' ? (
-        <Button disabled={readOnly} onClick={() => setState('normal')}>
+        <Button disabled={readOnly || recovering} onClick={() => void recover()}>
           重试请求
         </Button>
       ) : null}
@@ -823,6 +891,8 @@ export function App() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
+  const [newTenantPlan, setNewTenantPlan] = useState('专业版');
+  const [selectedTenantId, setSelectedTenantId] = useState('1');
   useEffect(
     () => localStorage.setItem('zhili.platform.tenants', JSON.stringify(tenantRows)),
     [tenantRows]
@@ -855,16 +925,22 @@ export function App() {
   const createTenant = async () => {
     if (!newTenantName.trim() || !newTenantSlug.trim()) return;
     try {
-      const created = await platformPort.createTenant(newTenantName.trim(), newTenantSlug.trim());
+      const created = await platformPort.createTenant(
+        newTenantName.trim(),
+        newTenantSlug.trim(),
+        newTenantPlan
+      );
+      const initialLimit =
+        newTenantPlan === '企业版' ? '500,000' : newTenantPlan === '专业版' ? '200,000' : '100,000';
       setTenantRows((current) => [
         ...current,
         {
           id: created.id,
           name: newTenantName.trim(),
           slug: newTenantSlug.trim(),
-          plan: '专业版',
+          plan: newTenantPlan,
           users: 1,
-          waybill: '0 / 200,000',
+          waybill: `0 / ${initialLimit}`,
           api: '0 / 5M',
           expires: '2027-07-22',
           days: 365,
@@ -876,6 +952,7 @@ export function App() {
       setCreateOpen(false);
       setNewTenantName('');
       setNewTenantSlug('');
+      setNewTenantPlan('专业版');
       setToast('租户已创建，默认套餐、模块和数据边界已初始化。');
     } catch (error) {
       setToast(error instanceof Error ? error.message : '租户创建失败。');
@@ -898,7 +975,46 @@ export function App() {
       />
     );
   else if (page === '套餐与模块') content = <ModulesPage notify={setToast} />;
-  else if (page === '配额与用量') content = <UsagePage notify={setToast} />;
+  else if (page === '配额与用量')
+    content = (
+      <UsagePage
+        key={selectedTenantId}
+        tenants={tenantRows}
+        selectedTenantId={selectedTenantId}
+        selectTenant={setSelectedTenantId}
+        notify={setToast}
+        save={async (tenantId, config) => {
+          const version = await platformPort.saveTenantConfiguration(tenantId, {
+            plan: config.plan,
+            waybillLimit: config.limit,
+            expires: config.expires,
+          });
+          const update = (tenant: Tenant): Tenant => {
+            if (tenant.id !== tenantId) return tenant;
+            const used = tenant.waybill.split('/')[0]?.trim() ?? '0';
+            const days = Math.max(
+              0,
+              Math.ceil(
+                (new Date(`${config.expires}T00:00:00+08:00`).getTime() -
+                  new Date('2026-07-22T00:00:00+08:00').getTime()) /
+                  86_400_000
+              )
+            );
+            return {
+              ...tenant,
+              plan: config.plan,
+              waybill: `${used} / ${config.limit.toLocaleString('en-US')}`,
+              expires: config.expires,
+              days,
+              version,
+            };
+          };
+          setTenantRows((rows) => rows.map(update));
+          setDetail((current) => (current ? update(current) : null));
+          return version;
+        }}
+      />
+    );
   else if (page === '平台公告') content = <AnnouncementsPage notify={setToast} />;
   else if (page === '代入与审计') content = <AuditPage auditReason={auditReason} />;
   else content = <RuntimePage readOnly={Boolean(session)} />;
@@ -1051,7 +1167,11 @@ export function App() {
           </label>
           <label>
             默认套餐
-            <select defaultValue="专业版">
+            <select
+              aria-label="默认套餐"
+              value={newTenantPlan}
+              onChange={(event) => setNewTenantPlan(event.target.value)}
+            >
               <option>基础版</option>
               <option>专业版</option>
               <option>企业版</option>
