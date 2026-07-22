@@ -170,7 +170,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
-  await admin`TRUNCATE idempotency_records, outbox_events`;
+  await admin`TRUNCATE transaction_command_contexts, idempotency_records, outbox_events`;
 });
 
 afterAll(async () => {
