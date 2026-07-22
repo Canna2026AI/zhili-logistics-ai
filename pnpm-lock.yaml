@@ -143,9 +143,27 @@ importers:
       '@zhili/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@zhili/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@zhili/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@zhili/feature-identity-masterdata':
+        specifier: workspace:*
+        version: link:../../packages/features/identity-masterdata
+      '@zhili/feature-linehaul':
+        specifier: workspace:*
+        version: link:../../packages/features/linehaul
+      '@zhili/feature-rates-routing':
+        specifier: workspace:*
+        version: link:../../packages/features/rates-routing
+      '@zhili/feature-warehouse':
+        specifier: workspace:*
+        version: link:../../packages/features/warehouse
+      '@zhili/feature-waybills':
+        specifier: workspace:*
+        version: link:../../packages/features/waybills
       '@zhili/observability':
         specifier: workspace:*
         version: link:../../packages/observability
