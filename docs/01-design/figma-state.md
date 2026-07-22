@@ -7,7 +7,7 @@
 - File key：`Mn56UdJSFmLZSmvOZSLIoX`
 - 账号：`Canna`（Full seat，Pro tier）
 - Run ID：`zhili-figma-v1-20260722`
-- 当前阶段：Phase 0 Discovery 完成，等待确认后进入 Phase 1 Foundations
+- 当前阶段：Phase 1 Foundations 已完成；Phase 2 Components 进行中
 
 旧文件 `FJb5EAV0dx3WHZCN9zJaok` 是 Starter 阶段的历史空文件，不再作为实现目标。
 
@@ -23,7 +23,10 @@
 
 ### Figma 环境
 
-- 新文件只有空白 `Page 1`，无本地变量、样式或组件，适合从代码源真相干净同步。
+- 主文件已建立 13 个分区页面，Cover、Getting Started、Foundations 与 Components 页面均为可编辑节点，不再是空白文件。
+- 已同步 4 个变量集合、61 个变量、9 个文字样式与 2 个阴影样式；变量包含 WEB code syntax 和控件边界宽度。
+- Foundations 已完成颜色、排版、间距、控件/表格/壳层尺寸、圆角与阴影文档，并通过节点边界和截图检查。
+- Components 已完成 Button/Primary、Button/Secondary、Button/Quiet、Button/Danger 四个组件集，共 72 个变体；每组包含 Compact/Default/Large 与 Default/Hover/Focus/Pressed/Disabled/Loading，且暴露可编辑 `Label` 属性。
 - 已订阅 Material 3、Simple Design System 和 Apple 官方设备库。
 - Simple Design System 可检索到 Button、Input Field、Table、Dialog、Tag、Sidebar，以及颜色、边界、间距、圆角和排版变量。
 - 复用决策：智立需要 28/32px 高密控件、4–6px 圆角、石墨导航、青绿主操作和物流专用数据组件；公共库 API 与视觉均不完全匹配，因此本地创建智立组件。外部库只作图标、可访问性和组件结构参考。
@@ -72,12 +75,12 @@
 
 | 项目 | 代码 | Figma | 处理 |
 | --- | --- | --- | --- |
-| 令牌 | 已实现并测试 | 空白 | Phase 1 同步变量、scope 和 code syntax |
-| 组件 | 7 个共享核心组件已实现 | 空白 | Phase 2 按真实 React API 建本地组件与 Code Connect |
+| 令牌 | 已实现并测试 | 4 集合、61 变量、11 样式已同步 | Foundations 已完成；继续在组件与页面中验证绑定 |
+| 组件 | 7 个共享核心组件已实现 | Button 四种类型、72 变体已完成；Input 进行中 | 继续完成 Input、StatusTag、DataTable、Dialog、Drawer、AppShell 与 Code Connect |
 | 页面 | 五端主要页面已实现 | 空白 | Phase 3 以真实浏览器捕获作参考并组件化重建 |
 | 状态 | 自动化已覆盖大量错误、离线和冲突状态 | 空白 | 依 `interaction-state-matrix.md` 建状态板和原型 |
-| 竞品一致性 | 视觉与交互已在浏览器实现 | 尚无画布证据 | Figma 负责团队评审、标注、映射和后续改版，不反向覆盖已验证代码语义 |
+| 竞品一致性 | 视觉与交互已在浏览器实现 | Foundations 与 Button 已有节点、截图和元数据证据 | Figma 负责团队评审、标注、映射和后续改版，不反向覆盖已验证代码语义 |
 
 ## Phase gate
 
-Phase 0 已满足退出条件：目标文件、复用策略、v1 范围、代码映射和缺口均已明确。进入 Phase 1 前需产品负责人确认本页 v1 范围；确认后才写入 Figma 变量、样式、组件和页面节点，并记录稳定 node IDs 与截图证据。
+Phase 0 与 Phase 1 已满足退出条件。稳定证据包括：Cover `8:2`、Getting Started `8:8`、Foundations `9:2`、Components Catalog `19:2`；Button sets 为 Primary `21:56`、Secondary `24:3`、Quiet `26:39`、Danger `28:39`。当前继续完成其余核心组件；在 Components、五端页面、10 条 Flow 与独立设计复审全部闭环前，Figma Gate 保持 `IN_PROGRESS`。
