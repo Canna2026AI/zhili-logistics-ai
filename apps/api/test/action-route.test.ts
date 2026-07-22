@@ -108,16 +108,19 @@ describe('Fastify colon-action URL rewriting', () => {
     expect(amend.json()).toEqual({ action: 'amend' });
   });
 
-  it('keeps the internal routing namespace unreachable from a direct client request', async () => {
-    const app = await createApplication();
-    const fastify = app.getHttpAdapter().getInstance();
-    const direct = await fastify.inject({
-      method: 'POST',
-      url: `${API_GLOBAL_PREFIX}/warehouse/receipts/01J0000000000000000000000A/__zhili_action__/confirm`,
-    });
+  it.each(['__zhili_action__', '__zhili%5Faction%5F%5F'])(
+    'keeps the internal routing namespace unreachable from a direct client request: %s',
+    async (reservedSegment) => {
+      const app = await createApplication();
+      const fastify = app.getHttpAdapter().getInstance();
+      const direct = await fastify.inject({
+        method: 'POST',
+        url: `${API_GLOBAL_PREFIX}/warehouse/receipts/01J0000000000000000000000A/${reservedSegment}/confirm`,
+      });
 
-    expect(direct.statusCode).toBe(404);
-  });
+      expect(direct.statusCode).toBe(404);
+    }
+  );
 
   it('reports external paths, operation IDs and idempotency to the OpenAPI guard', async () => {
     const operations = collectControllerOperations(

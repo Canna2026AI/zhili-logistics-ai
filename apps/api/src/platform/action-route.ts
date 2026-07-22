@@ -20,7 +20,7 @@ export function rewriteColonActionUrl(url: string): string {
   const query = queryStart === -1 ? '' : url.slice(queryStart);
   const segments = path.split('/');
 
-  if (segments.includes(INTERNAL_ACTION_ROUTE_SEGMENT)) {
+  if (segments.some(isInternalActionRouteSegment)) {
     return `/__invalid_internal_action_route__${query}`;
   }
 
@@ -33,4 +33,12 @@ export function rewriteColonActionUrl(url: string): string {
   });
 
   return `${rewritten.join('/')}${query}`;
+}
+
+function isInternalActionRouteSegment(segment: string): boolean {
+  try {
+    return decodeURIComponent(segment) === INTERNAL_ACTION_ROUTE_SEGMENT;
+  } catch {
+    return false;
+  }
 }
