@@ -14,10 +14,13 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.0",
+    "@node-rs/argon2": "2.0.2",
     "@tanstack/react-query": "^5.90.0",
     "@zhili/api-client": "workspace:*",
     "@zhili/contracts": "workspace:*",
+    "@zhili/db": "workspace:*",
     "@zhili/ui": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "react-hook-form": "^7.66.0",
     "zod": "^4.1.0",
     "zustand": "^5.0.8"
