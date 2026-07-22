@@ -4,6 +4,7 @@ import { MasterDataPanel } from '@zhili/feature-identity-masterdata';
 import { QuoteWorkbench, RateCatalogPanel } from '@zhili/feature-rates-routing';
 import { ImportWorkbench, OrderDraftPanel, WaybillList } from '@zhili/feature-waybills';
 import { defaultOpsOrdersPorts, type OpsOrdersPorts } from './ports';
+import { FlowStatePanel } from '../interaction-states';
 import './orders-workspace.css';
 
 type OrdersPage =
@@ -161,15 +162,21 @@ export function OpsOrdersWorkspace({
     ) : page === 'rate-catalog' ? (
       <RateCatalogPanel port={activePorts.rates} readOnly={simulation} />
     ) : page === 'quotes' ? (
-      <QuoteWorkbench
-        port={activePorts.quotes}
-        state={simulation ? 'forbidden-cost' : 'normal'}
-        readOnly={simulation}
-      />
+      <>
+        <FlowStatePanel key="F02" flows={['F02']} stateLabel="报价状态" />
+        <QuoteWorkbench
+          port={activePorts.quotes}
+          state={simulation ? 'forbidden-cost' : 'normal'}
+          readOnly={simulation}
+        />
+      </>
     ) : page === 'orders' ? (
       <OrderDraftPanel port={activePorts.orders} readOnly={simulation} />
     ) : page === 'imports' ? (
-      <ImportWorkbench port={activePorts.imports} readOnly={simulation} />
+      <>
+        <FlowStatePanel key="F10" flows={['F10']} stateLabel="AI 导入状态" />
+        <ImportWorkbench port={activePorts.imports} readOnly={simulation} />
+      </>
     ) : (
       <WaybillList
         port={activePorts.waybills}

@@ -2,6 +2,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import { Button, DataTable, Dialog, Input, StatusTag, type DataTableColumn } from '@zhili/ui';
 import { buildDangerousFinanceCommand } from '../../../../../packages/features/finance/src';
 import { deriveMeasurement } from '../../../../../packages/features/warehouse/src';
+import { FlowStatePanel, type OpsFlowId } from '../interaction-states';
 import './fulfillment-finance-workbench.css';
 
 export type FulfillmentSection = 'warehouse' | 'linehaul' | 'tracking' | 'finance';
@@ -1831,6 +1832,14 @@ export function FulfillmentFinanceWorkbench({
   >(null);
   const [auditCount, setAuditCount] = useState(0);
   const active = navItems.find((item) => item.id === section)!;
+  const scenarioFlows: OpsFlowId[] =
+    section === 'warehouse'
+      ? ['F03']
+      : section === 'linehaul'
+        ? ['F04']
+        : section === 'tracking'
+          ? ['F05']
+          : ['F06', 'F07'];
 
   const runCommand: RunCommand = async (nextCommand, successMessage, onResolved) => {
     setFeedback({ kind: 'pending', message: `正在提交 ${nextCommand.operationId}` });
@@ -1915,7 +1924,10 @@ export function FulfillmentFinanceWorkbench({
             </select>
           </label>
         </header>
-        <div className="ff-content">{renderSection()}</div>
+        <div className="ff-content">
+          <FlowStatePanel key={section} flows={scenarioFlows} initialFlow={scenarioFlows[0]} />
+          {renderSection()}
+        </div>
         {feedback ? (
           <div
             className="ff-toast"

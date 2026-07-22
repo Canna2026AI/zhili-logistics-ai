@@ -45,4 +45,25 @@ describe('ops orders workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '导入运单' }));
     expect(screen.getByRole('heading', { name: '运单批量导入' })).toBeInTheDocument();
   });
+
+  it('exposes quote expiry and AI import recovery as real interactive states', () => {
+    render(<OpsOrdersWorkspace initialPage="quotes" />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '报价状态' }), {
+      target: { value: 'expired' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('报价已过有效期');
+    expect(screen.getByText(/原报价快照/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '按当前规则重算' }));
+    expect(screen.queryByText('报价已过有效期')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '导入运单' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'AI 导入状态' }), {
+      target: { value: 'low-confidence' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('4 个字段置信度不足');
+    expect(screen.getByText(/Zhili-Map 2\.1/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '进入人工映射' }));
+    expect(screen.getByText('手工映射模式已开启')).toBeVisible();
+  });
 });
