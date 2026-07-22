@@ -55,6 +55,11 @@ const PROBLEMS: Readonly<Record<number, ProblemDefinition>> = {
     detail: 'The request conflicts with current server state.',
     remediation: 'Refresh current state and retry with a new request intent if needed.',
   },
+  410: {
+    code: 'SESSION_EXPIRED',
+    detail: 'The resource or command intent has expired.',
+    remediation: 'Create a new resource or command intent before retrying.',
+  },
   412: {
     code: 'PRECONDITION_FAILED',
     detail: 'A request precondition failed.',

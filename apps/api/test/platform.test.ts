@@ -391,6 +391,7 @@ describe('Problem Details filter', () => {
     [403, 'FORBIDDEN'],
     [404, 'NOT_FOUND'],
     [409, 'CONFLICT'],
+    [410, 'SESSION_EXPIRED'],
     [412, 'PRECONDITION_FAILED'],
     [413, 'PAYLOAD_TOO_LARGE'],
     [422, 'UNPROCESSABLE_ENTITY'],
@@ -417,6 +418,38 @@ describe('Problem Details filter', () => {
       details: [],
       remediation: expect.any(String),
       requestId: 'request-problem',
+    });
+  });
+
+  it('preserves a domain-specific expiration problem at HTTP 410', () => {
+    const reply = new TestReply();
+    const filter = new ProblemFilter({ error: vi.fn() });
+
+    filter.catch(
+      new HttpException(
+        {
+          code: 'QUOTE_EXPIRED',
+          detail: 'The accepted quote is no longer valid.',
+          remediation: 'Request and accept a new quote before linking the order.',
+        },
+        410
+      ),
+      {
+        switchToHttp: () => ({
+          getRequest: () => ({ headers: { 'x-request-id': 'request-expired-quote' } }),
+          getResponse: () => reply,
+        }),
+      } as never
+    );
+
+    expect(reply.statusCode).toBe(410);
+    expect(reply.body).toEqual({
+      code: 'QUOTE_EXPIRED',
+      message: 'The accepted quote is no longer valid.',
+      detail: 'The accepted quote is no longer valid.',
+      details: [],
+      remediation: 'Request and accept a new quote before linking the order.',
+      requestId: 'request-expired-quote',
     });
   });
 
