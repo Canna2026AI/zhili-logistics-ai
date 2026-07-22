@@ -2,27 +2,27 @@
 
 只有可复查证据齐全，门槛状态才可从 `OPEN` 改为 `PASSED`。不能只靠概念图或文字声明；必须同时提供机器可检验的规格、真实接口或自动测试。
 
-| Gate         | 状态        | Commit/版本              | 证据                                                                           | 未关闭例外                                                                         |
-| ------------ | ----------- | ------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
-| 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题   | 无                                                                                 |
-| 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过    | 无                                                                                 |
-| Figma 同步   | IN_PROGRESS | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、19 个五端画布和 19 个原型热点       | 物流专用组件、10 条 Flow 全分支、独立复审待完成；Code Connect 受方案与发布条件阻塞 |
-| 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过   | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                                 |
-| 后端         | IN_PROGRESS | `5cb423d`                | Foundation API/DB/Worker/RLS/Compose 已合并并通过独立 0 C/I/M 审查与主分支门禁 | B1 三个领域工作树正在先行产出统一迁移所需的 schema proposals                       |
-| 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                            | 前置门槛未通过                                                                     |
+| Gate         | 状态        | Commit/版本              | 证据                                                                                             | 未关闭例外                                                                 |
+| ------------ | ----------- | ------------------------ | ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题                     | 无                                                                         |
+| 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过                      | 无                                                                         |
+| Figma 同步   | PASSED      | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、45 个五端画布、104 条原型 reaction；独立终审 C0/I0/M0 | Code Connect 受方案与发布条件阻塞，记录为 `BLOCKED_EXTERNAL`，不阻塞本门槛 |
+| 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过                     | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                         |
+| 后端         | IN_PROGRESS | `5cb423d`                | Foundation API/DB/Worker/RLS/Compose 已合并并通过独立 0 C/I/M 审查与主分支门禁                   | B1 三个领域工作树正在先行产出统一迁移所需的 schema proposals               |
+| 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                                              | 前置门槛未通过                                                             |
 
 ## UI 门槛与 B 方案决策
 
 2026-07-22 采用 B 方案：以仓库中的设计系统、AppShell、交互矩阵、8 张基准图和机器可检验契约作为前端实现源真相。本地 UI 设计子门槛通过后允许前端开工；Figma 作为外部协作镜像继续补录，但不再阻塞代码实现，也不得被误记为已同步。
 
-Figma 同步完成时仍需补齐以下证据：
+Figma 同步已具备以下证据：
 
 - Figma node 链接：Foundations、Components、五端 Page Index、10 条 Flow Index。
-- 组件状态：正常、加载、空、失败、无权限、过期、部分成功、危险确认；PDA 离线/冲突/重启。
+- 组件状态：正常、加载、空、失败、无权限、过期、部分成功、危险确认；PDA 离线/冲突/结果/审计。
 - 固定画布截图：1440×900、1920×1080、390×844。
 - AppShell、Drawer、按钮、图标、圆角、状态色与标准 fixture 一致性记录。
 - OpenAPI lint、TypeScript client 生成、MSW 契约和 flow-to-API 覆盖报告。
-- 独立设计评审无 Critical/Important 未关闭项；仓库内本地复审已满足，Figma 节点需另行复查。
+- 独立设计终审无 Critical/Important/Minor 未关闭项；完整报告为 `/tmp/zhili-figma-key-screens-review.md`。
 
 Code Connect 当前是明确的外部门槛：Pro 方案与未发布的本地组件不满足其 Organization/Enterprise + 已发布 Library 前置条件，状态为 `BLOCKED_EXTERNAL`，不会以静态文档或伪映射替代真实连接。
 
