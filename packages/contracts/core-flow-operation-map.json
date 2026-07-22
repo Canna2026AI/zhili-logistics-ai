@@ -54,7 +54,16 @@
     "verifyAsSubject",
     "endPermissionSimulation"
   ],
-  "F09": ["syncDeviceEvents", "getDeviceConflict", "resolveDeviceConflict"],
+  "F09": [
+    "uploadDeviceMedia",
+    "syncDeviceEvents",
+    "updateDeliveryTaskStatus",
+    "captureProofOfDelivery",
+    "getDeviceConflict",
+    "resolveDeviceConflict",
+    "authorizeDeviceTakeoverExport",
+    "uploadEncryptedDeviceTakeoverExport"
+  ],
   "F10": [
     "createImportJob",
     "proposeAiMapping",

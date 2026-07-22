@@ -32,7 +32,31 @@ docs/ infra/ tests/e2e/
 
 资源根：`auth`、`tenants`、`organizations`、`users`、`customers`、`master-data`、`channels`、`quotes`、`waybills`、`warehouse`、`linehaul`、`tracking`、`issues`、`finance`、`reports`、`automations`、`integrations`、`ai`、`audit-logs`。
 
-## 4. 数据与安全
+## 4. PDA 尾程事件与媒体序列
+
+```mermaid
+sequenceDiagram
+  participant PDA
+  participant Media as Media reservation
+  participant API as Last-mile API
+  participant Task as DeliveryTask
+  PDA->>Media: uploadDeviceMedia(deviceEventId, mediaId, hash, bytes)
+  Media-->>PDA: UPLOADED (scoped, unclaimed)
+  PDA->>API: transition/POD(deviceEventId, mediaRefs, If-Match)
+  API->>Media: atomic claim by same deviceEventId and scope
+  API->>Task: validate and commit canonical transition
+  Task-->>API: authoritative status and version
+  API-->>PDA: receipt(deviceEventId, disposition, deliveryTask, claimedMediaRefs)
+  PDA->>PDA: clear matching event and claimed media atomically
+```
+
+- 尾程状态机只允许 `PLANNED → PALLETIZED → LOADED → OUT_FOR_DELIVERY → COMPLETED`；主链上每个状态均可转 `EXCEPTION`，`EXCEPTION` 终态不可再转移。
+- `uploadDeviceMedia` 的 `UPLOADED` 只表示作用域保留字节已被接受。只有在线 transition/POD 原子 claim，或 `syncDeviceEvents` 对同一 `eventId` 返回 `APPLIED/DUPLICATE`，才能使媒体进入 `READY`。
+- 在线 transition/POD 都必须提交客户端 `deviceEventId`。客户端只能使用专用响应中的 `deliveryTask.status/version`，不能根据意图本地推导状态或将版本 `+1`。
+- 成功清理依据是：响应 `deviceEventId` 与本地事件一致，`disposition` 为 `APPLIED/DUPLICATE`，并且只删除 `claimedMediaRefs`。其他结果保留队列与媒体。
+- 管理员接管是两阶段服务端流程：先用 `pda.takeover.export` 获取不超过 5 分钟的 authorizationId 和 RSA-OAEP-256 公钥 JWK，再上传包含全量 manifest/events/media 的 AES-256-GCM 密文；AES key 仅用授权公钥封装。只有服务端 receipt 为 `VERIFIED` 且 manifest/ciphertext SHA-256 都一致时才能清理；明文或客户端自授权一律禁止。
+
+## 5. 数据与安全
 
 - 所有租户业务表带 `tenant_id`；请求事务写入租户上下文，RLS 默认拒绝。
 - 会话使用短期访问令牌和可轮换 HttpOnly 刷新会话；密码用 Argon2id；微信通过官方 OAuth 适配器。
@@ -41,7 +65,7 @@ docs/ infra/ tests/e2e/
 - 金额与测量值使用 Decimal；时间存 UTC 与来源时区；币种、重量和尺寸单位显式保存。
 - 公开 API 使用作用域、限流、IP 策略、密钥轮换、幂等、退避重试和死信队列。
 
-## 5. 非功能基线
+## 6. 非功能基线
 
 - 100 租户、单租户百万级运单、300 在线用户、仓库峰值 100 次扫描/秒。
 - 普通查询 p95 < 500ms，在线扫描确认 p95 < 250ms；大导入、导出和报表异步执行。

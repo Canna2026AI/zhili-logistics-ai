@@ -67,6 +67,13 @@ function parseOperationContracts(source: string) {
   return operations;
 }
 
+function operationBlock(operationId: string): string {
+  const start = contract.indexOf(`      operationId: ${operationId}`);
+  if (start === -1) return "";
+  const end = contract.indexOf("\n  /", start);
+  return contract.slice(start, end === -1 ? undefined : end);
+}
+
 describe("OpenAPI UI-foundation gate", () => {
   it("covers every operation used by the ten core flows", () => {
     const operationIds = new Set(
@@ -117,11 +124,119 @@ describe("OpenAPI UI-foundation gate", () => {
     );
   });
 
+  it("defines palletized as a canonical last-mile task transition", () => {
+    expect(contract).toContain("DeliveryTaskStatus:");
+    expect(contract).toContain(
+      "enum: [PLANNED, PALLETIZED, LOADED, OUT_FOR_DELIVERY, COMPLETED, EXCEPTION]",
+    );
+    expect(contract).toContain(
+      "PLANNED -> PALLETIZED -> LOADED -> OUT_FOR_DELIVERY -> COMPLETED",
+    );
+    expect(contract).toContain(
+      "PLANNED, PALLETIZED, LOADED, OUT_FOR_DELIVERY and COMPLETED may each transition to EXCEPTION",
+    );
+    expect(contract).toContain(
+      "required: [deviceEventId, targetStatus, occurredAt, mediaRefs, scanEvidence]",
+    );
+  });
+
+  it("makes online last-mile transition and POD receipts server-authoritative", () => {
+    const transition = operationBlock("updateDeliveryTaskStatus");
+    const pod = operationBlock("captureProofOfDelivery");
+
+    expect(transition).toContain(
+      "$ref: '#/components/schemas/DeliveryTaskTransitionResponse'",
+    );
+    expect(pod).toContain(
+      "$ref: '#/components/schemas/ProofOfDeliveryCaptureResponse'",
+    );
+    expect(contract).toContain(
+      "required: [deviceEventId, disposition, deliveryTask, claimedMediaRefs]",
+    );
+    expect(contract).toContain(
+      "required: [deviceEventId, disposition, deliveryTask, proofOfDelivery, claimedMediaRefs]",
+    );
+    expect(contract).toContain(
+      "required: [deviceEventId, recipientName, signedAt, evidenceRefs]",
+    );
+    expect(contract).toContain(
+      "Only this authoritative deliveryTask status and version may update or clear client state",
+    );
+  });
+
+  it("models device media as scoped reservations claimed by an applied device event", () => {
+    expect(contract).toContain(
+      "required: [mediaId, eventId, scope, status, objectRef, expiresAt]",
+    );
+    expect(contract).toContain(
+      "enum: [UPLOADED, SCANNING, READY, REJECTED]",
+    );
+    expect(contract).toContain(
+      "READY only after an atomic transition or POD claim, or after device event sync returns APPLIED or DUPLICATE",
+    );
+  });
+
+  it("authorizes and receives only encrypted PDA takeover exports", () => {
+    const authorize = operationBlock("authorizeDeviceTakeoverExport");
+    const upload = operationBlock("uploadEncryptedDeviceTakeoverExport");
+
+    for (const operation of [authorize, upload]) {
+      expect(operation).toContain("x-feature-id: PDA-04");
+      expect(operation).toContain("x-permission: pda.takeover.export");
+      expect(operation).toContain("x-audit-event:");
+      expect(operation).toContain("#/components/parameters/IdempotencyKey");
+      expect(operation).toContain("#/components/responses/Forbidden");
+      expect(operation).toContain("#/components/responses/ValidationFailed");
+    }
+
+    expect(contract).toContain(
+      "required: [authorizationId, deviceId, scope, manifestHash, eventCount, mediaCount, expiresAt, keyEncryptionAlgorithm, contentEncryptionAlgorithm, publicKeyJwk, maxCiphertextBytes, status]",
+    );
+    expect(contract).toContain("enum: [RSA-OAEP-256]");
+    expect(contract).toContain("enum: [A256GCM]");
+    expect(contract).toContain(
+      "required: [manifestHash, ciphertextHash, ciphertext, iv, wrappedKey]",
+    );
+    expect(contract).toContain(
+      "required: [exportId, authorizationId, deviceId, scope, manifestHash, ciphertextHash, eventCount, mediaCount, checksumAlgorithm, status, receivedAt]",
+    );
+    expect(contract).toContain("enum: [RECEIVED, VERIFIED, REJECTED]");
+  });
+
   it("has generated TypeScript path types", () => {
     const generatedPath = resolve(packageRoot, "src/generated/api.d.ts");
     expect(existsSync(generatedPath)).toBe(true);
     expect(readFileSync(generatedPath, "utf8")).toContain(
       "export interface paths",
+    );
+  });
+
+  it("generates dedicated authoritative PDA receipt and takeover types", () => {
+    const generated = readFileSync(
+      resolve(packageRoot, "src/generated/api.d.ts"),
+      "utf8",
+    );
+
+    for (const schemaName of [
+      "DeliveryTaskStatus",
+      "DeliveryTaskTransitionReceipt",
+      "DeliveryTaskTransitionResponse",
+      "ProofOfDeliveryCaptureReceipt",
+      "ProofOfDeliveryCaptureResponse",
+      "DeviceTakeoverExportAuthorization",
+      "DeviceTakeoverExportReceipt",
+    ]) {
+      expect(generated).toContain(`${schemaName}:`);
+    }
+    expect(generated).toContain("| 'PALLETIZED'");
+    expect(generated).toContain(
+      "deviceEventId: components['schemas']['Ulid'];",
+    );
+    expect(generated).toContain(
+      "deliveryTask: components['schemas']['DeliveryTask'];",
+    );
+    expect(generated).toContain(
+      "publicKeyJwk: components['schemas']['RsaOaepPublicJwk'];",
     );
   });
 
