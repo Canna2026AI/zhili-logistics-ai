@@ -1,31 +1,193 @@
 -- Reverse only the B1 persistence-alignment migration. Foundation and 0001 domain objects remain.
 -- The migration is intentionally explicit: no schema-, role-, extension-, or unrelated-table drops.
 
-DROP FUNCTION IF EXISTS control_plane_end_impersonation(text, text, text, text, text, text);
-DROP FUNCTION IF EXISTS control_plane_start_impersonation(
+-- Runtime roles never belong to a capability owner. The retained offline deploy ADMIN membership
+-- lets the same non-superuser schema owner return the named functions to the table owner so that
+-- down/up remains repeatable without granting runtime identities direct table access.
+DO $$
+DECLARE
+  deploy_is_superuser boolean;
+  routine_signature text;
+  schema_owner text;
+BEGIN
+  SELECT role_row.rolsuper INTO deploy_is_superuser
+  FROM pg_catalog.pg_roles role_row WHERE role_row.rolname = current_user;
+  SELECT owner_role.rolname
+  INTO schema_owner
+  FROM pg_catalog.pg_class table_row
+  JOIN pg_catalog.pg_namespace namespace_row ON namespace_row.oid = table_row.relnamespace
+  JOIN pg_catalog.pg_roles owner_role ON owner_role.oid = table_row.relowner
+  WHERE namespace_row.nspname = 'public' AND table_row.relname = 'tenants';
+  IF NOT deploy_is_superuser THEN
+    IF schema_owner <> current_user THEN
+      RAISE EXCEPTION 'non-superuser down must run as the schema owner'
+        USING ERRCODE = '42501';
+    END IF;
+    EXECUTE pg_catalog.format(
+      'GRANT zhili_auth_capability_owner TO %I WITH SET TRUE, INHERIT TRUE',
+      current_user
+    );
+    EXECUTE pg_catalog.format(
+      'GRANT zhili_control_capability_owner TO %I WITH SET TRUE, INHERIT TRUE',
+      current_user
+    );
+  END IF;
+  FOREACH routine_signature IN ARRAY ARRAY[
+    'public.auth_lookup_password(text,text)',
+    'public.auth_lookup_refresh_token(text)',
+    'public.auth_consume_login_throttle(text,text,text,boolean,timestamptz)',
+    'public.auth_resolve_tenant(text)',
+    'public.auth_lookup_oauth_state(text)',
+    'public.control_plane_create_tenant_legacy(text,text,text,text,text,text,text,text)',
+    'public.control_plane_create_tenant(text,text,text,text,text,text,text,text,text,text)',
+    'public.control_plane_set_tenant_status_legacy(text,text,text,bigint,text,text,text,text)',
+    'public.control_plane_set_tenant_status(text,text,text,bigint,text,text,text,text)',
+    'public.control_plane_set_entitlement(text,text,text,text,text,integer,text,bigint,timestamptz,timestamptz,bigint,text,text,text)',
+    'public.control_plane_replace_entitlements(text,text,text,bigint,jsonb,text,text,text)',
+    'public.control_plane_start_impersonation(text,text,text,text,text,integer,text,text,text)',
+    'public.control_plane_end_impersonation(text,text,text,text,text,text)'
+  ]
+  LOOP
+    EXECUTE pg_catalog.format(
+      'ALTER FUNCTION %s OWNER TO %I', routine_signature, schema_owner
+    );
+  END LOOP;
+  IF NOT deploy_is_superuser THEN
+    EXECUTE pg_catalog.format(
+      'GRANT zhili_auth_capability_owner TO %I WITH SET TRUE, INHERIT FALSE',
+      current_user
+    );
+    EXECUTE pg_catalog.format(
+      'GRANT zhili_control_capability_owner TO %I WITH SET TRUE, INHERIT FALSE',
+      current_user
+    );
+  END IF;
+END
+$$;
+
+DROP POLICY capability_auth_tenants_select ON public.tenants;
+DROP POLICY capability_auth_users_select ON public.users;
+DROP POLICY capability_auth_refresh_tokens_select ON public.refresh_tokens;
+DROP POLICY capability_auth_refresh_families_select ON public.refresh_token_families;
+DROP POLICY capability_auth_oauth_states_select ON public.oauth_states;
+DROP POLICY capability_control_tenants_select ON public.tenants;
+DROP POLICY capability_control_tenants_insert ON public.tenants;
+DROP POLICY capability_control_tenants_update ON public.tenants;
+DROP POLICY capability_control_users_select ON public.users;
+DROP POLICY capability_control_assignments_select ON public.user_role_assignments;
+DROP POLICY capability_control_roles_select ON public.roles;
+DROP POLICY capability_control_role_grants_select ON public.role_grants;
+DROP POLICY capability_control_idempotency_select ON public.idempotency_records;
+DROP POLICY capability_control_idempotency_insert ON public.idempotency_records;
+DROP POLICY capability_control_idempotency_update ON public.idempotency_records;
+DROP POLICY capability_control_entitlements_select ON public.tenant_entitlements;
+DROP POLICY capability_control_entitlements_insert ON public.tenant_entitlements;
+DROP POLICY capability_control_entitlements_update ON public.tenant_entitlements;
+DROP POLICY capability_control_impersonation_select ON public.impersonation_sessions;
+DROP POLICY capability_control_impersonation_insert ON public.impersonation_sessions;
+DROP POLICY capability_control_impersonation_update ON public.impersonation_sessions;
+DROP POLICY capability_control_audit_insert ON public.audit_events;
+DROP POLICY capability_control_outbox_insert ON public.outbox_events;
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM
+  zhili_auth_capability_owner, zhili_control_capability_owner;
+REVOKE USAGE ON SCHEMA public FROM
+  zhili_auth_capability_owner, zhili_control_capability_owner;
+
+DROP FUNCTION IF EXISTS public.control_plane_end_impersonation(text, text, text, text, text, text);
+DROP FUNCTION IF EXISTS public.control_plane_start_impersonation(
   text, text, text, text, text, integer, text, text, text
 );
-DROP FUNCTION IF EXISTS control_plane_create_tenant(
+DROP FUNCTION IF EXISTS public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+);
+ALTER FUNCTION public.control_plane_set_tenant_status_legacy(
+  text, text, text, bigint, text, text, text, text
+) RENAME TO control_plane_set_tenant_status;
+GRANT EXECUTE ON FUNCTION public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) TO zhili_control_plane;
+ALTER FUNCTION public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) SET search_path = pg_catalog, public;
+
+DROP FUNCTION IF EXISTS public.control_plane_create_tenant(
   text, text, text, text, text, text, text, text, text, text
 );
-ALTER FUNCTION control_plane_create_tenant_legacy(
+ALTER FUNCTION public.control_plane_create_tenant_legacy(
   text, text, text, text, text, text, text, text
 ) RENAME TO control_plane_create_tenant;
-GRANT EXECUTE ON FUNCTION control_plane_create_tenant(
+GRANT EXECUTE ON FUNCTION public.control_plane_create_tenant(
   text, text, text, text, text, text, text, text
 ) TO zhili_control_plane;
-DROP FUNCTION IF EXISTS auth_lookup_oauth_state(text);
-DROP FUNCTION IF EXISTS auth_resolve_tenant(text);
+ALTER FUNCTION public.control_plane_create_tenant(
+  text, text, text, text, text, text, text, text
+) SET search_path = pg_catalog, public;
+ALTER FUNCTION public.control_plane_set_entitlement(
+  text, text, text, text, text, integer, text, bigint,
+  timestamptz, timestamptz, bigint, text, text, text
+) SET search_path = pg_catalog, public;
+DROP FUNCTION IF EXISTS public.auth_lookup_oauth_state(text);
+DROP FUNCTION IF EXISTS public.auth_resolve_tenant(text);
 
 -- platform.impersonate is 0002 seed data; remove dependent 0002 grants before the action row.
 DELETE FROM role_grants WHERE action_code = 'platform.impersonate';
 DELETE FROM permission_actions WHERE action_code = 'platform.impersonate';
 
-DROP FUNCTION IF EXISTS control_plane_replace_entitlements(
+DROP FUNCTION IF EXISTS public.control_plane_replace_entitlements(
   text, text, text, bigint, jsonb, text, text, text
 );
-DROP FUNCTION IF EXISTS auth_consume_login_throttle(text, text, text, boolean, timestamptz);
-DROP FUNCTION IF EXISTS auth_lookup_refresh_token(text);
+DROP FUNCTION IF EXISTS public.auth_consume_login_throttle(text, text, text, boolean, timestamptz);
+DROP FUNCTION IF EXISTS public.auth_lookup_refresh_token(text);
+
+CREATE OR REPLACE FUNCTION public.auth_lookup_password(p_account text, p_tenant_hint text)
+RETURNS TABLE (tenant_id text, user_id text, password_hash text)
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = pg_catalog, public
+AS $$
+  WITH normalized_input AS (
+    SELECT
+      lower(btrim(p_account)) AS account,
+      nullif(lower(btrim(p_tenant_hint)), '') AS tenant_hint
+  ),
+  candidates AS MATERIALIZED (
+    SELECT user_row.tenant_id, user_row.id AS user_id, user_row.password_hash
+    FROM public.users user_row
+    JOIN public.tenants tenant_row ON tenant_row.id = user_row.tenant_id
+    CROSS JOIN normalized_input input_row
+    WHERE user_row.login_name_normalized = input_row.account
+      AND (input_row.tenant_hint IS NULL OR tenant_row.slug = input_row.tenant_hint)
+      AND tenant_row.status = 'ACTIVE'
+      AND user_row.status = 'ACTIVE'
+      AND user_row.password_hash IS NOT NULL
+    ORDER BY user_row.tenant_id, user_row.id
+    LIMIT 2
+  ),
+  candidate_rollup AS (
+    SELECT
+      count(*) AS candidate_count,
+      min(candidates.tenant_id) AS tenant_id,
+      min(candidates.user_id) AS user_id,
+      min(candidates.password_hash) AS password_hash
+    FROM candidates
+  )
+  SELECT
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.tenant_id ELSE '01J0000000000000000000000A' END,
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.user_id ELSE '01J0000000000000000000000B' END,
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.password_hash
+      ELSE '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1kdW1teQ$YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk'
+    END
+  FROM candidate_rollup
+$$;
+COMMENT ON FUNCTION public.auth_lookup_password(text, text) IS
+  'Always returns one verifier row. The auth service must perform one Argon2id verify and return the same rate-limited generic failure for every mismatch.';
+REVOKE ALL ON FUNCTION public.auth_lookup_password(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.auth_lookup_password(text, text) TO zhili_auth;
 
 -- Remove the only outward foreign key from a pre-0002 table before dropping the new relations.
 ALTER TABLE device_event_media_claims
@@ -88,7 +250,8 @@ ALTER TABLE customers DROP CONSTRAINT customers_settlement_currency_check;
 ALTER TABLE organizations DROP CONSTRAINT organizations_type_check;
 ALTER TABLE tenants
   DROP CONSTRAINT tenants_timezone_check,
-  DROP CONSTRAINT tenants_currency_check;
+  DROP CONSTRAINT tenants_currency_check,
+  DROP CONSTRAINT tenants_reserved_sentinel_check;
 ALTER TABLE users DROP CONSTRAINT users_mobile_check;
 ALTER TABLE customer_credit_policies
   DROP CONSTRAINT customer_credit_policies_contract_shape_check,

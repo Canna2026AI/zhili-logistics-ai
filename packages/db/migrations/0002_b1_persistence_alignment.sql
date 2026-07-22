@@ -1,3 +1,51 @@
+-- Capability functions are deliberately owned by isolated, non-login roles instead of the
+-- migration/table owner. PostgreSQL 16+ records the non-superuser CREATEROLE principal that
+-- creates them as their ADMIN member. That single NOINHERIT deploy relationship is retained so
+-- down/up remains maintainable; runtime roles are never members and receive EXECUTE only.
+DO $$
+DECLARE
+  deploy_is_superuser boolean;
+BEGIN
+  SELECT role_row.rolsuper INTO deploy_is_superuser
+  FROM pg_catalog.pg_roles role_row WHERE role_row.rolname = current_user;
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'zhili_auth_capability_owner') THEN
+    CREATE ROLE zhili_auth_capability_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'zhili_control_capability_owner') THEN
+    CREATE ROLE zhili_control_capability_owner
+      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_roles
+    WHERE rolname IN ('zhili_auth_capability_owner', 'zhili_control_capability_owner')
+      AND (rolcanlogin OR rolsuper OR rolcreatedb OR rolcreaterole OR rolinherit
+           OR rolreplication OR rolbypassrls)
+  ) THEN
+    RAISE EXCEPTION 'capability owner role attributes are unsafe' USING ERRCODE = '42501';
+  END IF;
+  IF NOT deploy_is_superuser THEN
+    EXECUTE pg_catalog.format(
+      'GRANT zhili_auth_capability_owner TO %I WITH SET TRUE, INHERIT FALSE',
+      current_user
+    );
+    EXECUTE pg_catalog.format(
+      'GRANT zhili_control_capability_owner TO %I WITH SET TRUE, INHERIT FALSE',
+      current_user
+    );
+    IF NOT pg_catalog.pg_has_role(current_user, 'zhili_auth_capability_owner', 'SET')
+       OR NOT pg_catalog.pg_has_role(current_user, 'zhili_control_capability_owner', 'SET') THEN
+      RAISE EXCEPTION 'non-superuser deploy role requires SET administration of capability owners'
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
+END
+$$;
+
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE, CREATE ON SCHEMA public
+TO zhili_auth_capability_owner, zhili_control_capability_owner;
+
 CREATE TABLE "accepted_quote_order_links" (
 	"id" text PRIMARY KEY NOT NULL,
 	"tenant_id" text NOT NULL,
@@ -920,6 +968,7 @@ ALTER TABLE "customers" ADD CONSTRAINT "customers_settlement_currency_check" CHE
 ALTER TABLE "organizations" ADD CONSTRAINT "organizations_type_check" CHECK (organization_type = ANY (ARRAY['TENANT_ROOT'::text, 'BUSINESS_UNIT'::text, 'BRANCH'::text, 'PARTNER'::text, 'COMPANY'::text, 'DEPARTMENT'::text, 'SITE'::text, 'WAREHOUSE'::text, 'LOCATION'::text]));--> statement-breakpoint
 ALTER TABLE "tenants" ADD CONSTRAINT "tenants_timezone_check" CHECK (default_timezone IS NULL OR length(btrim(default_timezone)) BETWEEN 1 AND 64);--> statement-breakpoint
 ALTER TABLE "tenants" ADD CONSTRAINT "tenants_currency_check" CHECK (default_currency IS NULL OR default_currency ~ '^[A-Z]{3}$'::text);--> statement-breakpoint
+ALTER TABLE "tenants" ADD CONSTRAINT "tenants_reserved_sentinel_check" CHECK (id <> '00000000000000000000000000');--> statement-breakpoint
 ALTER TABLE "users" ADD CONSTRAINT "users_mobile_check" CHECK (mobile IS NULL OR length(btrim(mobile)) BETWEEN 3 AND 32);--> statement-breakpoint
 ALTER TABLE "customer_credit_policies" ADD CONSTRAINT "customer_credit_policies_contract_shape_check" CHECK ((payment_cycle_days IS NULL OR payment_cycle_days BETWEEN 0 AND 365) AND (credit_tier IS NULL OR credit_tier IN ('STANDARD', 'SILVER', 'GOLD', 'STRATEGIC')) AND (change_reason IS NULL OR length(btrim(change_reason)) BETWEEN 5 AND 500));--> statement-breakpoint
 ALTER TABLE "customer_credit_policies" ADD CONSTRAINT "customer_credit_policies_aggregate_version_check" CHECK (version >= 1);--> statement-breakpoint
@@ -1065,7 +1114,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE
   device_media_reservations
 TO zhili_app;
 
-CREATE FUNCTION auth_lookup_refresh_token(p_token_hash text)
+CREATE FUNCTION public.auth_lookup_refresh_token(p_token_hash text)
 RETURNS TABLE (
   token_id text,
   tenant_id text,
@@ -1080,7 +1129,7 @@ RETURNS TABLE (
 LANGUAGE sql
 SECURITY DEFINER
 STABLE
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
   WITH candidate AS MATERIALIZED (
     SELECT
@@ -1104,10 +1153,10 @@ AS $$
   SELECT * FROM candidate
   UNION ALL
   SELECT
-    '01J0000000000000000000000C',
-    '01J0000000000000000000000A',
-    '01J0000000000000000000000D',
-    '01J0000000000000000000000E',
+    '00000000000000000000000002',
+    '00000000000000000000000000',
+    '00000000000000000000000003',
+    '00000000000000000000000004',
     'REVOKED',
     'REVOKED',
     '1970-01-01 00:00:00+00'::timestamptz,
@@ -1116,13 +1165,13 @@ AS $$
   WHERE NOT EXISTS (SELECT 1 FROM candidate)
 $$;
 
-COMMENT ON FUNCTION auth_lookup_refresh_token(text) IS
+COMMENT ON FUNCTION public.auth_lookup_refresh_token(text) IS
   'Returns exactly one credential-shaped row for an opaque refresh hash. The auth service must reject all non-ACTIVE or expired rows generically and handle ROTATED reuse.';
-REVOKE ALL ON FUNCTION auth_lookup_refresh_token(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.auth_lookup_refresh_token(text) FROM PUBLIC;
 REVOKE ALL ON TABLE refresh_tokens, refresh_token_families FROM zhili_auth;
-GRANT EXECUTE ON FUNCTION auth_lookup_refresh_token(text) TO zhili_auth;
+GRANT EXECUTE ON FUNCTION public.auth_lookup_refresh_token(text) TO zhili_auth;
 
-CREATE FUNCTION auth_consume_login_throttle(
+CREATE FUNCTION public.auth_consume_login_throttle(
   p_bucket_id text,
   p_login_key_hash text,
   p_tenant_id text,
@@ -1132,10 +1181,10 @@ CREATE FUNCTION auth_consume_login_throttle(
 RETURNS TABLE (allowed boolean, failure_count integer, retry_after_seconds integer, bucket_version bigint)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
 DECLARE
-  bucket login_throttle_buckets%ROWTYPE;
+  bucket record;
 BEGIN
   IF p_bucket_id !~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'
      OR p_login_key_hash !~ '^[0-9a-f]{64}$' THEN
@@ -1149,7 +1198,7 @@ BEGIN
     RETURN;
   END IF;
 
-  INSERT INTO public.login_throttle_buckets (
+  INSERT INTO public.login_throttle_buckets AS throttle_bucket (
     id, tenant_id, login_key_hash, window_started_at, failure_count,
     blocked_until, version, created_at, updated_at
   ) VALUES (
@@ -1157,20 +1206,20 @@ BEGIN
   )
   ON CONFLICT (login_key_hash) DO UPDATE
   SET
-    tenant_id = COALESCE(login_throttle_buckets.tenant_id, EXCLUDED.tenant_id),
+    tenant_id = COALESCE(throttle_bucket.tenant_id, EXCLUDED.tenant_id),
     window_started_at = CASE
-      WHEN login_throttle_buckets.window_started_at <= p_now - interval '15 minutes'
-        THEN p_now ELSE login_throttle_buckets.window_started_at END,
+      WHEN throttle_bucket.window_started_at <= p_now - interval '15 minutes'
+        THEN p_now ELSE throttle_bucket.window_started_at END,
     failure_count = CASE
-      WHEN login_throttle_buckets.window_started_at <= p_now - interval '15 minutes'
-        THEN 1 ELSE login_throttle_buckets.failure_count + 1 END,
+      WHEN throttle_bucket.window_started_at <= p_now - interval '15 minutes'
+        THEN 1 ELSE throttle_bucket.failure_count + 1 END,
     blocked_until = CASE
       WHEN (CASE
-        WHEN login_throttle_buckets.window_started_at <= p_now - interval '15 minutes'
-          THEN 1 ELSE login_throttle_buckets.failure_count + 1 END) >= 5
-        THEN GREATEST(COALESCE(login_throttle_buckets.blocked_until, p_now), p_now + interval '15 minutes')
-      ELSE login_throttle_buckets.blocked_until END,
-    version = login_throttle_buckets.version + 1,
+        WHEN throttle_bucket.window_started_at <= p_now - interval '15 minutes'
+          THEN 1 ELSE throttle_bucket.failure_count + 1 END) >= 5
+        THEN GREATEST(COALESCE(throttle_bucket.blocked_until, p_now), p_now + interval '15 minutes')
+      ELSE throttle_bucket.blocked_until END,
+    version = throttle_bucket.version + 1,
     updated_at = p_now
   RETURNING * INTO bucket;
 
@@ -1182,14 +1231,14 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION auth_consume_login_throttle(text, text, text, boolean, timestamptz) IS
+COMMENT ON FUNCTION public.auth_consume_login_throttle(text, text, text, boolean, timestamptz) IS
   'Atomically consumes a distributed login throttle attempt without granting direct table access.';
-REVOKE ALL ON FUNCTION auth_consume_login_throttle(text, text, text, boolean, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.auth_consume_login_throttle(text, text, text, boolean, timestamptz) FROM PUBLIC;
 REVOKE ALL ON TABLE login_throttle_buckets FROM zhili_auth;
-GRANT EXECUTE ON FUNCTION auth_consume_login_throttle(text, text, text, boolean, timestamptz)
+GRANT EXECUTE ON FUNCTION public.auth_consume_login_throttle(text, text, text, boolean, timestamptz)
 TO zhili_auth;
 
-CREATE FUNCTION control_plane_replace_entitlements(
+CREATE FUNCTION public.control_plane_replace_entitlements(
   p_actor_tenant_id text,
   p_actor_user_id text,
   p_target_tenant_id text,
@@ -1202,7 +1251,7 @@ CREATE FUNCTION control_plane_replace_entitlements(
 RETURNS TABLE (tenant_id text, modules jsonb, tenant_version bigint, replayed boolean)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
 DECLARE
   idempotency_inserted integer;
@@ -1392,20 +1441,20 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION control_plane_replace_entitlements(
+REVOKE ALL ON FUNCTION public.control_plane_replace_entitlements(
   text, text, text, bigint, jsonb, text, text, text
 ) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION control_plane_replace_entitlements(
+GRANT EXECUTE ON FUNCTION public.control_plane_replace_entitlements(
   text, text, text, bigint, jsonb, text, text, text
 ) TO zhili_control_plane;
 
 -- Complete the pre-tenant OAuth boundary without granting zhili_auth direct tenant-table access.
-CREATE FUNCTION auth_resolve_tenant(p_slug text)
-RETURNS TABLE (tenant_id text)
+CREATE FUNCTION public.auth_resolve_tenant(p_slug text)
+RETURNS TABLE (tenant_id text, found boolean)
 LANGUAGE sql
 SECURITY DEFINER
 STABLE
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
   WITH candidate AS MATERIALIZED (
     SELECT tenant_row.id AS tenant_id
@@ -1415,18 +1464,18 @@ AS $$
       AND p_slug IS NOT NULL
     LIMIT 1
   )
-  SELECT candidate.tenant_id FROM candidate
+  SELECT candidate.tenant_id, true FROM candidate
   UNION ALL
-  SELECT '01J0000000000000000000000A'
+  SELECT '00000000000000000000000000', false
   WHERE NOT EXISTS (SELECT 1 FROM candidate)
 $$;
 
-CREATE FUNCTION auth_lookup_oauth_state(p_state_hash text)
-RETURNS TABLE (tenant_id text)
+CREATE FUNCTION public.auth_lookup_oauth_state(p_state_hash text)
+RETURNS TABLE (tenant_id text, found boolean)
 LANGUAGE sql
 SECURITY DEFINER
 STABLE
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
   WITH candidate AS MATERIALIZED (
     SELECT state_row.tenant_id
@@ -1439,32 +1488,32 @@ AS $$
       AND tenant_row.status = 'ACTIVE'
     LIMIT 1
   )
-  SELECT candidate.tenant_id FROM candidate
+  SELECT candidate.tenant_id, true FROM candidate
   UNION ALL
-  SELECT '01J0000000000000000000000A'
+  SELECT '00000000000000000000000000', false
   WHERE NOT EXISTS (SELECT 1 FROM candidate)
 $$;
 
-COMMENT ON FUNCTION auth_resolve_tenant(text) IS
-  'Resolves an active tenant slug to one tenant-shaped row; misses return the fixed dummy tenant.';
-COMMENT ON FUNCTION auth_lookup_oauth_state(text) IS
-  'Resolves a pending unexpired OAuth state digest to one tenant-shaped row; misses return the fixed dummy tenant. Consumption must still re-check hash, redirect, status and expiry under tenant RLS.';
-REVOKE ALL ON FUNCTION auth_resolve_tenant(text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION auth_lookup_oauth_state(text) FROM PUBLIC;
+COMMENT ON FUNCTION public.auth_resolve_tenant(text) IS
+  'Resolves an active tenant slug to one tenant-shaped row; misses return the reserved sentinel with found=false.';
+COMMENT ON FUNCTION public.auth_lookup_oauth_state(text) IS
+  'Resolves a pending unexpired OAuth state digest to one tenant-shaped row; misses return the reserved sentinel with found=false. Consumption must still re-check hash, redirect, status and expiry under tenant RLS.';
+REVOKE ALL ON FUNCTION public.auth_resolve_tenant(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.auth_lookup_oauth_state(text) FROM PUBLIC;
 REVOKE ALL ON TABLE tenants, oauth_states FROM zhili_auth;
-GRANT EXECUTE ON FUNCTION auth_resolve_tenant(text) TO zhili_auth;
-GRANT EXECUTE ON FUNCTION auth_lookup_oauth_state(text) TO zhili_auth;
+GRANT EXECUTE ON FUNCTION public.auth_resolve_tenant(text) TO zhili_auth;
+GRANT EXECUTE ON FUNCTION public.auth_lookup_oauth_state(text) TO zhili_auth;
 
 -- 0001 exposed an eight-argument tenant creator before timezone/currency were persistent. Keep its
 -- body solely for an exact down migration, but remove it from the capability surface.
-REVOKE ALL ON FUNCTION control_plane_create_tenant(
+REVOKE ALL ON FUNCTION public.control_plane_create_tenant(
   text, text, text, text, text, text, text, text
 ) FROM zhili_control_plane;
-ALTER FUNCTION control_plane_create_tenant(
+ALTER FUNCTION public.control_plane_create_tenant(
   text, text, text, text, text, text, text, text
 ) RENAME TO control_plane_create_tenant_legacy;
 
-CREATE FUNCTION control_plane_create_tenant(
+CREATE FUNCTION public.control_plane_create_tenant(
   p_actor_tenant_id text,
   p_actor_user_id text,
   p_target_tenant_id text,
@@ -1476,10 +1525,19 @@ CREATE FUNCTION control_plane_create_tenant(
   p_idempotency_key text,
   p_request_hash text
 )
-RETURNS TABLE (tenant_id text, status text, version bigint, replayed boolean)
+RETURNS TABLE (
+  tenant_id text,
+  display_name text,
+  slug text,
+  status text,
+  default_timezone text,
+  default_currency text,
+  version bigint,
+  replayed boolean
+)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
 DECLARE
   idempotency_inserted integer;
@@ -1564,8 +1622,14 @@ BEGIN
       RAISE EXCEPTION 'idempotent command is still in progress' USING ERRCODE = '40001';
     END IF;
     RETURN QUERY SELECT
-      stored_response->>'tenant_id', stored_response->>'status',
-      (stored_response->>'version')::bigint, true;
+      stored_response->>'tenant_id',
+      stored_response->>'display_name',
+      stored_response->>'slug',
+      stored_response->>'status',
+      stored_response->>'default_timezone',
+      stored_response->>'default_currency',
+      (stored_response->>'version')::bigint,
+      true;
     RETURN;
   END IF;
 
@@ -1578,6 +1642,8 @@ BEGIN
 
   response := jsonb_build_object(
     'tenant_id', p_target_tenant_id,
+    'display_name', p_display_name,
+    'slug', lower(btrim(p_slug)),
     'status', 'ACTIVE',
     'version', 1,
     'default_timezone', btrim(p_default_timezone),
@@ -1602,7 +1668,9 @@ BEGIN
   WHERE record_row.tenant_id = p_actor_tenant_id
     AND record_row.idempotency_key = p_idempotency_key;
 
-  RETURN QUERY SELECT p_target_tenant_id, 'ACTIVE'::text, 1::bigint, false;
+  RETURN QUERY SELECT
+    p_target_tenant_id, p_display_name, lower(btrim(p_slug)), 'ACTIVE'::text,
+    btrim(p_default_timezone), p_default_currency, 1::bigint, false;
 END;
 $$;
 
@@ -1610,7 +1678,7 @@ INSERT INTO permission_actions (action_code, resource_type, description) VALUES
   ('platform.impersonate', 'tenant', 'Start and end audited cross-tenant impersonation')
 ON CONFLICT (action_code) DO NOTHING;
 
-CREATE FUNCTION control_plane_start_impersonation(
+CREATE FUNCTION public.control_plane_start_impersonation(
   p_actor_tenant_id text,
   p_actor_user_id text,
   p_target_tenant_id text,
@@ -1632,7 +1700,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
 DECLARE
   idempotency_inserted integer;
@@ -1778,7 +1846,7 @@ BEGIN
 END;
 $$;
 
-CREATE FUNCTION control_plane_end_impersonation(
+CREATE FUNCTION public.control_plane_end_impersonation(
   p_actor_tenant_id text,
   p_actor_user_id text,
   p_target_tenant_id text,
@@ -1789,7 +1857,7 @@ CREATE FUNCTION control_plane_end_impersonation(
 RETURNS TABLE (impersonation_id text, tenant_id text, version bigint)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = pg_catalog, public
+SET search_path = pg_catalog
 AS $$
 DECLARE
   updated_version bigint;
@@ -1844,21 +1912,401 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION control_plane_create_tenant(
+REVOKE ALL ON FUNCTION public.control_plane_create_tenant(
   text, text, text, text, text, text, text, text, text, text
 ) FROM PUBLIC;
-REVOKE ALL ON FUNCTION control_plane_start_impersonation(
+REVOKE ALL ON FUNCTION public.control_plane_start_impersonation(
   text, text, text, text, text, integer, text, text, text
 ) FROM PUBLIC;
-REVOKE ALL ON FUNCTION control_plane_end_impersonation(
+REVOKE ALL ON FUNCTION public.control_plane_end_impersonation(
   text, text, text, text, text, text
 ) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION control_plane_create_tenant(
+GRANT EXECUTE ON FUNCTION public.control_plane_create_tenant(
   text, text, text, text, text, text, text, text, text, text
 ) TO zhili_control_plane;
-GRANT EXECUTE ON FUNCTION control_plane_start_impersonation(
+GRANT EXECUTE ON FUNCTION public.control_plane_start_impersonation(
   text, text, text, text, text, integer, text, text, text
 ) TO zhili_control_plane;
-GRANT EXECUTE ON FUNCTION control_plane_end_impersonation(
+GRANT EXECUTE ON FUNCTION public.control_plane_end_impersonation(
   text, text, text, text, text, text
 ) TO zhili_control_plane;
+
+-- Replace the 0001 status command so its authoritative response is sufficient to construct the
+-- OpenAPI Tenant resource without granting the caller direct tenant-table SELECT.
+REVOKE ALL ON FUNCTION public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) FROM zhili_control_plane;
+ALTER FUNCTION public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) RENAME TO control_plane_set_tenant_status_legacy;
+
+CREATE FUNCTION public.control_plane_set_tenant_status(
+  p_actor_tenant_id text,
+  p_actor_user_id text,
+  p_target_tenant_id text,
+  p_expected_version bigint,
+  p_new_status text,
+  p_operation_id text,
+  p_idempotency_key text,
+  p_request_hash text
+)
+RETURNS TABLE (
+  tenant_id text,
+  display_name text,
+  slug text,
+  status text,
+  version bigint,
+  replayed boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+  idempotency_inserted integer;
+  stored_hash text;
+  stored_response jsonb;
+  response jsonb;
+  updated_display_name text;
+  updated_slug text;
+  updated_status text;
+  updated_version bigint;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.tenants actor_tenant
+    JOIN public.users actor_user
+      ON actor_user.tenant_id = actor_tenant.id AND actor_user.id = p_actor_user_id
+    JOIN public.user_role_assignments assignment
+      ON assignment.tenant_id = actor_user.tenant_id AND assignment.user_id = actor_user.id
+    JOIN public.roles actor_role
+      ON actor_role.tenant_id = assignment.tenant_id AND actor_role.id = assignment.role_id
+    JOIN public.role_grants actor_grant
+      ON actor_grant.tenant_id = actor_role.tenant_id AND actor_grant.role_id = actor_role.id
+    WHERE actor_tenant.id = p_actor_tenant_id
+      AND actor_tenant.status = 'ACTIVE'
+      AND actor_user.status = 'ACTIVE'
+      AND assignment.status = 'ACTIVE'
+      AND assignment.valid_from <= now()
+      AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
+      AND actor_role.status = 'ACTIVE'
+      AND actor_grant.action_code = 'platform.tenant.manage'
+      AND actor_grant.effect = 'ALLOW'
+      AND actor_grant.status = 'ACTIVE'
+      AND actor_grant.data_scope_kind = 'PLATFORM'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM public.user_role_assignments denied_assignment
+        JOIN public.roles denied_role
+          ON denied_role.tenant_id = denied_assignment.tenant_id
+         AND denied_role.id = denied_assignment.role_id
+        JOIN public.role_grants denied_grant
+          ON denied_grant.tenant_id = denied_role.tenant_id
+         AND denied_grant.role_id = denied_role.id
+        WHERE denied_assignment.tenant_id = actor_user.tenant_id
+          AND denied_assignment.user_id = actor_user.id
+          AND denied_assignment.status = 'ACTIVE'
+          AND denied_assignment.valid_from <= now()
+          AND (denied_assignment.valid_until IS NULL OR denied_assignment.valid_until > now())
+          AND denied_role.status = 'ACTIVE'
+          AND denied_grant.action_code = 'platform.tenant.manage'
+          AND denied_grant.effect = 'DENY'
+          AND denied_grant.status = 'ACTIVE'
+          AND denied_grant.data_scope_kind = 'PLATFORM'
+      )
+  ) THEN
+    RAISE EXCEPTION 'control-plane actor is not authorized' USING ERRCODE = '42501';
+  END IF;
+
+  INSERT INTO public.idempotency_records (
+    id, tenant_id, idempotency_key, request_hash, expires_at
+  ) VALUES (
+    p_operation_id, p_actor_tenant_id, p_idempotency_key, p_request_hash,
+    now() + interval '24 hours'
+  )
+  ON CONFLICT ON CONSTRAINT idempotency_records_tenant_key_unique DO NOTHING;
+  GET DIAGNOSTICS idempotency_inserted = ROW_COUNT;
+  IF idempotency_inserted = 0 THEN
+    SELECT record_row.request_hash, record_row.response_body
+    INTO stored_hash, stored_response
+    FROM public.idempotency_records record_row
+    WHERE record_row.tenant_id = p_actor_tenant_id
+      AND record_row.idempotency_key = p_idempotency_key
+    FOR UPDATE;
+    IF stored_hash IS DISTINCT FROM p_request_hash THEN
+      RAISE EXCEPTION 'idempotency key request hash mismatch' USING ERRCODE = '23514';
+    END IF;
+    IF stored_response IS NULL THEN
+      RAISE EXCEPTION 'idempotent command is still in progress' USING ERRCODE = '40001';
+    END IF;
+    RETURN QUERY SELECT
+      stored_response->>'tenant_id',
+      COALESCE(stored_response->>'display_name', replay_tenant.display_name),
+      COALESCE(stored_response->>'slug', replay_tenant.slug),
+      stored_response->>'status',
+      (stored_response->>'version')::bigint,
+      true
+    FROM public.tenants replay_tenant
+    WHERE replay_tenant.id = stored_response->>'tenant_id';
+    RETURN;
+  END IF;
+
+  UPDATE public.tenants target_tenant
+  SET status = p_new_status, version = target_tenant.version + 1, updated_at = now()
+  WHERE target_tenant.id = p_target_tenant_id
+    AND target_tenant.version = p_expected_version
+  RETURNING target_tenant.display_name, target_tenant.slug,
+            target_tenant.status, target_tenant.version
+  INTO updated_display_name, updated_slug, updated_status, updated_version;
+  IF NOT FOUND THEN
+    IF EXISTS (SELECT 1 FROM public.tenants WHERE id = p_target_tenant_id) THEN
+      RAISE EXCEPTION 'tenant version is stale' USING ERRCODE = '40001';
+    END IF;
+    RAISE EXCEPTION 'tenant not found' USING ERRCODE = 'P0002';
+  END IF;
+
+  response := jsonb_build_object(
+    'tenant_id', p_target_tenant_id,
+    'display_name', updated_display_name,
+    'slug', updated_slug,
+    'status', updated_status,
+    'version', updated_version
+  );
+  INSERT INTO public.audit_events (
+    id, tenant_id, subject_id, request_id, action, entity_type, entity_id, payload
+  ) VALUES (
+    p_operation_id, p_actor_tenant_id, p_actor_user_id, p_operation_id,
+    'platform.tenant.status-changed', 'tenant', p_target_tenant_id,
+    jsonb_build_object('target_tenant_id', p_target_tenant_id, 'response', response)
+  );
+  INSERT INTO public.outbox_events (
+    id, tenant_id, aggregate_type, aggregate_id, aggregate_version,
+    event_type, payload, dedupe_key, trace_id
+  ) VALUES (
+    p_operation_id, p_target_tenant_id, 'TENANT', p_target_tenant_id, updated_version,
+    'TENANT_STATUS_CHANGED', response, 'control:' || p_operation_id, p_operation_id
+  );
+  UPDATE public.idempotency_records record_row
+  SET response_status = 200, response_headers = '{}'::jsonb, response_body = response
+  WHERE record_row.tenant_id = p_actor_tenant_id
+    AND record_row.idempotency_key = p_idempotency_key;
+
+  RETURN QUERY SELECT
+    p_target_tenant_id, updated_display_name, updated_slug,
+    updated_status, updated_version, false;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) TO zhili_control_plane;
+
+-- Rebuild the 0001 password capability around the same reserved tenant sentinel used by every
+-- other pre-tenant lookup. The explicit pg_catalog-only path prevents public-schema shadowing.
+CREATE OR REPLACE FUNCTION public.auth_lookup_password(p_account text, p_tenant_hint text)
+RETURNS TABLE (tenant_id text, user_id text, password_hash text)
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = pg_catalog
+AS $$
+  WITH normalized_input AS (
+    SELECT
+      lower(btrim(p_account)) AS account,
+      nullif(lower(btrim(p_tenant_hint)), '') AS tenant_hint
+  ),
+  candidates AS MATERIALIZED (
+    SELECT user_row.tenant_id, user_row.id AS user_id, user_row.password_hash
+    FROM public.users user_row
+    JOIN public.tenants tenant_row ON tenant_row.id = user_row.tenant_id
+    CROSS JOIN normalized_input input_row
+    WHERE user_row.login_name_normalized = input_row.account
+      AND (input_row.tenant_hint IS NULL OR tenant_row.slug = input_row.tenant_hint)
+      AND tenant_row.status = 'ACTIVE'
+      AND user_row.status = 'ACTIVE'
+      AND user_row.password_hash IS NOT NULL
+    ORDER BY user_row.tenant_id, user_row.id
+    LIMIT 2
+  ),
+  candidate_rollup AS (
+    SELECT
+      count(*) AS candidate_count,
+      min(candidates.tenant_id) AS tenant_id,
+      min(candidates.user_id) AS user_id,
+      min(candidates.password_hash) AS password_hash
+    FROM candidates
+  )
+  SELECT
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.tenant_id ELSE '00000000000000000000000000' END,
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.user_id ELSE '00000000000000000000000001' END,
+    CASE WHEN candidate_rollup.candidate_count = 1
+      THEN candidate_rollup.password_hash
+      ELSE '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1kdW1teQ$YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk'
+    END
+  FROM candidate_rollup
+$$;
+
+COMMENT ON FUNCTION public.auth_lookup_password(text, text) IS
+  'Always returns one verifier row. Misses use the reserved all-zero tenant sentinel; the auth service must keep a generic response.';
+REVOKE ALL ON FUNCTION public.auth_lookup_password(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.auth_lookup_password(text, text) TO zhili_auth;
+
+-- Harden every SECURITY DEFINER that survives the 0002 final state, including 0001 legacy
+-- commands. Their bodies already use explicit public table references; their runtime path is now
+-- pg_catalog-only and their owner is an isolated NOBYPASSRLS capability role.
+ALTER FUNCTION public.control_plane_create_tenant_legacy(
+  text, text, text, text, text, text, text, text
+) SET search_path = pg_catalog;
+ALTER FUNCTION public.control_plane_set_tenant_status_legacy(
+  text, text, text, bigint, text, text, text, text
+) SET search_path = pg_catalog;
+ALTER FUNCTION public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) SET search_path = pg_catalog;
+ALTER FUNCTION public.control_plane_set_entitlement(
+  text, text, text, text, text, integer, text, bigint,
+  timestamptz, timestamptz, bigint, text, text, text
+) SET search_path = pg_catalog;
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM
+  zhili_auth_capability_owner, zhili_control_capability_owner;
+
+GRANT SELECT ON TABLE
+  public.tenants,
+  public.users,
+  public.refresh_tokens,
+  public.refresh_token_families,
+  public.oauth_states
+TO zhili_auth_capability_owner;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.login_throttle_buckets
+TO zhili_auth_capability_owner;
+
+GRANT SELECT ON TABLE
+  public.tenants,
+  public.users,
+  public.user_role_assignments,
+  public.roles,
+  public.role_grants,
+  public.idempotency_records,
+  public.tenant_entitlements,
+  public.impersonation_sessions
+TO zhili_control_capability_owner;
+GRANT INSERT, UPDATE ON TABLE public.tenants TO zhili_control_capability_owner;
+GRANT INSERT, UPDATE ON TABLE public.idempotency_records TO zhili_control_capability_owner;
+GRANT INSERT, UPDATE ON TABLE public.tenant_entitlements TO zhili_control_capability_owner;
+GRANT INSERT, UPDATE ON TABLE public.impersonation_sessions TO zhili_control_capability_owner;
+GRANT INSERT ON TABLE public.audit_events, public.outbox_events
+TO zhili_control_capability_owner;
+
+CREATE POLICY capability_auth_tenants_select ON public.tenants
+  FOR SELECT TO zhili_auth_capability_owner USING (true);
+CREATE POLICY capability_auth_users_select ON public.users
+  FOR SELECT TO zhili_auth_capability_owner USING (true);
+CREATE POLICY capability_auth_refresh_tokens_select ON public.refresh_tokens
+  FOR SELECT TO zhili_auth_capability_owner USING (true);
+CREATE POLICY capability_auth_refresh_families_select ON public.refresh_token_families
+  FOR SELECT TO zhili_auth_capability_owner USING (true);
+CREATE POLICY capability_auth_oauth_states_select ON public.oauth_states
+  FOR SELECT TO zhili_auth_capability_owner USING (true);
+CREATE POLICY capability_auth_login_throttle_all ON public.login_throttle_buckets
+  FOR ALL TO zhili_auth_capability_owner USING (true) WITH CHECK (true);
+
+CREATE POLICY capability_control_tenants_select ON public.tenants
+  FOR SELECT TO zhili_control_capability_owner USING (true);
+CREATE POLICY capability_control_tenants_insert ON public.tenants
+  FOR INSERT TO zhili_control_capability_owner WITH CHECK (true);
+CREATE POLICY capability_control_tenants_update ON public.tenants
+  FOR UPDATE TO zhili_control_capability_owner USING (true) WITH CHECK (true);
+CREATE POLICY capability_control_users_select ON public.users
+  FOR SELECT TO zhili_control_capability_owner USING (true);
+CREATE POLICY capability_control_assignments_select ON public.user_role_assignments
+  FOR SELECT TO zhili_control_capability_owner USING (true);
+CREATE POLICY capability_control_roles_select ON public.roles
+  FOR SELECT TO zhili_control_capability_owner USING (true);
+CREATE POLICY capability_control_role_grants_select ON public.role_grants
+  FOR SELECT TO zhili_control_capability_owner USING (true);
+CREATE POLICY capability_control_idempotency_select ON public.idempotency_records
+  FOR SELECT TO zhili_control_capability_owner USING (true);
+CREATE POLICY capability_control_idempotency_insert ON public.idempotency_records
+  FOR INSERT TO zhili_control_capability_owner WITH CHECK (true);
+CREATE POLICY capability_control_idempotency_update ON public.idempotency_records
+  FOR UPDATE TO zhili_control_capability_owner USING (true) WITH CHECK (true);
+CREATE POLICY capability_control_entitlements_select ON public.tenant_entitlements
+  FOR SELECT TO zhili_control_capability_owner USING (true);
+CREATE POLICY capability_control_entitlements_insert ON public.tenant_entitlements
+  FOR INSERT TO zhili_control_capability_owner WITH CHECK (true);
+CREATE POLICY capability_control_entitlements_update ON public.tenant_entitlements
+  FOR UPDATE TO zhili_control_capability_owner USING (true) WITH CHECK (true);
+CREATE POLICY capability_control_impersonation_select ON public.impersonation_sessions
+  FOR SELECT TO zhili_control_capability_owner USING (true);
+CREATE POLICY capability_control_impersonation_insert ON public.impersonation_sessions
+  FOR INSERT TO zhili_control_capability_owner WITH CHECK (true);
+CREATE POLICY capability_control_impersonation_update ON public.impersonation_sessions
+  FOR UPDATE TO zhili_control_capability_owner USING (true) WITH CHECK (true);
+CREATE POLICY capability_control_audit_insert ON public.audit_events
+  FOR INSERT TO zhili_control_capability_owner WITH CHECK (true);
+CREATE POLICY capability_control_outbox_insert ON public.outbox_events
+  FOR INSERT TO zhili_control_capability_owner WITH CHECK (true);
+
+ALTER FUNCTION public.auth_lookup_password(text, text)
+  OWNER TO zhili_auth_capability_owner;
+ALTER FUNCTION public.auth_lookup_refresh_token(text)
+  OWNER TO zhili_auth_capability_owner;
+ALTER FUNCTION public.auth_consume_login_throttle(text, text, text, boolean, timestamptz)
+  OWNER TO zhili_auth_capability_owner;
+ALTER FUNCTION public.auth_resolve_tenant(text)
+  OWNER TO zhili_auth_capability_owner;
+ALTER FUNCTION public.auth_lookup_oauth_state(text)
+  OWNER TO zhili_auth_capability_owner;
+
+ALTER FUNCTION public.control_plane_create_tenant_legacy(
+  text, text, text, text, text, text, text, text
+) OWNER TO zhili_control_capability_owner;
+ALTER FUNCTION public.control_plane_create_tenant(
+  text, text, text, text, text, text, text, text, text, text
+) OWNER TO zhili_control_capability_owner;
+ALTER FUNCTION public.control_plane_set_tenant_status_legacy(
+  text, text, text, bigint, text, text, text, text
+) OWNER TO zhili_control_capability_owner;
+ALTER FUNCTION public.control_plane_set_tenant_status(
+  text, text, text, bigint, text, text, text, text
+) OWNER TO zhili_control_capability_owner;
+ALTER FUNCTION public.control_plane_set_entitlement(
+  text, text, text, text, text, integer, text, bigint,
+  timestamptz, timestamptz, bigint, text, text, text
+) OWNER TO zhili_control_capability_owner;
+ALTER FUNCTION public.control_plane_replace_entitlements(
+  text, text, text, bigint, jsonb, text, text, text
+) OWNER TO zhili_control_capability_owner;
+ALTER FUNCTION public.control_plane_start_impersonation(
+  text, text, text, text, text, integer, text, text, text
+) OWNER TO zhili_control_capability_owner;
+ALTER FUNCTION public.control_plane_end_impersonation(
+  text, text, text, text, text, text
+) OWNER TO zhili_control_capability_owner;
+
+REVOKE CREATE ON SCHEMA public
+FROM zhili_auth_capability_owner, zhili_control_capability_owner;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_auth_members role_membership
+    JOIN pg_catalog.pg_roles granted_role ON granted_role.oid = role_membership.roleid
+    JOIN pg_catalog.pg_roles member_role ON member_role.oid = role_membership.member
+    WHERE granted_role.rolname IN (
+      'zhili_auth_capability_owner', 'zhili_control_capability_owner'
+    )
+      AND member_role.rolname <> current_user
+  ) THEN
+    RAISE EXCEPTION 'only the offline deploy role may administer capability owners'
+      USING ERRCODE = '42501';
+  END IF;
+END
+$$;

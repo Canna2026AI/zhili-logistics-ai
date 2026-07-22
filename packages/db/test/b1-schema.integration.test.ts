@@ -160,8 +160,8 @@ const deniedTenantD = '01J1000000000000000000000D';
 const realPasswordHash =
   '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1yZWFsLWE$MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY';
 const dummyCredential = {
-  tenant_id: '01J0000000000000000000000A',
-  user_id: '01J0000000000000000000000B',
+  tenant_id: '00000000000000000000000000',
+  user_id: '00000000000000000000000001',
   password_hash:
     '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1kdW1teQ$YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODk',
 } as const;
@@ -1275,19 +1275,19 @@ describe('B1 ordered domain migration', () => {
       {
         proname: 'control_plane_create_tenant',
         security_definer: true,
-        config: ['search_path=pg_catalog, public'],
+        config: ['search_path=pg_catalog'],
         execute_allowed: true,
       },
       {
         proname: 'control_plane_set_entitlement',
         security_definer: true,
-        config: ['search_path=pg_catalog, public'],
+        config: ['search_path=pg_catalog'],
         execute_allowed: true,
       },
       {
         proname: 'control_plane_set_tenant_status',
         security_definer: true,
-        config: ['search_path=pg_catalog, public'],
+        config: ['search_path=pg_catalog'],
         execute_allowed: true,
       },
     ]);
@@ -1659,7 +1659,7 @@ describe('B1 ordered domain migration', () => {
     `;
     expect(boundary).toEqual({
       security_definer: true,
-      config: ['search_path=pg_catalog, public'],
+      config: ['search_path=pg_catalog'],
       execute_allowed: true,
       public_execute_allowed: false,
     });
@@ -1832,6 +1832,8 @@ describe('B1 ordered domain migration', () => {
     expect(remainingRoles.map(({ rolname }) => rolname)).toEqual([
       'zhili_app',
       'zhili_auth',
+      'zhili_auth_capability_owner',
+      'zhili_control_capability_owner',
       'zhili_control_plane',
       'zhili_worker',
     ]);

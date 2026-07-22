@@ -60,6 +60,7 @@ export const tenants = pgTable(
     check('tenants_version_check', sql`version >= 1`),
     check('tenants_timezone_check', sql`default_timezone IS NULL OR length(btrim(default_timezone)) BETWEEN 1 AND 64`),
     check('tenants_currency_check', sql`default_currency IS NULL OR default_currency ~ '^[A-Z]{3}$'::text`),
+    check('tenants_reserved_sentinel_check', sql`id <> '00000000000000000000000000'::text`),
     check('tenants_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();

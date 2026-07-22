@@ -3477,6 +3477,10 @@
           "name": "tenants_currency_check",
           "value": "default_currency IS NULL OR default_currency ~ '^[A-Z]{3}$'::text"
         },
+        "tenants_reserved_sentinel_check": {
+          "name": "tenants_reserved_sentinel_check",
+          "value": "id <> '00000000000000000000000000'::text"
+        },
         "tenants_timestamps_check": {
           "name": "tenants_timestamps_check",
           "value": "updated_at >= created_at"

@@ -36,6 +36,8 @@ const endImpersonationOperationA = '01J2000000000000000000085A';
 const deniedImpersonationB = '01J2000000000000000000086B';
 const deniedImpersonationOperationB = '01J2000000000000000000087B';
 const invalidTenantOperationA = '01J2000000000000000000088A';
+const statusTenantOperationA = '01J2000000000000000000089A';
+const sentinelTenantOperationA = '01J2000000000000000000089B';
 const refreshHash = 'a'.repeat(64);
 const loginHash = 'b'.repeat(64);
 const oauthStateHash = 'e'.repeat(64);
@@ -151,6 +153,12 @@ describe('B1 persistence alignment behavior', () => {
         ) VALUES ('01J2000000000000000000090A', ${tenantA}, ${userB}, ${organizationA})
       `
     ).rejects.toMatchObject({ code: '23503' });
+    await expect(
+      admin`
+        INSERT INTO tenants (id, slug, display_name)
+        VALUES ('00000000000000000000000000', 'reserved-sentinel', 'Reserved sentinel')
+      `
+    ).rejects.toMatchObject({ code: '23514' });
 
     await admin.unsafe("ALTER ROLE zhili_app WITH LOGIN PASSWORD 'alignment-app'");
     const appUrl = new URL(container.getConnectionUri());
@@ -210,7 +218,7 @@ describe('B1 persistence alignment behavior', () => {
       for (const boundary of authBoundaries) {
         expect(boundary).toMatchObject({
           security_definer: true,
-          config: ['search_path=pg_catalog, public'],
+          config: ['search_path=pg_catalog'],
           execute_allowed: true,
           public_execute_allowed: false,
         });
@@ -251,22 +259,22 @@ describe('B1 persistence alignment behavior', () => {
       expect(missingToken).toHaveLength(1);
       expect(missingToken[0]).toMatchObject({ token_status: 'REVOKED' });
 
+      expect(await auth`SELECT * FROM auth_resolve_tenant('alignment-a')`).toEqual([
+        { tenant_id: tenantA, found: true },
+      ]);
+      expect(await auth`SELECT * FROM auth_resolve_tenant('missing')`).toEqual([
+        { tenant_id: '00000000000000000000000000', found: false },
+      ]);
       expect(
-        await auth<{ tenant_id: string }[]>`SELECT tenant_id FROM auth_resolve_tenant('alignment-a')`
-      ).toEqual([{ tenant_id: tenantA }]);
-      expect(
-        await auth<{ tenant_id: string }[]>`SELECT tenant_id FROM auth_resolve_tenant('missing')`
-      ).toEqual([{ tenant_id: '01J0000000000000000000000A' }]);
-      expect(
-        await auth<{ tenant_id: string }[]>`
-          SELECT tenant_id FROM auth_lookup_oauth_state(${oauthStateHash})
+        await auth`
+          SELECT * FROM auth_lookup_oauth_state(${oauthStateHash})
         `
-      ).toEqual([{ tenant_id: tenantA }]);
+      ).toEqual([{ tenant_id: tenantA, found: true }]);
       expect(
-        await auth<{ tenant_id: string }[]>`
-          SELECT tenant_id FROM auth_lookup_oauth_state(${'f'.repeat(64)})
+        await auth`
+          SELECT * FROM auth_lookup_oauth_state(${'f'.repeat(64)})
         `
-      ).toEqual([{ tenant_id: '01J0000000000000000000000A' }]);
+      ).toEqual([{ tenant_id: '00000000000000000000000000', found: false }]);
 
       const attempts: {
         allowed: boolean;
@@ -435,22 +443,39 @@ describe('B1 persistence alignment behavior', () => {
         `
       ).rejects.toMatchObject({ code: '42501' });
 
-      const [createdTenant] = await control<
-        { replayed: boolean; status: string; tenant_id: string; version: string }[]
-      >`
-        SELECT tenant_id, status, version::text, replayed
+      const createTenant = () =>
+        control<
+          {
+            default_currency: string;
+            default_timezone: string;
+            display_name: string;
+            replayed: boolean;
+            slug: string;
+            status: string;
+            tenant_id: string;
+            version: string;
+          }[]
+        >`
+        SELECT tenant_id, display_name, slug, status, default_timezone, default_currency,
+               version::text, replayed
         FROM control_plane_create_tenant(
           ${tenantA}, ${userA}, ${createdTenantC}, 'alignment-c', 'Alignment C',
           'Asia/Shanghai', 'CNY', ${createTenantOperationA},
           'create-alignment-c', ${'1'.repeat(64)}
         )
       `;
+      const [createdTenant] = await createTenant();
       expect(createdTenant).toEqual({
         tenant_id: createdTenantC,
+        display_name: 'Alignment C',
+        slug: 'alignment-c',
         status: 'ACTIVE',
+        default_timezone: 'Asia/Shanghai',
+        default_currency: 'CNY',
         version: '1',
         replayed: false,
       });
+      expect(await createTenant()).toEqual([{ ...createdTenant, replayed: true }]);
       const [persistedDefaults] = await admin<
         { default_currency: string; default_timezone: string }[]
       >`
@@ -460,6 +485,33 @@ describe('B1 persistence alignment behavior', () => {
         default_timezone: 'Asia/Shanghai',
         default_currency: 'CNY',
       });
+
+      const changedStatus = await control`
+        SELECT tenant_id, display_name, slug, status, version::text, replayed
+        FROM control_plane_set_tenant_status(
+          ${tenantA}, ${userA}, ${createdTenantC}, 1, 'SUSPENDED',
+          ${statusTenantOperationA}, 'suspend-alignment-c', ${'5'.repeat(64)}
+        )
+      `;
+      expect(changedStatus).toEqual([
+        {
+          tenant_id: createdTenantC,
+          display_name: 'Alignment C',
+          slug: 'alignment-c',
+          status: 'SUSPENDED',
+          version: '2',
+          replayed: false,
+        },
+      ]);
+      await expect(
+        control`
+          SELECT * FROM control_plane_create_tenant(
+            ${tenantA}, ${userA}, '00000000000000000000000000',
+            'reserved-sentinel', 'Reserved sentinel', 'Asia/Shanghai', 'CNY',
+            ${sentinelTenantOperationA}, 'reserved-sentinel', ${'6'.repeat(64)}
+          )
+        `
+      ).rejects.toMatchObject({ code: '23514' });
 
       const [started] = await control<
         {

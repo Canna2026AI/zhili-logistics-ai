@@ -126,7 +126,14 @@ describe('B1 persistence alignment migration contract', () => {
     expect(sql).toContain('auth_lookup_refresh_token');
     expect(sql).toContain('auth_consume_login_throttle');
     expect(sql).toMatch(/SECURITY DEFINER/g);
-    expect(sql).toMatch(/SET search_path = pg_catalog, public/g);
+    expect(sql).toMatch(/SET search_path = pg_catalog/g);
+    expect(sql).not.toMatch(/SET search_path = pg_catalog, public/g);
+    expect(sql).toContain('zhili_auth_capability_owner');
+    expect(sql).toContain('zhili_control_capability_owner');
+    expect(sql).toContain('ALTER FUNCTION public.auth_lookup_password');
+    expect(sql).toContain('ALTER FUNCTION public.control_plane_set_tenant_status');
+    expect(sql).toContain('ALTER FUNCTION public.control_plane_set_entitlement');
+    expect(sql).toContain('REVOKE CREATE ON SCHEMA public FROM PUBLIC');
     expect(sql).toMatch(/REVOKE ALL ON FUNCTION[\s\S]+FROM PUBLIC/g);
     expect(sql).toMatch(/GRANT EXECUTE ON FUNCTION[\s\S]+TO zhili_auth/g);
     expect(sql).not.toMatch(/GRANT (?:SELECT|INSERT|UPDATE|DELETE) ON ALL TABLES TO zhili_auth/);
@@ -143,6 +150,9 @@ describe('B1 persistence alignment migration contract', () => {
     expect(sql).toContain('control_plane_start_impersonation');
     expect(sql).toContain('control_plane_end_impersonation');
     expect(sql).toContain("'platform.impersonate'");
+    expect(sql).toContain("'00000000000000000000000000'");
+    expect(sql).toContain('tenants_reserved_sentinel_check');
+    expect(sql).toMatch(/RETURNS TABLE \(tenant_id text, found boolean\)/g);
   });
 
   it('ships an explicit 0002-only down migration and records a snapshot', async () => {
