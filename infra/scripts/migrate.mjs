@@ -22,9 +22,15 @@ try {
   const adminUrl = parseDatabaseUrl('ADMIN_DATABASE_URL');
   const apiUrl = parseDatabaseUrl('DATABASE_URL', 'zhili_api_login');
   const workerUrl = parseDatabaseUrl('WORKER_DATABASE_URL', 'zhili_worker_login');
+  const adminPassword = requiredEnvironment('POSTGRES_ADMIN_PASSWORD');
+  const apiPassword = requiredEnvironment('POSTGRES_API_PASSWORD');
+  const workerPassword = requiredEnvironment('POSTGRES_WORKER_PASSWORD');
   const migrationsFolder = requiredEnvironment('MIGRATIONS_FOLDER');
   assertSameDatabase(adminUrl, apiUrl);
   assertSameDatabase(adminUrl, workerUrl);
+  assertUrlPassword(adminUrl, adminPassword);
+  assertUrlPassword(apiUrl, apiPassword);
+  assertUrlPassword(workerUrl, workerPassword);
 
   admin = postgres(adminUrl.toString(), {
     max: 1,
@@ -37,8 +43,8 @@ try {
   await runStage('GROUP_ROLE_BOOTSTRAP_FAILED', () => admin.unsafe(groupRolesSql));
   await runStage('DRIZZLE_MIGRATION_FAILED', () => migrate(drizzle(admin), { migrationsFolder }));
 
-  await runStage('ROLE_PROVISION_FAILED', () => normalizeLogin(LOGIN_ROLES[0], apiUrl.password));
-  await runStage('ROLE_PROVISION_FAILED', () => normalizeLogin(LOGIN_ROLES[1], workerUrl.password));
+  await runStage('ROLE_PROVISION_FAILED', () => normalizeLogin(LOGIN_ROLES[0], apiPassword));
+  await runStage('ROLE_PROVISION_FAILED', () => normalizeLogin(LOGIN_ROLES[1], workerPassword));
   await assertRoles();
   console.log('MIGRATE_OK');
 } catch (error) {
@@ -156,6 +162,18 @@ function assertSameDatabase(adminUrl, candidateUrl) {
     adminUrl.pathname !== candidateUrl.pathname
   ) {
     throw new MigrationFailure('DATABASE_TARGET_MISMATCH');
+  }
+}
+
+function assertUrlPassword(url, rawPassword) {
+  let decodedPassword;
+  try {
+    decodedPassword = decodeURIComponent(url.password);
+  } catch {
+    throw new MigrationFailure('DATABASE_URL_INVALID');
+  }
+  if (decodedPassword !== rawPassword) {
+    throw new MigrationFailure('DATABASE_PASSWORD_MISMATCH');
   }
 }
 

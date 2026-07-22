@@ -5,29 +5,6 @@ set -eu
 REPOSITORY_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 cd "$REPOSITORY_ROOT"
 
-COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-zhili-task6-$$}
-COMPOSE_ENV_FILE=${COMPOSE_ENV_FILE:-infra/.env.example}
-EVIDENCE_DIR=${TMPDIR:-/tmp}/${COMPOSE_PROJECT_NAME}-evidence
-export COMPOSE_PROJECT_NAME COMPOSE_ENV_FILE
-
-compose() {
-  docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$COMPOSE_ENV_FILE" -f infra/compose.yaml "$@"
-}
-
-project_resources() {
-  docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"
-  docker network ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"
-  docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"
-}
-
-cleanup() {
-  compose down --volumes --remove-orphans >/dev/null 2>&1 || true
-  rm -rf "$EVIDENCE_DIR"
-}
-
-trap cleanup EXIT HUP INT TERM
-mkdir -p "$EVIDENCE_DIR"
-
 require_command() {
   if ! command -v "$1" >/dev/null 2>&1; then
     echo "Task 6 preflight failed: required command '$1' is unavailable." >&2
@@ -49,29 +26,49 @@ if ! docker info --format '{{.OSType}}' 2>/dev/null | grep '^linux$' >/dev/null;
   exit 1
 fi
 
-ports=$(node -e '
-  const net = require("node:net");
-  const servers = Array.from({ length: 5 }, () => net.createServer());
-  Promise.all(servers.map((server) => new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolve);
-  }))).then(() => {
-    console.log(servers.map((server) => server.address().port).join(" "));
-    return Promise.all(servers.map((server) => new Promise((resolve) => server.close(resolve))));
-  }).catch(() => process.exit(1));
-')
-set -- $ports
-if [ "$#" -ne 5 ]; then
-  echo "Task 6 preflight failed: unable to allocate isolated loopback ports." >&2
+random_suffix=$(node -e "process.stdout.write(require('node:crypto').randomBytes(12).toString('hex'))")
+COMPOSE_PROJECT_NAME=zhili-task6-$random_suffix
+COMPOSE_ENV_FILE=${COMPOSE_ENV_FILE:-infra/.env.example}
+API_IMAGE=zhili-task6-api:$COMPOSE_PROJECT_NAME
+WORKER_IMAGE=zhili-task6-worker:$COMPOSE_PROJECT_NAME
+POSTGRES_PORT=0
+REDIS_PORT=0
+MINIO_API_PORT=0
+MINIO_CONSOLE_PORT=0
+API_PORT=0
+EVIDENCE_DIR=${TMPDIR:-/tmp}/${COMPOSE_PROJECT_NAME}-evidence
+export COMPOSE_PROJECT_NAME COMPOSE_ENV_FILE API_IMAGE WORKER_IMAGE
+export POSTGRES_PORT REDIS_PORT MINIO_API_PORT MINIO_CONSOLE_PORT API_PORT
+
+compose() {
+  docker compose -p "$COMPOSE_PROJECT_NAME" --env-file "$COMPOSE_ENV_FILE" -f infra/compose.yaml "$@"
+}
+
+project_resources() {
+  docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"
+  docker network ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"
+  docker volume ls -q --filter "label=com.docker.compose.project=$COMPOSE_PROJECT_NAME"
+}
+
+cleanup() {
+  compose down --volumes --remove-orphans >/dev/null 2>&1 || true
+  docker image rm "$API_IMAGE" "$WORKER_IMAGE" >/dev/null 2>&1 || true
+  rm -rf "$EVIDENCE_DIR"
+}
+
+if [ -n "$(project_resources)" ]; then
+  echo "Task 6 preflight failed: generated project identity already has labeled resources." >&2
   exit 1
 fi
-POSTGRES_PORT=$1
-REDIS_PORT=$2
-MINIO_API_PORT=$3
-MINIO_CONSOLE_PORT=$4
-API_PORT=$5
-export POSTGRES_PORT REDIS_PORT MINIO_API_PORT MINIO_CONSOLE_PORT API_PORT
-echo "preflight: isolated loopback ports allocated"
+if docker image inspect "$API_IMAGE" >/dev/null 2>&1 \
+  || docker image inspect "$WORKER_IMAGE" >/dev/null 2>&1; then
+  echo "Task 6 preflight failed: generated application image identity already exists." >&2
+  exit 1
+fi
+
+trap cleanup EXIT HUP INT TERM
+mkdir -p "$EVIDENCE_DIR"
+echo "preflight: collision-safe project and Docker-managed ephemeral ports allocated"
 
 compose config --quiet
 compose build --check
@@ -84,11 +81,11 @@ fi
 echo "preflight: frozen offline install passed"
 
 for image in \
-  postgres:17-alpine \
-  redis:8-alpine \
-  minio/minio:RELEASE.2025-04-22T22-12-26Z \
-  minio/mc:RELEASE.2025-04-16T18-13-26Z \
-  node:22.22.0-bookworm-slim
+  postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193 \
+  redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005 \
+  minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e \
+  minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3 \
+  node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94
 do
   docker pull "$image" >/dev/null
   docker image inspect --format '{{index .RepoDigests 0}} architecture={{.Architecture}}' "$image"
@@ -141,6 +138,20 @@ assert_one_shot_success() {
   fi
 }
 
+mapped_port() {
+  service=$1
+  container_port=$2
+  mapping=$(compose port "$service" "$container_port")
+  port=${mapping##*:}
+  case "$port" in
+    ''|*[!0-9]*)
+      echo "Task 6 port assertion failed: $service has no ephemeral loopback port." >&2
+      exit 1
+      ;;
+  esac
+  echo "$port"
+}
+
 wait_for_stopped() {
   deadline=$(( $(date +%s) + 30 ))
   while :; do
@@ -172,9 +183,12 @@ assert_drained() {
     exit 1
   fi
 
-  if compose exec -T redis sh -c \
-    'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli --no-auth-warning CLIENT LIST' \
-    | grep 'name=zhili-outbox-' >/dev/null; then
+  if ! redis_clients=$(compose exec -T redis sh -c \
+    'REDISCLI_AUTH="$REDIS_ADMIN_PASSWORD" redis-cli --no-auth-warning CLIENT LIST'); then
+    echo "Task 6 drain assertion failed: Redis client inspection failed." >&2
+    exit 1
+  fi
+  if echo "$redis_clients" | grep 'name=zhili-outbox-' >/dev/null; then
     echo "Task 6 drain assertion failed: owned Redis clients remain." >&2
     exit 1
   fi
@@ -208,7 +222,20 @@ run_cycle() {
   assert_one_shot_success minio-init
   echo "cycle $cycle: all services healthy and one-shots succeeded"
 
-  COMPOSE_CYCLE=$cycle pnpm exec vitest run tests/integration/compose-smoke.test.ts \
+  TEST_POSTGRES_PORT=$(mapped_port postgres 5432)
+  TEST_REDIS_PORT=$(mapped_port redis 6379)
+  TEST_MINIO_API_PORT=$(mapped_port minio 9000)
+  TEST_MINIO_CONSOLE_PORT=$(mapped_port minio 9001)
+  TEST_API_PORT=$(mapped_port api 3000)
+  echo "cycle $cycle: Docker-assigned loopback ports discovered"
+
+  COMPOSE_CYCLE=$cycle \
+  TEST_POSTGRES_PORT=$TEST_POSTGRES_PORT \
+  TEST_REDIS_PORT=$TEST_REDIS_PORT \
+  TEST_MINIO_API_PORT=$TEST_MINIO_API_PORT \
+  TEST_MINIO_CONSOLE_PORT=$TEST_MINIO_CONSOLE_PORT \
+  TEST_API_PORT=$TEST_API_PORT \
+  pnpm exec vitest run tests/integration/compose-smoke.test.ts \
     --no-file-parallelism --testTimeout=120000 --hookTimeout=120000
   echo "cycle $cycle: real smoke assertions passed"
 

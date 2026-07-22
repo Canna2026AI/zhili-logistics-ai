@@ -17,7 +17,7 @@ x-one-shot-limits: &one-shot-limits
 
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: postgres
@@ -39,15 +39,36 @@ services:
     logging: *json-logging
 
   redis:
-    image: redis:8-alpine
+    image: redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005
     command:
       - redis-server
       - --appendonly
       - 'yes'
       - --requirepass
-      - ${REDIS_PASSWORD}
+      - ${REDIS_ADMIN_PASSWORD}
+      - --user
+      - zhili_api
+      - 'on'
+      - '>${REDIS_API_PASSWORD}'
+      - '~*'
+      - '&*'
+      - +ping
+      - +info
+      - +client|setname
+      - +client|setinfo
+      - --user
+      - zhili_worker
+      - 'on'
+      - '>${REDIS_WORKER_PASSWORD}'
+      - '~bull:*'
+      - '&*'
+      - +@all
+      - -@admin
+      - -flushall
+      - -flushdb
+      - -shutdown
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_ADMIN_PASSWORD: ${REDIS_ADMIN_PASSWORD}
     ports:
       - '127.0.0.1:${REDIS_PORT}:6379'
     volumes:
@@ -58,14 +79,14 @@ services:
       <<: *health-defaults
       test:
         - CMD-SHELL
-        - REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli --no-auth-warning ping | grep '^PONG$'
+        - REDISCLI_AUTH="$${REDIS_ADMIN_PASSWORD}" redis-cli --no-auth-warning ping | grep '^PONG$'
     cpus: 0.5
     mem_limit: 256m
     pids_limit: 128
     logging: *json-logging
 
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
     command:
       - server
       - /data
@@ -95,7 +116,7 @@ services:
     logging: *json-logging
 
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
     entrypoint:
       - /bin/sh
       - -c
@@ -103,12 +124,27 @@ services:
       - >-
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}"
         "$${MINIO_ROOT_PASSWORD}" >/dev/null && mc mb --ignore-existing
-        "local/$${MINIO_BUCKET}" >/dev/null && echo MINIO_INIT_OK
+        "local/$${MINIO_BUCKET}" >/dev/null && printf '%s' '{"Version":"2012-10-17",
+        "Statement":[{"Effect":"Allow","Action":["s3:GetBucketLocation","s3:ListBucket",
+        "s3:ListBucketMultipartUploads"],"Resource":["arn:aws:s3:::'"$${MINIO_BUCKET}"'"]},
+        {"Effect":"Allow","Action":["s3:GetObject","s3:PutObject","s3:DeleteObject",
+        "s3:AbortMultipartUpload","s3:ListMultipartUploadParts"],
+        "Resource":["arn:aws:s3:::'"$${MINIO_BUCKET}"'/*"]}]}' > /tmp/zhili-policy.json &&
+        mc admin policy create local zhili-bucket /tmp/zhili-policy.json >/dev/null &&
+        mc admin user add local "$${MINIO_API_ACCESS_KEY}" "$${MINIO_API_SECRET_KEY}" >/dev/null &&
+        mc admin policy attach local zhili-bucket --user "$${MINIO_API_ACCESS_KEY}" >/dev/null &&
+        mc admin user add local "$${MINIO_WORKER_ACCESS_KEY}" "$${MINIO_WORKER_SECRET_KEY}" >/dev/null &&
+        mc admin policy attach local zhili-bucket --user "$${MINIO_WORKER_ACCESS_KEY}" >/dev/null &&
+        echo MINIO_INIT_OK
     environment:
       MC_CONFIG_DIR: /tmp/.mc
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BUCKET: ${MINIO_BUCKET}
+      MINIO_API_ACCESS_KEY: ${MINIO_API_ACCESS_KEY}
+      MINIO_API_SECRET_KEY: ${MINIO_API_SECRET_KEY}
+      MINIO_WORKER_ACCESS_KEY: ${MINIO_WORKER_ACCESS_KEY}
+      MINIO_WORKER_SECRET_KEY: ${MINIO_WORKER_SECRET_KEY}
     depends_on:
       minio:
         condition: service_healthy
@@ -126,15 +162,18 @@ services:
     logging: *json-logging
 
   migrate:
-    image: zhili-task6-api:local
+    image: ${API_IMAGE:-zhili-task6-api:local}
     command:
       - node
       - /app/infra/scripts/migrate.mjs
     environment:
       NODE_ENV: production
-      ADMIN_DATABASE_URL: postgresql://postgres:${POSTGRES_ADMIN_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      DATABASE_URL: postgresql://zhili_api_login:${POSTGRES_API_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      WORKER_DATABASE_URL: postgresql://zhili_worker_login:${POSTGRES_WORKER_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      ADMIN_DATABASE_URL: postgresql://postgres:${POSTGRES_ADMIN_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
+      DATABASE_URL: postgresql://zhili_api_login:${POSTGRES_API_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
+      WORKER_DATABASE_URL: postgresql://zhili_worker_login:${POSTGRES_WORKER_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
+      POSTGRES_ADMIN_PASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_API_PASSWORD: ${POSTGRES_API_PASSWORD}
+      POSTGRES_WORKER_PASSWORD: ${POSTGRES_WORKER_PASSWORD}
       MIGRATIONS_FOLDER: /app/packages/db/migrations
     depends_on:
       postgres:
@@ -154,7 +193,7 @@ services:
     logging: *json-logging
 
   api:
-    image: zhili-task6-api:local
+    image: ${API_IMAGE:-zhili-task6-api:local}
     build:
       context: ..
       dockerfile: infra/docker/api.Dockerfile
@@ -163,11 +202,11 @@ services:
       NODE_ENV: production
       PORT: 3000
       LOG_LEVEL: ${LOG_LEVEL}
-      DATABASE_URL: postgresql://zhili_api_login:${POSTGRES_API_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      DATABASE_URL: postgresql://zhili_api_login:${POSTGRES_API_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://zhili_api:${REDIS_API_PASSWORD_URL_ENCODED}@redis:6379
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
-      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      S3_ACCESS_KEY: ${MINIO_API_ACCESS_KEY}
+      S3_SECRET_KEY: ${MINIO_API_SECRET_KEY}
       SESSION_KEY: ${SESSION_KEY}
       ENVELOPE_MASTER_KEY: ${ENVELOPE_MASTER_KEY}
     depends_on:
@@ -211,7 +250,7 @@ services:
     logging: *json-logging
 
   worker:
-    image: zhili-task6-worker:local
+    image: ${WORKER_IMAGE:-zhili-task6-worker:local}
     build:
       context: ..
       dockerfile: infra/docker/worker.Dockerfile
@@ -219,11 +258,11 @@ services:
     environment:
       NODE_ENV: production
       LOG_LEVEL: ${LOG_LEVEL}
-      WORKER_DATABASE_URL: postgresql://zhili_worker_login:${POSTGRES_WORKER_PASSWORD}@postgres:5432/${POSTGRES_DB}
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      WORKER_DATABASE_URL: postgresql://zhili_worker_login:${POSTGRES_WORKER_PASSWORD_URL_ENCODED}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://zhili_worker:${REDIS_WORKER_PASSWORD_URL_ENCODED}@redis:6379
       S3_ENDPOINT: http://minio:9000
-      S3_ACCESS_KEY: ${MINIO_ROOT_USER}
-      S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      S3_ACCESS_KEY: ${MINIO_WORKER_ACCESS_KEY}
+      S3_SECRET_KEY: ${MINIO_WORKER_SECRET_KEY}
       SESSION_KEY: ${SESSION_KEY}
       ENVELOPE_MASTER_KEY: ${ENVELOPE_MASTER_KEY}
     depends_on:
@@ -262,7 +301,7 @@ services:
     logging: *json-logging
 
   object-smoke:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3
     profiles:
       - smoke
     entrypoint:
@@ -271,8 +310,12 @@ services:
     command:
       - >-
         set -eu; test -n "$${OBJECT_SMOKE_KEY}"; test -n "$${OBJECT_SMOKE_BODY}";
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}"
-        "$${MINIO_ROOT_PASSWORD}" >/dev/null; printf '%s' "$${OBJECT_SMOKE_BODY}"
+        mc alias set local http://minio:9000 "$${MINIO_API_ACCESS_KEY}"
+        "$${MINIO_API_SECRET_KEY}" >/dev/null;
+        if mc admin info local >/dev/null 2>&1; then exit 1; fi;
+        echo OBJECT_ADMIN_DENIED;
+        if mc mb "local/$${MINIO_BUCKET}-forbidden" >/dev/null 2>&1; then exit 1; fi;
+        echo OBJECT_SCOPE_DENIED; printf '%s' "$${OBJECT_SMOKE_BODY}"
         > /tmp/object-smoke; mc cp /tmp/object-smoke
         "local/$${MINIO_BUCKET}/$${OBJECT_SMOKE_KEY}" >/dev/null;
         actual=$$(mc cat "local/$${MINIO_BUCKET}/$${OBJECT_SMOKE_KEY}");
@@ -282,8 +325,8 @@ services:
         echo "OBJECT_SMOKE_OK operations=cp-cat-stat bytes=$${bytes}"
     environment:
       MC_CONFIG_DIR: /tmp/.mc
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_API_ACCESS_KEY: ${MINIO_API_ACCESS_KEY}
+      MINIO_API_SECRET_KEY: ${MINIO_API_SECRET_KEY}
       MINIO_BUCKET: ${MINIO_BUCKET}
     networks:
       - backend

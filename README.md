@@ -58,7 +58,9 @@ pnpm test:compose
 
 `pnpm test:compose` 会从空命名卷启动完整栈两次，执行真实对象写读、租户 RLS、
 Outbox/BullMQ、容器加固、故障恢复和 SIGTERM 清理验证。第二轮在 Docker 构建网络为
-`none` 且禁止拉取镜像的条件下复用冻结缓存。
+`none` 且禁止拉取镜像的条件下复用冻结缓存。验收脚本忽略外部
+`COMPOSE_PROJECT_NAME`，使用强随机项目名、项目专属应用镜像标签和 Docker 分配的临时
+回环端口，退出时只清理本次项目资源。
 
 复制 `infra/.env.example` 为未跟踪的 `infra/.env` 后，可手动操作：
 
@@ -75,8 +77,11 @@ docker compose --env-file infra/.env -f infra/compose.yaml down --volumes --remo
 PostgreSQL、已认证 Redis 与 MinIO。
 
 示例环境文件中的凭据仅适用于一次性本地开发，绝不能用于生产、共享或提交真实
-`infra/.env`。`down --volumes` 会不可逆地删除这套本地栈的全部一次性数据库、队列和
-对象数据。
+`infra/.env`。数据库与 Redis 的 `*_PASSWORD` 是原始密码，相应
+`*_PASSWORD_URL_ENCODED` 必须是同一密码的 URL 编码；启动验收会使用包含保留字符的
+示例值并验证两者一致。API 与 Worker 使用相互独立的 Redis ACL 用户及 MinIO 桶级用户，
+不会收到 Redis 默认用户或 MinIO root 凭据。`down --volumes` 会不可逆地删除这套本地栈
+的全部一次性数据库、队列和对象数据。
 
 ## 许可证
 

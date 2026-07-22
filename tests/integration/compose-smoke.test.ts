@@ -14,6 +14,16 @@ const composeEnvironmentFile = process.env.COMPOSE_ENV_FILE ?? 'infra/.env.examp
 const composeFile = 'infra/compose.yaml';
 const cycle = Number(process.env.COMPOSE_CYCLE ?? '0');
 const commandTimeoutMs = 120_000;
+const imageReferences = {
+  postgres:
+    'postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193',
+  redis: 'redis:8-alpine@sha256:9d317178eceac8454a2284a9e6df2466b93c745529947f0cd42a0fa9609d7005',
+  minio:
+    'minio/minio:RELEASE.2025-04-22T22-12-26Z@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e',
+  minioClient:
+    'minio/mc:RELEASE.2025-04-16T18-13-26Z@sha256:aead63c77f9db9107f1696fb08ecb0faeda23729cde94b0f663edf4fe09728e3',
+  node: 'node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94',
+} as const;
 const expectedServices = [
   'api',
   'migrate',
@@ -48,11 +58,22 @@ interface CommandResult {
 interface ComposeEnvironment {
   readonly POSTGRES_DB: string;
   readonly POSTGRES_ADMIN_PASSWORD: string;
+  readonly POSTGRES_ADMIN_PASSWORD_URL_ENCODED: string;
   readonly POSTGRES_API_PASSWORD: string;
+  readonly POSTGRES_API_PASSWORD_URL_ENCODED: string;
   readonly POSTGRES_WORKER_PASSWORD: string;
-  readonly REDIS_PASSWORD: string;
+  readonly POSTGRES_WORKER_PASSWORD_URL_ENCODED: string;
+  readonly REDIS_ADMIN_PASSWORD: string;
+  readonly REDIS_API_PASSWORD: string;
+  readonly REDIS_API_PASSWORD_URL_ENCODED: string;
+  readonly REDIS_WORKER_PASSWORD: string;
+  readonly REDIS_WORKER_PASSWORD_URL_ENCODED: string;
   readonly MINIO_ROOT_USER: string;
   readonly MINIO_ROOT_PASSWORD: string;
+  readonly MINIO_API_ACCESS_KEY: string;
+  readonly MINIO_API_SECRET_KEY: string;
+  readonly MINIO_WORKER_ACCESS_KEY: string;
+  readonly MINIO_WORKER_SECRET_KEY: string;
   readonly SESSION_KEY: string;
   readonly ENVELOPE_MASTER_KEY: string;
   readonly POSTGRES_PORT: string;
@@ -67,6 +88,7 @@ interface ContainerInspection {
     readonly Image: string;
     readonly User: string;
     readonly Cmd: readonly string[] | null;
+    readonly Env: readonly string[] | null;
     readonly Labels: Readonly<Record<string, string>>;
   };
   readonly HostConfig: {
@@ -113,6 +135,7 @@ let database: DatabaseModule | undefined;
 let appSql: Sql | undefined;
 let workerSql: Sql | undefined;
 let redis: IORedis | undefined;
+let workerRedis: IORedis | undefined;
 let queue: Queue<NormalOutboxJob> | undefined;
 let deadQueue: Queue | undefined;
 
@@ -121,6 +144,7 @@ afterAll(async () => {
     queue?.close(),
     deadQueue?.close(),
     redis?.quit(),
+    workerRedis?.quit(),
     appSql?.end(),
     workerSql?.end(),
     database?.closeDatabaseClient(),
@@ -128,11 +152,43 @@ afterAll(async () => {
   delete process.env.DATABASE_URL;
 });
 
+it('pins external images and isolates every destructive/runtime identity', async () => {
+  const [composeSource, apiDockerfile, workerDockerfile, smokeSource] = await Promise.all([
+    readFile(resolve(repositoryRoot, composeFile), 'utf8'),
+    readFile(resolve(repositoryRoot, 'infra/docker/api.Dockerfile'), 'utf8'),
+    readFile(resolve(repositoryRoot, 'infra/docker/worker.Dockerfile'), 'utf8'),
+    readFile(resolve(repositoryRoot, 'infra/scripts/smoke.sh'), 'utf8'),
+  ]);
+  const requiredFragments = [
+    ...Object.values(imageReferences),
+    'S3_ACCESS_KEY: ${MINIO_API_ACCESS_KEY}',
+    'S3_ACCESS_KEY: ${MINIO_WORKER_ACCESS_KEY}',
+    'redis://zhili_api:${REDIS_API_PASSWORD_URL_ENCODED}@redis:6379',
+    'redis://zhili_worker:${REDIS_WORKER_PASSWORD_URL_ENCODED}@redis:6379',
+    'API_IMAGE=zhili-task6-api:$COMPOSE_PROJECT_NAME',
+    'WORKER_IMAGE=zhili-task6-worker:$COMPOSE_PROJECT_NAME',
+    'randomBytes',
+  ];
+  const allSources = `${composeSource}\n${apiDockerfile}\n${workerDockerfile}\n${smokeSource}`;
+  for (const fragment of requiredFragments) {
+    if (!allSources.includes(fragment)) throw new Error('HARDENING_CONTRACT_MISSING');
+  }
+  const forbiddenFragments = [
+    'COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-',
+    'S3_ACCESS_KEY: ${MINIO_ROOT_USER}',
+    'S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD}',
+    'REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379',
+  ];
+  for (const fragment of forbiddenFragments) {
+    if (allSources.includes(fragment)) throw new Error('HARDENING_CONTRACT_FORBIDDEN');
+  }
+});
+
 it('proves the complete production-like Compose stack from an empty-volume cycle', async () => {
   environment = await loadComposeEnvironment();
   await assertStackReady();
   await assertVersionsAndArchitectures(environment);
-  await assertRuntimeHardening();
+  await assertRuntimeHardening(environment);
   await assertHealthFailureAndRecovery(environment);
   await assertObjectWriteRead();
   await assertTenantIsolationAndWorkerDelivery(environment);
@@ -167,9 +223,17 @@ async function assertVersionsAndArchitectures(env: ComposeEnvironment): Promise<
   const versions = await appSql<{ server_version: string }[]>`SHOW server_version`;
   expect(versions[0]?.server_version).toMatch(/^17\./);
 
-  redis = new IORedis(redisUrl(env), { maxRetriesPerRequest: 1 });
+  redis = new IORedis(redisUrl('zhili_api', env.REDIS_API_PASSWORD, env), {
+    maxRetriesPerRequest: 1,
+  });
   const redisInformation = await redis.info('server');
   expect(redisInformation).toMatch(/(?:^|\r?\n)redis_version:8\./);
+  await expectRedisAdministrationDenied(redis);
+  workerRedis = new IORedis(redisUrl('zhili_worker', env.REDIS_WORKER_PASSWORD, env), {
+    maxRetriesPerRequest: 1,
+  });
+  expect(await workerRedis.ping()).toBe('PONG');
+  await expectRedisAdministrationDenied(workerRedis);
 
   const minioVersion = await compose(['exec', '-T', 'minio', 'minio', '--version']);
   expect(minioVersion.code).toBe(0);
@@ -182,9 +246,9 @@ async function assertVersionsAndArchitectures(env: ComposeEnvironment): Promise<
   }
 
   const pinnedImages = {
-    postgres: 'postgres:17-alpine',
-    redis: 'redis:8-alpine',
-    minio: 'minio/minio:RELEASE.2025-04-22T22-12-26Z',
+    postgres: imageReferences.postgres,
+    redis: imageReferences.redis,
+    minio: imageReferences.minio,
   } as const;
   for (const [service, image] of Object.entries(pinnedImages)) {
     const inspection = await inspectService(service);
@@ -205,7 +269,7 @@ async function assertVersionsAndArchitectures(env: ComposeEnvironment): Promise<
   }
 }
 
-async function assertRuntimeHardening(): Promise<void> {
+async function assertRuntimeHardening(env: ComposeEnvironment): Promise<void> {
   for (const service of ['api', 'worker'] as const) {
     const inspection = await inspectService(service);
     const limits = longRunningResources[service];
@@ -229,6 +293,16 @@ async function assertRuntimeHardening(): Promise<void> {
       '301ec59f33896e123f154b4b01f63ff211d1a05a'
     );
     expect(inspection.Config.Labels['org.opencontainers.image.component']).toBe(service);
+    const runtimeEnvironment = inspection.Config.Env ?? [];
+    if (
+      runtimeEnvironment.some((entry) =>
+        [env.REDIS_ADMIN_PASSWORD, env.MINIO_ROOT_USER, env.MINIO_ROOT_PASSWORD].includes(
+          entry.slice(entry.indexOf('=') + 1)
+        )
+      )
+    ) {
+      throw new Error(`ADMIN_CREDENTIAL_EXPOSED:${service}`);
+    }
   }
 
   for (const service of ['postgres', 'redis', 'minio'] as const) {
@@ -334,6 +408,8 @@ async function assertObjectWriteRead(): Promise<void> {
   );
   expect(result.code).toBe(0);
   expect(result.stdout).toContain('OBJECT_SMOKE_OK');
+  expect(result.stdout).toContain('OBJECT_ADMIN_DENIED');
+  expect(result.stdout).toContain('OBJECT_SCOPE_DENIED');
 }
 
 async function assertTenantIsolationAndWorkerDelivery(env: ComposeEnvironment): Promise<void> {
@@ -402,7 +478,8 @@ async function assertTenantIsolationAndWorkerDelivery(env: ComposeEnvironment): 
   const connection = {
     host: '127.0.0.1',
     port: Number(env.REDIS_PORT),
-    password: env.REDIS_PASSWORD,
+    username: 'zhili_worker',
+    password: env.REDIS_WORKER_PASSWORD,
     maxRetriesPerRequest: null,
   };
   queue = new Queue<NormalOutboxJob>('imports', { connection });
@@ -620,20 +697,59 @@ async function loadComposeEnvironment(): Promise<ComposeEnvironment> {
     if (!value) throw new Error(`COMPOSE_ENV_MISSING:${name}`);
     return value;
   };
-  return {
+  const environment = {
     POSTGRES_DB: required('POSTGRES_DB'),
     POSTGRES_ADMIN_PASSWORD: required('POSTGRES_ADMIN_PASSWORD'),
+    POSTGRES_ADMIN_PASSWORD_URL_ENCODED: required('POSTGRES_ADMIN_PASSWORD_URL_ENCODED'),
     POSTGRES_API_PASSWORD: required('POSTGRES_API_PASSWORD'),
+    POSTGRES_API_PASSWORD_URL_ENCODED: required('POSTGRES_API_PASSWORD_URL_ENCODED'),
     POSTGRES_WORKER_PASSWORD: required('POSTGRES_WORKER_PASSWORD'),
-    REDIS_PASSWORD: required('REDIS_PASSWORD'),
+    POSTGRES_WORKER_PASSWORD_URL_ENCODED: required('POSTGRES_WORKER_PASSWORD_URL_ENCODED'),
+    REDIS_ADMIN_PASSWORD: required('REDIS_ADMIN_PASSWORD'),
+    REDIS_API_PASSWORD: required('REDIS_API_PASSWORD'),
+    REDIS_API_PASSWORD_URL_ENCODED: required('REDIS_API_PASSWORD_URL_ENCODED'),
+    REDIS_WORKER_PASSWORD: required('REDIS_WORKER_PASSWORD'),
+    REDIS_WORKER_PASSWORD_URL_ENCODED: required('REDIS_WORKER_PASSWORD_URL_ENCODED'),
     MINIO_ROOT_USER: required('MINIO_ROOT_USER'),
     MINIO_ROOT_PASSWORD: required('MINIO_ROOT_PASSWORD'),
+    MINIO_API_ACCESS_KEY: required('MINIO_API_ACCESS_KEY'),
+    MINIO_API_SECRET_KEY: required('MINIO_API_SECRET_KEY'),
+    MINIO_WORKER_ACCESS_KEY: required('MINIO_WORKER_ACCESS_KEY'),
+    MINIO_WORKER_SECRET_KEY: required('MINIO_WORKER_SECRET_KEY'),
     SESSION_KEY: required('SESSION_KEY'),
     ENVELOPE_MASTER_KEY: required('ENVELOPE_MASTER_KEY'),
-    POSTGRES_PORT: required('POSTGRES_PORT'),
-    REDIS_PORT: required('REDIS_PORT'),
-    API_PORT: required('API_PORT'),
+    POSTGRES_PORT: process.env.TEST_POSTGRES_PORT?.trim() || required('POSTGRES_PORT'),
+    REDIS_PORT: process.env.TEST_REDIS_PORT?.trim() || required('REDIS_PORT'),
+    API_PORT: process.env.TEST_API_PORT?.trim() || required('API_PORT'),
   };
+  assertEncodedPassword(
+    environment.POSTGRES_ADMIN_PASSWORD_URL_ENCODED,
+    environment.POSTGRES_ADMIN_PASSWORD
+  );
+  assertEncodedPassword(
+    environment.POSTGRES_API_PASSWORD_URL_ENCODED,
+    environment.POSTGRES_API_PASSWORD
+  );
+  assertEncodedPassword(
+    environment.POSTGRES_WORKER_PASSWORD_URL_ENCODED,
+    environment.POSTGRES_WORKER_PASSWORD
+  );
+  assertEncodedPassword(environment.REDIS_API_PASSWORD_URL_ENCODED, environment.REDIS_API_PASSWORD);
+  assertEncodedPassword(
+    environment.REDIS_WORKER_PASSWORD_URL_ENCODED,
+    environment.REDIS_WORKER_PASSWORD
+  );
+  return environment;
+}
+
+function assertEncodedPassword(encoded: string, raw: string): void {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(encoded);
+  } catch {
+    throw new Error('COMPOSE_PASSWORD_ENCODING_INVALID');
+  }
+  if (decoded !== raw) throw new Error('COMPOSE_PASSWORD_ENCODING_MISMATCH');
 }
 
 function databaseUrl(username: string, password: string, env: ComposeEnvironment): string {
@@ -645,21 +761,45 @@ function databaseUrl(username: string, password: string, env: ComposeEnvironment
   return url.toString();
 }
 
-function redisUrl(env: ComposeEnvironment): string {
+function redisUrl(username: string, password: string, env: ComposeEnvironment): string {
   const url = new URL('redis://127.0.0.1');
-  url.password = env.REDIS_PASSWORD;
+  url.username = username;
+  url.password = password;
   url.port = env.REDIS_PORT;
   return url.toString();
+}
+
+async function expectRedisAdministrationDenied(client: IORedis): Promise<void> {
+  const administrativeCommands: [string, ...string[]][] = [['ACL', 'LIST'], ['FLUSHALL']];
+  for (const commandArguments of administrativeCommands) {
+    try {
+      await client.call(...commandArguments);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('NOPERM')) continue;
+    }
+    throw new Error('REDIS_ADMINISTRATION_NOT_DENIED');
+  }
 }
 
 function assertNoKnownSecrets(value: string, env: ComposeEnvironment, sourceLabel: string): void {
   const secrets = {
     POSTGRES_ADMIN_PASSWORD: env.POSTGRES_ADMIN_PASSWORD,
+    POSTGRES_ADMIN_PASSWORD_URL_ENCODED: env.POSTGRES_ADMIN_PASSWORD_URL_ENCODED,
     POSTGRES_API_PASSWORD: env.POSTGRES_API_PASSWORD,
+    POSTGRES_API_PASSWORD_URL_ENCODED: env.POSTGRES_API_PASSWORD_URL_ENCODED,
     POSTGRES_WORKER_PASSWORD: env.POSTGRES_WORKER_PASSWORD,
-    REDIS_PASSWORD: env.REDIS_PASSWORD,
+    POSTGRES_WORKER_PASSWORD_URL_ENCODED: env.POSTGRES_WORKER_PASSWORD_URL_ENCODED,
+    REDIS_ADMIN_PASSWORD: env.REDIS_ADMIN_PASSWORD,
+    REDIS_API_PASSWORD: env.REDIS_API_PASSWORD,
+    REDIS_API_PASSWORD_URL_ENCODED: env.REDIS_API_PASSWORD_URL_ENCODED,
+    REDIS_WORKER_PASSWORD: env.REDIS_WORKER_PASSWORD,
+    REDIS_WORKER_PASSWORD_URL_ENCODED: env.REDIS_WORKER_PASSWORD_URL_ENCODED,
     MINIO_ROOT_USER: env.MINIO_ROOT_USER,
     MINIO_ROOT_PASSWORD: env.MINIO_ROOT_PASSWORD,
+    MINIO_API_ACCESS_KEY: env.MINIO_API_ACCESS_KEY,
+    MINIO_API_SECRET_KEY: env.MINIO_API_SECRET_KEY,
+    MINIO_WORKER_ACCESS_KEY: env.MINIO_WORKER_ACCESS_KEY,
+    MINIO_WORKER_SECRET_KEY: env.MINIO_WORKER_SECRET_KEY,
     SESSION_KEY: env.SESSION_KEY,
     ENVELOPE_MASTER_KEY: env.ENVELOPE_MASTER_KEY,
   };

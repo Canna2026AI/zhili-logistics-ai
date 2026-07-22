@@ -1,4 +1,4 @@
-FROM node:22.22.0-bookworm-slim AS build
+FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS build
 
 ENV PNPM_HOME=/pnpm
 ENV COREPACK_HOME=/corepack
@@ -24,7 +24,7 @@ RUN --mount=type=cache,id=zhili-corepack,target=/corepack \
     PNPM_CONFIG_PREFER_OFFLINE=true PNPM_CONFIG_TRUST_LOCKFILE=true \
     pnpm --filter @zhili/api deploy --prod --legacy /prod/api
 
-FROM node:22.22.0-bookworm-slim AS runtime
+FROM node:22.22.0-bookworm-slim@sha256:dd9d21971ec4395903fa6143c2b9267d048ae01ca6d3ea96f16cb30df6187d94 AS runtime
 
 LABEL org.opencontainers.image.component="api"
 LABEL org.opencontainers.image.revision="301ec59f33896e123f154b4b01f63ff211d1a05a"
