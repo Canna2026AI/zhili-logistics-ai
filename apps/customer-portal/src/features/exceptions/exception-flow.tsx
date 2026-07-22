@@ -64,6 +64,7 @@ export function ExceptionFlow({
   const [file, setFile] = useState<File | null>(null);
   const [contact, setContact] = useState('李楠 139****8712');
   const [note, setNote] = useState('东门货运通道 B3');
+  const [failedNotificationIds, setFailedNotificationIds] = useState<string[]>([]);
   const [retryComplete, setRetryComplete] = useState(false);
   const [busy, setBusy] = useState(false);
   const current = meta[step];
@@ -77,15 +78,58 @@ export function ExceptionFlow({
         contact,
         note,
       });
+      const failedIds = result.failedNotificationIds;
+      const hasValidFailedIds =
+        Array.isArray(failedIds) &&
+        failedIds.every((id) => typeof id === 'string' && id.trim().length > 0) &&
+        new Set(failedIds).size === failedIds.length;
+      const validResult =
+        result.issueId === '01JISSUE00000000000000001' &&
+        Number.isSafeInteger(result.version) &&
+        result.version >= 1 &&
+        hasValidFailedIds &&
+        ((result.status === 'PARTIAL' && failedIds.length > 0) ||
+          (result.status === 'SUCCEEDED' && failedIds.length === 0));
+      if (!validResult) throw new Error('服务端通知回执不一致，未进入可重试状态。');
+      setFailedNotificationIds(failedIds);
+      setRetryComplete(false);
       setStep(result.status === 'PARTIAL' ? 'partial' : 'resolved');
       notify(
         result.status === 'PARTIAL'
-          ? '异常资料已保存；短信通知失败，工单不回滚。'
+          ? `异常资料已保存；${failedIds.length} 个通知项待重试，工单不回滚。`
           : '异常资料与通知已全部提交。'
       );
     } catch (error) {
+      setFailedNotificationIds([]);
+      setRetryComplete(false);
       notify(error instanceof Error ? error.message : '资料提交失败。');
       setStep('failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const retryFailed = async () => {
+    if (failedNotificationIds.length === 0) {
+      notify('没有可重试的服务端失败项。');
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await customerPort.retryFailedNotifications(failedNotificationIds);
+      const returnedIds = result.items.map((item) => item.id);
+      const expected = [...failedNotificationIds].sort();
+      const returned = [...returnedIds].sort();
+      if (
+        result.items.some((item) => item.status !== 'SUCCEEDED') ||
+        returned.length !== expected.length ||
+        returned.some((id, index) => id !== expected[index])
+      )
+        throw new Error('重试回执与服务端失败项不一致，状态未标记为送达。');
+      setRetryComplete(true);
+      notify(`仅重试失败通知：${failedNotificationIds.join('、')} 已送达。`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : '失败通知重试未完成。');
     } finally {
       setBusy(false);
     }
@@ -99,7 +143,11 @@ export function ExceptionFlow({
       steps={['异常列表', '核验详情', '补充资料', '处理完成']}
       activeStep={current.active}
       panelTitle={step === 'list' ? '优先处理' : step === 'partial' ? '通知通道' : '异常资料'}
-      status={current.status}
+      status={
+        step === 'partial'
+          ? `PARTIAL · ${failedNotificationIds.length} 个通知渠道待重试`
+          : current.status
+      }
       tone={current.tone}
       summaryTitle={step === 'partial' ? '数据结果' : 'SLA 与处理结果'}
       summary={
@@ -108,7 +156,7 @@ export function ExceptionFlow({
             <>
               <SummaryItem label="异常资料" value="已保存" />
               <SummaryItem label="工单状态" value="处理中" />
-              <SummaryItem label="失败渠道" value="短信" />
+              <SummaryItem label="失败通知项" value={failedNotificationIds.join('、')} />
             </>
           ) : (
             <>
@@ -140,17 +188,7 @@ export function ExceptionFlow({
               <Button
                 variant="secondary"
                 disabled={busy || retryComplete}
-                onClick={() => {
-                  setBusy(true);
-                  void customerPort
-                    .retryFailedNotifications(['notification-sms'])
-                    .then(() => {
-                      setRetryComplete(true);
-                      notify('仅重试失败通知：客户短信已送达。');
-                    })
-                    .catch((error: Error) => notify(error.message))
-                    .finally(() => setBusy(false));
-                }}
+                onClick={() => void retryFailed()}
               >
                 仅重试失败通知
               </Button>
@@ -240,22 +278,12 @@ export function ExceptionFlow({
         </div>
       ) : step === 'partial' ? (
         <div className="customer-workflow__choice-list">
-          <div>
-            <strong>承运商 API · 成功</strong>
-            <span>14:42:08</span>
-          </div>
-          <div>
-            <strong>企业微信 · 成功</strong>
-            <span>14:42:09</span>
-          </div>
-          <div data-danger="true">
-            <strong>客户短信 · 失败</strong>
-            <span>号码拒收</span>
-          </div>
-          <div>
-            <strong>站内消息 · 成功</strong>
-            <span>14:42:10</span>
-          </div>
+          {failedNotificationIds.map((id) => (
+            <div key={id} data-danger="true">
+              <strong>{id} · 失败</strong>
+              <span>以服务端返回的失败项为准</span>
+            </div>
+          ))}
           {retryComplete ? (
             <p className="customer-workflow__success-message">所有通知渠道已送达</p>
           ) : null}

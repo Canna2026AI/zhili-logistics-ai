@@ -21,6 +21,23 @@ const navigateDesktop = (page, name) =>
     .getByRole('button', { name, exact: true })
     .click();
 
+const paymentOrderResponse = {
+  data: {
+    id: '01JPAYMENT0000000000000001',
+    paymentOrderNo: 'PAY-20260723-RECOVERED',
+    purpose: 'STATEMENT',
+    status: 'PENDING',
+    amount: { amount: '68420.00', currency: 'CNY' },
+    paidAmount: { amount: '0.00', currency: 'CNY' },
+    refundedAmount: { amount: '0.00', currency: 'CNY' },
+    version: 1,
+  },
+  meta: { requestId: 'req-customer-e2e', asOf: '2026-07-23T04:30:00.000Z' },
+};
+
+const productionUrl = new URL(baseUrl);
+productionUrl.searchParams.delete('mock');
+
 await mkdir(outputDir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 
@@ -101,6 +118,79 @@ try {
     desktop.getByRole('heading', { name: '账单已完成全额核销' }),
     '账单未完成全额核销'
   );
+
+  const delayedPayment = await browser.newPage({ viewport: { width: 1440, height: 1024 } });
+  let releaseDelayedPayment;
+  let resolveDelayedPaymentRequest;
+  let delayedAttempts = 0;
+  const delayedPaymentRequest = new Promise((resolve) => {
+    resolveDelayedPaymentRequest = resolve;
+  });
+  await delayedPayment.route('**/api/v1/payments/statement-orders', async (route) => {
+    delayedAttempts += 1;
+    const requestKey = route.request().headers()['idempotency-key'];
+    releaseDelayedPayment = async () => {
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify(paymentOrderResponse),
+      });
+    };
+    resolveDelayedPaymentRequest(requestKey);
+  });
+  await delayedPayment.goto(productionUrl.href, { waitUntil: 'networkidle' });
+  await navigateDesktop(delayedPayment, '账单与付款');
+  await delayedPayment.getByRole('button', { name: '打开账单详情' }).click();
+  await delayedPayment.getByRole('button', { name: '立即支付' }).click();
+  await delayedPayment.getByRole('button', { name: '确认付款' }).evaluate((button) => {
+    button.click();
+    button.click();
+  });
+  const delayedKey = await delayedPaymentRequest;
+  await delayedPayment.waitForTimeout(50);
+  if (!delayedKey?.startsWith('f1c-')) throw new Error('支付请求未携带稳定幂等键');
+  if (delayedAttempts !== 1) throw new Error('支付同 tick 重复创建了多个意图');
+  await navigateDesktop(delayedPayment, '工作台');
+  await releaseDelayedPayment?.();
+  await navigateDesktop(delayedPayment, '账单与付款');
+  await assertVisible(
+    delayedPayment.getByRole('heading', { name: '支付订单已创建' }),
+    '支付响应期间切页后未恢复 PENDING'
+  );
+
+  const lostResponse = await browser.newPage({ viewport: { width: 1440, height: 1024 } });
+  const replayKeys = [];
+  let paymentAttempts = 0;
+  await lostResponse.route('**/api/v1/payments/statement-orders', async (route) => {
+    paymentAttempts += 1;
+    replayKeys.push(route.request().headers()['idempotency-key']);
+    if (paymentAttempts === 1) {
+      await route.abort('failed');
+      return;
+    }
+    await route.fulfill({
+      status: 201,
+      contentType: 'application/json',
+      body: JSON.stringify(paymentOrderResponse),
+    });
+  });
+  await lostResponse.goto(productionUrl.href, { waitUntil: 'networkidle' });
+  await navigateDesktop(lostResponse, '账单与付款');
+  await lostResponse.getByRole('button', { name: '打开账单详情' }).click();
+  await lostResponse.getByRole('button', { name: '立即支付' }).click();
+  await lostResponse.getByRole('button', { name: '确认付款' }).click();
+  await assertVisible(
+    lostResponse.getByRole('heading', { name: '支付结果待恢复' }),
+    '丢失创单回执后未保留支付意图'
+  );
+  await navigateDesktop(lostResponse, '工作台');
+  await navigateDesktop(lostResponse, '账单与付款');
+  await assertVisible(
+    lostResponse.getByRole('heading', { name: '支付订单已创建' }),
+    '丢失回执后重放支付意图失败'
+  );
+  if (replayKeys.length !== 2 || replayKeys[0] !== replayKeys[1])
+    throw new Error('丢失回执后未复用原 Idempotency-Key');
 
   await navigateDesktop(desktop, '地址簿');
   await desktop.getByLabel('地址名称').fill('北京亦庄仓');

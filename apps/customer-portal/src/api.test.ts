@@ -243,6 +243,79 @@ describe('customer mock OpenAPI conformance', () => {
 });
 
 describe('customer app-local command transport', () => {
+  it.each([409, 412])(
+    'maps a real HTTP %i problem and preserves the caller Idempotency-Key',
+    async (status) => {
+      const productionFetch = vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            JSON.stringify({
+              code: status === 409 ? 'CONFLICT' : 'STALE_VERSION',
+              message: '服务端版本已更新',
+              remediation: '刷新后重试',
+            }),
+            {
+              status,
+              headers: { 'content-type': 'application/problem+json' },
+            }
+          )
+      );
+      const command = createCustomerCommandTransport('', 'production', productionFetch) as <
+        TRequest extends Record<string, unknown>,
+        TResponse,
+      >(
+        path: string,
+        body: TRequest,
+        idempotencyKey?: string
+      ) => Promise<TResponse>;
+
+      await expect(
+        command('/api/v1/portal/receipts/receipt-1:refresh', { localVersion: 7 }, 'f1c-stable')
+      ).rejects.toMatchObject({
+        name: 'CustomerApiError',
+        status,
+        code: status === 409 ? 'CONFLICT' : 'STALE_VERSION',
+        remediation: '刷新后重试',
+      });
+      expect(productionFetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+        'Idempotency-Key': 'f1c-stable',
+      });
+    }
+  );
+
+  it('replays a lost command response with the exact same Idempotency-Key header', async () => {
+    const productionFetch = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { id: 'same-intent', status: 'PENDING' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+    const command = createCustomerCommandTransport('', 'production', productionFetch) as <
+      TRequest extends Record<string, unknown>,
+      TResponse,
+    >(
+      path: string,
+      body: TRequest,
+      idempotencyKey?: string
+    ) => Promise<TResponse>;
+
+    await expect(
+      command('/api/v1/portal/payment-intents', { amount: '68420.00' }, 'f1c-lost-response')
+    ).rejects.toThrow('Failed to fetch');
+    await expect(
+      command('/api/v1/portal/payment-intents', { amount: '68420.00' }, 'f1c-lost-response')
+    ).resolves.toEqual({ id: 'same-intent', status: 'PENDING' });
+
+    expect(
+      productionFetch.mock.calls.map(
+        (call) => (call[1]?.headers as Record<string, string>)['Idempotency-Key']
+      )
+    ).toEqual(['f1c-lost-response', 'f1c-lost-response']);
+  });
+
   it('uses real same-origin HTTP outside explicit mock mode', async () => {
     const productionFetch = vi.fn(
       async () =>
@@ -291,12 +364,16 @@ describe('customer app-local command transport', () => {
         { status: 200, headers: { 'content-type': 'application/json' } }
       );
     });
-    const upload = createCustomerUploadTransport('', 'production', productionFetch);
+    const upload = createCustomerUploadTransport('', 'production', productionFetch) as <TResponse>(
+      path: string,
+      form: FormData,
+      idempotencyKey?: string
+    ) => Promise<TResponse>;
     const form = new FormData();
     form.set('file', new File(['real-gate-bytes'], 'gate.jpg', { type: 'image/jpeg' }));
     form.set('contact', '李楠');
 
-    await upload('/api/v1/portal/issues/issue-1/materials', form);
+    await upload('/api/v1/portal/issues/issue-1/materials', form, 'f1c-evidence-retry');
 
     expect(productionFetch).toHaveBeenCalledWith(
       '/api/v1/portal/issues/issue-1/materials',
@@ -308,6 +385,6 @@ describe('customer app-local command transport', () => {
     );
     const headers = productionFetch.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(headers['content-type']).toBeUndefined();
-    expect(headers['Idempotency-Key']).toBeTruthy();
+    expect(headers['Idempotency-Key']).toBe('f1c-evidence-retry');
   });
 });

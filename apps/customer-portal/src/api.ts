@@ -480,7 +480,9 @@ export function resolveCustomerTransport(
   return undefined;
 }
 
-const key = () => `f1c-${crypto.randomUUID?.() ?? Date.now()}`;
+export const createCustomerIdempotencyKey = () =>
+  `f1c-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+const key = createCustomerIdempotencyKey;
 
 export function createCustomerCommandTransport(
   search: string,
@@ -490,7 +492,8 @@ export function createCustomerCommandTransport(
   const useMock = mode === 'test' || new URLSearchParams(search).get('mock') === '1';
   return async <TRequest extends Record<string, unknown>, TResponse>(
     path: string,
-    body: TRequest
+    body: TRequest,
+    idempotencyKey = key()
   ): Promise<TResponse> => {
     if (useMock) return (await mockCustomerCommandFetch(path, body)) as TResponse;
     const response = await productionFetch(path, {
@@ -498,7 +501,7 @@ export function createCustomerCommandTransport(
       credentials: 'include',
       headers: {
         'content-type': 'application/json',
-        'Idempotency-Key': key(),
+        'Idempotency-Key': idempotencyKey,
       },
       body: JSON.stringify(body),
     });
@@ -527,7 +530,11 @@ export function createCustomerUploadTransport(
   productionFetch: typeof fetch = globalThis.fetch
 ) {
   const useMock = mode === 'test' || new URLSearchParams(search).get('mock') === '1';
-  return async <TResponse>(path: string, form: FormData): Promise<TResponse> => {
+  return async <TResponse>(
+    path: string,
+    form: FormData,
+    idempotencyKey = key()
+  ): Promise<TResponse> => {
     if (useMock) {
       return (await mockCustomerCommandFetch(path, {
         fileName: (form.get('file') as File | null)?.name ?? '',
@@ -538,7 +545,7 @@ export function createCustomerUploadTransport(
     const response = await productionFetch(path, {
       method: 'POST',
       credentials: 'include',
-      headers: { 'Idempotency-Key': key() },
+      headers: { 'Idempotency-Key': idempotencyKey },
       body: form,
     });
     const payload = await response.json().catch(() => ({}));
@@ -747,10 +754,11 @@ export const customerPort = {
       statementId: '01JSTATEMENT00000000000001',
       statementVersion: 1,
       amount: '2320.00',
-    }
+    },
+    idempotencyKey = key()
   ) {
     const response = await client.POST('/payments/statement-orders', {
-      params: { header: { 'Idempotency-Key': key() } },
+      params: { header: { 'Idempotency-Key': idempotencyKey } },
       body: {
         customerId: '01JCUSTOMER000000000000001',
         statementId: input.statementId,
@@ -759,7 +767,7 @@ export const customerPort = {
         paymentMethod: 'WECHAT_PAY',
       },
     });
-    return ensure(response.data, response.error).data;
+    return ensure(response.data, response.error, response.response).data;
   },
   async getPaymentOrder(paymentOrderId: string) {
     const response = await client.GET('/payments/{paymentOrderId}', {
@@ -767,11 +775,17 @@ export const customerPort = {
     });
     return ensure(response.data, response.error).data;
   },
-  async allocateReceipt(receiptId: string, version: number, statementId: string, amount: string) {
+  async allocateReceipt(
+    receiptId: string,
+    version: number,
+    statementId: string,
+    amount: string,
+    idempotencyKey = key()
+  ) {
     const response = await client.POST('/finance/receipts/{receiptId}:allocate', {
       params: {
         path: { receiptId },
-        header: { 'Idempotency-Key': key(), 'If-Match': `"${version}"` },
+        header: { 'Idempotency-Key': idempotencyKey, 'If-Match': `"${version}"` },
       },
       body: { allocations: [{ statementId, amount: { amount, currency: 'CNY' } }] },
     });
@@ -783,10 +797,11 @@ export const customerPort = {
       {}
     );
   },
-  refreshReceiptAllocation(receiptId: string, localVersion: number) {
+  refreshReceiptAllocation(receiptId: string, localVersion: number, idempotencyKey = key()) {
     return customerCommand<{ localVersion: number }, ReceiptAllocationSnapshot>(
       `/api/v1/portal/receipts/${receiptId}:refresh`,
-      { localVersion }
+      { localVersion },
+      idempotencyKey
     );
   },
   async createImport(fileName: string) {
@@ -809,11 +824,11 @@ export const customerPort = {
     });
     ensure(response.data, response.error);
   },
-  async uploadReceipt(file: File) {
+  async uploadReceipt(file: File, idempotencyKey = key()) {
     const form = new FormData();
     form.set('file', file, file.name);
     form.set('statementNo', 'ST202605-0008');
-    await customerUpload('/api/v1/portal/payment-vouchers', form);
+    await customerUpload('/api/v1/portal/payment-vouchers', form, idempotencyKey);
   },
   submitIssueEvidence(issueId: string, input: { file: File; contact: string; note: string }) {
     const form = new FormData();
