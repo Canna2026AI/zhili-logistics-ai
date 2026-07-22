@@ -180,6 +180,27 @@ describe('平台控制台', () => {
     expect(screen.getByRole('button', { name: '仅重试 2 个失败项' })).toBeVisible();
   });
 
+  it('失败项重试成功后按 ID 合并并把统计与回调行更新为健康', async () => {
+    const retry = vi.spyOn(platformPort, 'retryRuntimeJobs');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '运行中心' }));
+    await user.selectOptions(screen.getByLabelText('运行状态'), 'partial');
+    await user.click(screen.getByRole('button', { name: '仅重试 2 个失败项' }));
+
+    expect(retry).toHaveBeenCalledWith(['job-pay-382', 'job-pay-384']);
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      'job-pay-382、job-pay-384 已合并成功'
+    );
+    expect(screen.getByText('失败作业').parentElement).toHaveTextContent('0 / 384');
+    const callbackRow = screen.getByText('支付回调').closest('tr');
+    expect(callbackRow).not.toBeNull();
+    expect(callbackRow).toHaveTextContent('384');
+    expect(callbackRow).toHaveTextContent('0');
+    expect(callbackRow).toHaveTextContent('健康');
+    expect(callbackRow).not.toHaveTextContent('部分失败');
+  });
+
   it('租户创建失败时保留对话框输入且不写列表', async () => {
     vi.spyOn(platformPort, 'createTenant').mockRejectedValueOnce(new Error('租户服务失败'));
     const user = userEvent.setup();

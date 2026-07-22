@@ -52,7 +52,12 @@ test('客户过期报价被阻止且陈旧快照展示服务端版本差异', as
   const quote = page.getByRole('region', { name: '报价 Q2505120042' });
   await expect(quote).toContainText('已过期');
   await expect(quote.getByRole('button', { name: '选择此报价' })).toBeDisabled();
-  await expect(quote.getByRole('button', { name: '按当前规则重新查价' })).toBeVisible();
+  await quote.getByRole('button', { name: '按当前规则重新查价' }).click();
+  await page.getByLabel('目的地邮编').fill('41000');
+  await page.getByRole('button', { name: '获取报价' }).click();
+  await page.getByRole('button', { name: '选择此报价' }).click();
+  await expect(page.getByRole('alert')).toContainText('报价已在服务端过期');
+  await expect(page.getByRole('heading', { name: '多渠道查价' })).toBeVisible();
 
   await page.getByLabel('演示状态').selectOption('stale');
   await page.getByRole('button', { name: '刷新并比较' }).click();

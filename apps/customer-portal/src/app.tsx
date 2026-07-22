@@ -324,13 +324,44 @@ function Dashboard({
   );
 }
 
-function QuotePage({ choose }: { choose: (quote: QuoteResult) => void }) {
+function QuotePage({ choose, now }: { choose: (quote: QuoteResult) => void; now: () => number }) {
   const [quote, setQuote] = useState<QuoteResult | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [accepting, setAccepting] = useState(false);
   const [error, setError] = useState('');
+  const [currentTime, setCurrentTime] = useState(now);
+  const [serverExpired, setServerExpired] = useState(false);
+  useEffect(() => {
+    if (!quote) return;
+    const timer = window.setInterval(() => setCurrentTime(now()), 500);
+    return () => window.clearInterval(timer);
+  }, [now, quote]);
   const expired = quote
-    ? new Date(quote.validUntil).getTime() <= new Date(quote.evaluatedAt).getTime()
+    ? serverExpired || new Date(quote.validUntil).getTime() <= currentTime
     : false;
+  const resetQuote = () => {
+    setQuote(null);
+    setError('');
+    setServerExpired(false);
+  };
+  const accept = async () => {
+    if (!quote) return;
+    if (new Date(quote.validUntil).getTime() <= now()) {
+      setCurrentTime(now());
+      return;
+    }
+    setAccepting(true);
+    setError('');
+    try {
+      choose(await customerPort.acceptQuote(quote));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '报价接受失败，请重试。');
+      if (reason instanceof Error && 'code' in reason && reason.code === 'QUOTE_EXPIRED')
+        setServerExpired(true);
+    } finally {
+      setAccepting(false);
+    }
+  };
   return (
     <>
       <SectionHeader
@@ -351,7 +382,10 @@ function QuotePage({ choose }: { choose: (quote: QuoteResult) => void }) {
               weightKg: Number(form.get('weightKg')),
               volumeM3: Number(form.get('volumeM3')),
             })
-            .then(setQuote)
+            .then((result) => {
+              setCurrentTime(now());
+              setQuote(result);
+            })
             .catch((reason: Error) => setError(reason.message))
             .finally(() => setSubmitting(false));
         }}
@@ -421,11 +455,11 @@ function QuotePage({ choose }: { choose: (quote: QuoteResult) => void }) {
           </dl>
           <div>
             <small>报价有效至 {quote.validUntil.slice(0, 16).replace('T', ' ')}</small>
-            <Button disabled={expired} onClick={() => choose(quote)}>
-              选择此报价
+            <Button disabled={expired || accepting} onClick={() => void accept()}>
+              {accepting ? '正在接受…' : '选择此报价'}
             </Button>
             {expired ? (
-              <Button variant="secondary" onClick={() => setQuote(null)}>
+              <Button variant="secondary" onClick={resetQuote}>
                 按当前规则重新查价
               </Button>
             ) : null}
@@ -458,7 +492,13 @@ function OrderPage({
       commodity: String(data.get('commodity')),
       pieces: Number(data.get('pieces')),
       weightKg: Number(data.get('weightKg')),
-      quoteNo: selectedQuote?.quoteNo,
+      acceptedQuote: selectedQuote
+        ? {
+            quoteId: selectedQuote.id,
+            optionId: selectedQuote.optionId,
+            version: selectedQuote.version,
+          }
+        : undefined,
     };
   };
   return (
@@ -1033,12 +1073,14 @@ type CustomerPortalProps = {
   tenantId?: string;
   customerId?: string;
   companyName?: string;
+  now?: () => number;
 };
 
 function CustomerPortalApp({
   tenantId = 'tenant-xinyuan',
   customerId = 'customer-xinyuan',
   companyName = '深圳鑫源贸易有限公司',
+  now = Date.now,
 }: CustomerPortalProps) {
   const waybillsKey = storageKey(tenantId, customerId, 'waybills');
   const shortcutsKey = storageKey(tenantId, customerId, 'shortcuts');
@@ -1115,6 +1157,7 @@ function CustomerPortalApp({
   else if (page === '查价')
     content = (
       <QuotePage
+        now={now}
         choose={(quote) => {
           setSelectedQuote(quote);
           navigate('新建运单');

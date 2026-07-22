@@ -15,6 +15,9 @@ export type QuoteRequest = {
 };
 
 export type QuoteResult = {
+  id: string;
+  optionId: string;
+  version: number;
   quoteNo: string;
   channel: string;
   request: QuoteRequest;
@@ -22,7 +25,6 @@ export type QuoteResult = {
   zone: string;
   rateCardVersion: string;
   validUntil: string;
-  evaluatedAt: string;
   charges: {
     base: string;
     fuel: string;
@@ -30,6 +32,12 @@ export type QuoteResult = {
     handling: string;
     total: string;
   };
+};
+
+export type AcceptedQuoteReference = {
+  quoteId: string;
+  optionId: string;
+  version: number;
 };
 
 export type OrderInput = {
@@ -40,7 +48,7 @@ export type OrderInput = {
   commodity: string;
   pieces: number;
   weightKg: number;
-  quoteNo?: string;
+  acceptedQuote?: AcceptedQuoteReference;
 };
 
 export type VersionDifference = {
@@ -52,6 +60,70 @@ export type VersionDifference = {
 const mockFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
   const path = new URL(request.url, window.location.origin).pathname;
+  if (path.endsWith('/quotes')) {
+    const body = (await request.clone().json()) as {
+      destination: { postalCode?: string };
+      packages: Array<{ weightKg: string }>;
+    };
+    const postalCode = body.destination.postalCode ?? '90001';
+    const quoteId =
+      postalCode === '41000' ? '01JQUOTEGONE00000000000042' : '01JQUOTE000000000000000042';
+    return json(
+      {
+        data: {
+          id: quoteId,
+          quoteNo: 'Q2505120042',
+          status: postalCode === 'EXPIRED' ? 'EXPIRED' : 'CALCULATED',
+          options: [
+            {
+              id: '01JQUOTEOPTION0000000000001',
+              channelProductId: '01JCHANNELPRODUCT0000000001',
+              chargeableWeightKg: body.packages[0]?.weightKg ?? '123.50',
+              available: true,
+              lines: [
+                { code: 'BASE', label: '基础运费', amount: { amount: '4680.00', currency: 'CNY' } },
+                {
+                  code: 'FUEL',
+                  label: '燃油附加费',
+                  amount: { amount: '514.80', currency: 'CNY' },
+                },
+                {
+                  code: 'REMOTE',
+                  label: '偏远附加费',
+                  amount: { amount: '80.00', currency: 'CNY' },
+                },
+                { code: 'HANDLING', label: '操作费', amount: { amount: '45.20', currency: 'CNY' } },
+              ],
+              total: { amount: '5320.00', currency: 'CNY' },
+            },
+          ],
+          validUntil:
+            postalCode === 'EXPIRED' ? '2026-05-12T18:00:00+08:00' : '2026-07-22T18:00:00+08:00',
+          version: 1,
+        },
+        meta,
+      },
+      201
+    );
+  }
+  const acceptedQuote = path.match(/\/quotes\/([^/]+):accept$/);
+  if (acceptedQuote) {
+    if (acceptedQuote[1]?.includes('GONE'))
+      return json({ type: 'QUOTE_EXPIRED', title: 'Quote expired', status: 410 }, 410);
+    const body = (await request.clone().json()) as { optionId: string };
+    return json({
+      data: {
+        id: acceptedQuote[1],
+        quoteNo: 'Q2505120042',
+        status: 'ACCEPTED',
+        options: [],
+        acceptedOptionId: body.optionId,
+        validUntil: '2026-07-22T18:00:00+08:00',
+        version: 2,
+      },
+      meta,
+    });
+  }
   if (path.endsWith('/orders'))
     return json(
       {
@@ -134,32 +206,6 @@ const mockCustomerCommandFetch = async (
   path: string,
   body: Record<string, unknown>
 ): Promise<LocalCommandResponse> => {
-  if (path === '/api/v1/portal/quotes:calculate') {
-    const request = body as QuoteRequest;
-    return {
-      quoteNo: 'Q2505120042',
-      channel: '智立海运专线',
-      request,
-      chargeableWeightKg: request.weightKg,
-      zone:
-        request.destinationPostalCode === '90001'
-          ? 'US-LAX 4 区'
-          : `${request.destinationPostalCode} 分区`,
-      rateCardVersion: 'v2026.07',
-      validUntil:
-        request.destinationPostalCode === 'EXPIRED'
-          ? '2026-05-12T18:00:00+08:00'
-          : '2026-07-22T18:00:00+08:00',
-      evaluatedAt: '2026-07-22T10:00:00+08:00',
-      charges: {
-        base: '4,680.00',
-        fuel: '514.80',
-        remote: '80.00',
-        handling: '45.20',
-        total: '5,320.00',
-      },
-    } satisfies QuoteResult;
-  }
   if (path === '/api/v1/portal/payment-vouchers' || path === '/api/v1/portal/preferences/shortcuts')
     return { resourceId: '01JPORTALCOMMAND0000000001', status: 'SUCCEEDED', version: 1 };
   if (path === '/api/v1/portal/dashboard:compare')
@@ -172,6 +218,8 @@ const mockCustomerCommandFetch = async (
     const itemIds = body.itemIds as string[];
     return { items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) };
   }
+  if (path === '/api/v1/portal/order-quote-links')
+    return { resourceId: '01JORDERQUOTELINK000000001', status: 'SUCCEEDED', version: 1 };
   throw new Error(`未实现的客户门户命令：${path}`);
 };
 
@@ -190,9 +238,98 @@ function ensure<T>(data: T | undefined, error: unknown): T {
   return data;
 }
 
+export class QuoteExpiredError extends Error {
+  readonly code = 'QUOTE_EXPIRED';
+
+  constructor() {
+    super('报价已在服务端过期，请按当前规则重新查价。');
+    this.name = 'QuoteExpiredError';
+  }
+}
+
 export const customerPort = {
-  quote(request: QuoteRequest) {
-    return localCommand<QuoteRequest, QuoteResult>('/api/v1/portal/quotes:calculate', request);
+  async quote(request: QuoteRequest): Promise<QuoteResult> {
+    const sideCm = Math.max(1, Math.cbrt(request.volumeM3) * 100).toFixed(2);
+    const response = await client.POST('/quotes', {
+      params: { header: { 'Idempotency-Key': key() } },
+      body: {
+        customerId: '01JCUSTOMER000000000000001',
+        origin: {
+          countryCode: request.origin.split('-')[0] || 'CN',
+          city: request.origin,
+          line1: request.origin,
+          postalCode: '518000',
+        },
+        destination: {
+          countryCode: 'US',
+          city: request.destinationPostalCode,
+          line1: request.destinationPostalCode,
+          postalCode: request.destinationPostalCode,
+        },
+        packages: [
+          {
+            packageRef: 'QUOTE-PACKAGE',
+            weightKg: String(request.weightKg),
+            lengthCm: sideCm,
+            widthCm: sideCm,
+            heightCm: sideCm,
+          },
+        ],
+        quoteDate: '2026-07-22',
+        currency: 'CNY',
+      },
+    });
+    const quote = ensure(response.data, response.error).data;
+    const option = quote.options.find((item) => item.available) ?? quote.options[0];
+    if (!option) throw new Error('当前没有可用报价渠道。');
+    const line = (code: string) =>
+      Number(option.lines.find((item) => item.code === code)?.amount.amount ?? 0).toLocaleString(
+        'en-US',
+        { minimumFractionDigits: 2 }
+      );
+    return {
+      id: quote.id,
+      optionId: option.id,
+      version: quote.version,
+      quoteNo: quote.quoteNo,
+      channel: '智立海运专线',
+      request,
+      chargeableWeightKg: Number(option.chargeableWeightKg),
+      zone:
+        request.destinationPostalCode === '90001'
+          ? 'US-LAX 4 区'
+          : `${request.destinationPostalCode} 分区`,
+      rateCardVersion: 'v2026.07',
+      validUntil: quote.validUntil,
+      charges: {
+        base: line('BASE'),
+        fuel: line('FUEL'),
+        remote: line('REMOTE'),
+        handling: line('HANDLING'),
+        total: Number(option.total.amount).toLocaleString('en-US', { minimumFractionDigits: 2 }),
+      },
+    };
+  },
+  async acceptQuote(quote: QuoteResult): Promise<QuoteResult> {
+    const response = await client.POST('/quotes/{quoteId}:accept', {
+      params: {
+        path: { quoteId: quote.id },
+        header: { 'Idempotency-Key': key(), 'If-Match': `"${quote.version}"` },
+      },
+      body: { optionId: quote.optionId, reason: '客户确认报价' },
+    });
+    if (response.response.status === 410) throw new QuoteExpiredError();
+    const accepted = ensure(response.data, response.error).data;
+    return { ...quote, version: accepted.version };
+  },
+  async linkAcceptedQuote(input: {
+    orderId: string;
+    orderVersion: number;
+    quoteId: string;
+    optionId: string;
+    quoteVersion: number;
+  }) {
+    await localCommand('/api/v1/portal/order-quote-links', input);
   },
   async createOrder(input: OrderInput) {
     const originCountry = input.origin.split('-')[0] || 'CN';
@@ -225,7 +362,16 @@ export const customerPort = {
         ],
       },
     });
-    return ensure(response.data, response.error).data;
+    const order = ensure(response.data, response.error).data;
+    if (input.acceptedQuote)
+      await customerPort.linkAcceptedQuote({
+        orderId: order.id,
+        orderVersion: order.version,
+        quoteId: input.acceptedQuote.quoteId,
+        optionId: input.acceptedQuote.optionId,
+        quoteVersion: input.acceptedQuote.version,
+      });
+    return order;
   },
   async createPayment() {
     const response = await client.POST('/payments/statement-orders', {

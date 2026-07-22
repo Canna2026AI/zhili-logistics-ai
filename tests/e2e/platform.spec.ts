@@ -51,4 +51,11 @@ test('平台配置回写当前租户实体且运行快照可比较', async ({ pa
   await expect(page.locator('.platform-runtime-notice')).toContainText('snapshotAt 10:18 → 10:21');
   await page.getByRole('button', { name: '应用服务器快照' }).click();
   await expect(page.getByRole('table', { name: '运行作业' })).toBeVisible();
+  await page.getByLabel('运行状态').selectOption('partial');
+  await page.getByRole('button', { name: '仅重试 2 个失败项' }).click();
+  await expect(page.getByText(/job-pay-382、job-pay-384 已合并成功/)).toBeVisible();
+  await expect(
+    page.locator('.platform-runtime-stats > div').filter({ hasText: '失败作业' })
+  ).toContainText('0 / 384');
+  await expect(page.getByRole('row', { name: /支付回调/ })).toContainText('健康：0 / 384 失败');
 });

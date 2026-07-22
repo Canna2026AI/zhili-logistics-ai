@@ -729,8 +729,11 @@ function RuntimeNotice({
 }
 
 function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
+  const initialFailedIds = ['job-pay-382', 'job-pay-384'];
   const [state, setState] = useState<RuntimeState>('normal');
   const [message, setMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [failedItemIds, setFailedItemIds] = useState(initialFailedIds);
   const [differences, setDifferences] = useState<
     Array<{ field: string; local: string; server: string }>
   >([]);
@@ -738,7 +741,9 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
   const selectState = (next: RuntimeState) => {
     setState(next);
     setMessage('');
+    setSuccessMessage('');
     setDifferences([]);
+    if (next === 'partial') setFailedItemIds(initialFailedIds);
   };
   const recover = async () => {
     setRecovering(true);
@@ -754,9 +759,16 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
           setDifferences(result.differences);
         }
       } else if (state === 'partial') {
-        const result = await platformPort.retryRuntimeJobs(['job-pay-382', 'job-pay-384']);
-        setState('normal');
-        setMessage(`${result.items.map((item) => item.id).join('、')} 已合并为成功。`);
+        const result = await platformPort.retryRuntimeJobs(failedItemIds);
+        const succeededIds = result.items
+          .filter((item) => item.status === 'SUCCEEDED')
+          .map((item) => item.id);
+        const remainingIds = failedItemIds.filter((id) => !succeededIds.includes(id));
+        setFailedItemIds(remainingIds);
+        setState(remainingIds.length ? 'partial' : 'normal');
+        setSuccessMessage(
+          `${succeededIds.join('、')} 已合并成功，剩余失败 ${remainingIds.length} 项。`
+        );
       } else {
         await platformPort.refreshRuntime();
         setState('normal');
@@ -792,6 +804,7 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
         }
       />
       <RuntimeNotice state={state} message={message} differences={differences} />
+      {successMessage ? <div role="status">{successMessage}</div> : null}
       {state === 'stale' ? (
         <Button disabled={readOnly || recovering} onClick={() => void recover()}>
           {differences.length ? '应用服务器快照' : '刷新运行快照'}
@@ -812,7 +825,11 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
               ['API 网关', '99.98%', '健康'],
               ['作业队列', '42', '正常'],
               ['连接器', '7 / 8', '警告'],
-              ['失败作业', '2 / 384', '需处理'],
+              [
+                '失败作业',
+                `${failedItemIds.length} / 384`,
+                failedItemIds.length ? '需处理' : '健康',
+              ],
             ].map(([label, value, status]) => (
               <div key={label}>
                 <span>{label}</span>
@@ -837,11 +854,15 @@ function RuntimePage({ readOnly = false }: { readOnly?: boolean }) {
                 <tr>
                   <td>支付回调</td>
                   <td>2026-05-12 10:21</td>
-                  <td>382</td>
-                  <td>2</td>
+                  <td>{384 - failedItemIds.length}</td>
+                  <td>{failedItemIds.length}</td>
                   <td>480ms</td>
                   <td>
-                    <StatusTag tone="warning">部分失败：2 / 384</StatusTag>
+                    <StatusTag tone={failedItemIds.length ? 'warning' : 'success'}>
+                      {failedItemIds.length
+                        ? `部分失败：${failedItemIds.length} / 384`
+                        : '健康：0 / 384 失败'}
+                    </StatusTag>
                   </td>
                 </tr>
                 {state === 'normal' ? (

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentType } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -8,6 +8,7 @@ import { App } from './app';
 import { customerPort } from './api';
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   localStorage.clear();
   cleanup();
@@ -64,6 +65,105 @@ describe('客户门户', () => {
     expect(await screen.findByRole('region', { name: '报价 Q2505120042' })).toHaveTextContent(
       'CN-XMN → 33101 · 77.25 kg · 0.66 m³'
     );
+  });
+
+  it('typed 报价返回可接受的 quote、option 与版本标识', async () => {
+    const quote = await customerPort.quote({
+      origin: 'CN-SZX',
+      destinationPostalCode: '90001',
+      weightKg: 123.5,
+      volumeM3: 0.48,
+    });
+
+    expect(quote).toEqual(
+      expect.objectContaining({
+        id: '01JQUOTE000000000000000042',
+        optionId: '01JQUOTEOPTION0000000000001',
+        version: 1,
+      })
+    );
+  });
+
+  it('接受报价后订单显式携带已接受 quoteId、optionId 与 version', async () => {
+    const create = vi.spyOn(customerPort, 'createOrder');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '立即查价' }));
+    await user.click(screen.getByRole('button', { name: '获取报价' }));
+    await user.click(screen.getByRole('button', { name: '选择此报价' }));
+    await user.type(screen.getByLabelText('收件人'), 'Quote Bound User');
+    await user.type(screen.getByLabelText('目的地'), 'US-LAX 90001');
+    await user.click(screen.getByRole('button', { name: '提交预报' }));
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        acceptedQuote: {
+          quoteId: '01JQUOTE000000000000000042',
+          optionId: '01JQUOTEOPTION0000000000001',
+          version: 2,
+        },
+      })
+    );
+  });
+
+  it('创建订单后通过审计 port 关联已接受报价且不丢弃版本', async () => {
+    const linkAcceptedQuote = vi
+      .spyOn(customerPort, 'linkAcceptedQuote')
+      .mockResolvedValue(undefined);
+
+    await customerPort.createOrder({
+      origin: 'CN-SZX 518000',
+      recipient: 'Audit User',
+      destination: 'US-LAX 90001',
+      phone: '+1 213 555 0108',
+      commodity: '样品',
+      pieces: 1,
+      weightKg: 1,
+      acceptedQuote: {
+        quoteId: '01JQUOTE000000000000000042',
+        optionId: '01JQUOTEOPTION0000000000001',
+        version: 2,
+      },
+    });
+
+    expect(linkAcceptedQuote).toHaveBeenCalledWith({
+      orderId: '01JORDER000000000000000006',
+      orderVersion: 1,
+      quoteId: '01JQUOTE000000000000000042',
+      optionId: '01JQUOTEOPTION0000000000001',
+      quoteVersion: 2,
+    });
+  });
+
+  it('服务端 accept 返回 410 时停留查价页并要求重新查价', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '立即查价' }));
+    await user.type(screen.getByLabelText('目的地邮编'), '41000');
+    await user.click(screen.getByRole('button', { name: '获取报价' }));
+    await user.click(screen.getByRole('button', { name: '选择此报价' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '报价已在服务端过期，请按当前规则重新查价'
+    );
+    expect(screen.getByRole('heading', { name: '多渠道查价' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '按当前规则重新查价' })).toBeVisible();
+  });
+
+  it('页面停留跨过 validUntil 后用注入时钟自动禁用接受', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let currentTime = new Date('2026-07-22T17:59:59+08:00').getTime();
+    const ClockedApp = App as ComponentType<{ now: () => number }>;
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<ClockedApp now={() => currentTime} />);
+    await user.click(screen.getByRole('button', { name: '立即查价' }));
+    await user.click(screen.getByRole('button', { name: '获取报价' }));
+    expect(screen.getByRole('button', { name: '选择此报价' })).toBeEnabled();
+
+    currentTime = new Date('2026-07-22T18:00:01+08:00').getTime();
+    await act(() => vi.advanceTimersByTimeAsync(1_000));
+    expect(screen.getByRole('region', { name: '报价 Q2505120042' })).toHaveTextContent('已过期');
+    expect(screen.getByRole('button', { name: '选择此报价' })).toBeDisabled();
   });
 
   it('过期报价不能接受并明确要求重新查价', async () => {

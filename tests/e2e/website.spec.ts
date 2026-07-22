@@ -26,3 +26,9 @@ test('官网首屏与产品预览使用同一事实数据', async ({ page }) => 
   ).toContain('WebPage');
   await page.screenshot({ path: 'artifacts/e2e/f1c/website-legal-1440x900.png', fullPage: true });
 });
+
+test('官网未知静态路由不回退首页', async ({ request }) => {
+  const response = await request.get('/zhili-logistics-ai/not-found/');
+  expect(response.status()).toBe(404);
+  expect(await response.text()).not.toContain('跨境物流业务一体化平台');
+});
