@@ -9,8 +9,8 @@
     "start": "node dist/main.js",
     "lint": "eslint src test ../../tests/integration/outbox-worker.test.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run --root ../.. apps/worker/test/outbox.processor.test.ts tests/integration/outbox-worker.test.ts --no-file-parallelism --testTimeout=30000 --hookTimeout=120000",
-    "test:integration": "vitest run --root ../.. tests/integration/outbox-worker.test.ts --no-file-parallelism --testTimeout=30000 --hookTimeout=120000"
+    "test": "vitest run --root ../.. apps/worker/test/outbox.processor.test.ts tests/integration/outbox-worker.test.ts --exclude '**/.worktrees/**' --no-file-parallelism --testTimeout=30000 --hookTimeout=120000",
+    "test:integration": "vitest run --root ../.. tests/integration/outbox-worker.test.ts --exclude '**/.worktrees/**' --no-file-parallelism --testTimeout=30000 --hookTimeout=120000"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",

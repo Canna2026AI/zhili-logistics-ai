@@ -124,6 +124,8 @@ describe('OutboxPublisher validation and lifecycle', () => {
 
     expect(packageJson.scripts?.build).toBe('node scripts/build.mjs');
     expect(packageJson.scripts?.start).toBe('node dist/main.js');
+    expect(packageJson.scripts?.test).toContain("--exclude '**/.worktrees/**'");
+    expect(packageJson.scripts?.['test:integration']).toContain("--exclude '**/.worktrees/**'");
     expect(packageJson.dependencies).toMatchObject({
       '@nestjs/core': expect.any(String),
       '@zhili/config': expect.any(String),

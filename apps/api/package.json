@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run test --exclude 'test/*.e2e.test.ts'",
     "test:e2e": "vitest run test/health.e2e.test.ts test/openapi-coverage.test.ts test/production-start.e2e.test.ts --no-file-parallelism --testTimeout=30000 --hookTimeout=120000",
-    "test:integration": "vitest run --root ../.. tests/integration/idempotency.test.ts --no-file-parallelism --testTimeout=30000 --hookTimeout=120000",
+    "test:integration": "vitest run --root ../.. tests/integration/idempotency.test.ts --exclude '**/.worktrees/**' --no-file-parallelism --testTimeout=30000 --hookTimeout=120000",
     "integration": "pnpm test:integration"
   },
   "dependencies": {
