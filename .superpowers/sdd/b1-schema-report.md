@@ -5,6 +5,7 @@
 - Canonical alignment: `9a46544e244af4273d934f173c21e2e763ce9368`
 - Round-1 hardening: `863a00b60ac1d66c05f18436274c040610438115`
 - Round-2 remediation code: `44bb3d382cedcce79f657205cddfe06bc4055279`
+- Round-3 migration-history compatibility code: `3be1e4ca96e08c6f4f56e7e11948879e5147ae75`
 - Scope: identity/master-data → rates/waybills → warehouse/linehaul schema, Drizzle source and
   snapshot, ordered migrations, reversible B1 down, cluster prerequisites, platform control-plane
   capabilities, and pre-tenant authentication.
@@ -62,13 +63,22 @@ transaction.
 
 - `zhili_auth`, `zhili_control_plane`, and `btree_gist` are explicit
   `0000_foundation.sql` cluster prerequisites.
-- Foundation creates missing prerequisites but never alters a pre-existing auth/control role.
-- B1 up no longer creates or rewrites these resources.
+- Foundation owns their provisioning for fresh installs and creates only missing prerequisites.
+- B1 up repeats only create-if-absent role/extension provisioning and the minimum schema `USAGE`
+  grants. This compatibility prelude supports databases whose migration journal already records
+  the previously published `0000` before these prerequisites were added.
+- Neither path alters pre-existing role attributes, changes object ownership, nor takes ownership
+  of an existing extension. The repeated provisioning is migration-history compatibility, not a
+  resource takeover.
 - B1 down contains no cluster role, owned-object, or extension removal.
 - The rollback regression pre-creates both roles, role-owned schemas/tables, `btree_gist`, and an
   unrelated GiST exclusion constraint. It applies foundation and B1, runs B1 down, and proves role
   attributes, object ownership, extension identity/version/owner/schema, and the dependent
   constraint are unchanged.
+- The old-history regression uses the exact Round-2 `0000_foundation.sql` fixture
+  (`SHA-256 3ebd6c45e25da0916510ee96bb3085978733cd7ddd34ca1cf4a26c3a60808802`), records it
+  through the Drizzle journal, then runs the current migration chain. It covers both missing
+  prerequisites and pre-existing roles, owned objects, extension, and GiST dependency variants.
 
 ## Concurrency, idempotency, and negative coverage
 
@@ -124,6 +134,8 @@ The fingerprint includes:
 - Round 2 index parity exposed incorrect opclasses across the generated snapshot.
 - The canonical permission seed query initially returned no rows.
 - The pre-existing-resource rollback initially attempted to remove an unrelated role-owned schema.
+- The exact previously published `0000` journal initially caused current `0001` to fail because
+  `zhili_auth` was absent after the runner correctly skipped the now-modified `0000`.
 
 Each failure was observed before its corresponding production fix.
 
@@ -143,7 +155,7 @@ pnpm --filter @zhili/db test
 # exit 0; 2 files, 3 tests passed
 
 pnpm --filter @zhili/db test:integration
-# exit 0; 4 files, 25 tests passed against postgres:17-alpine
+# exit 0; 5 files, 27 tests passed against postgres:17-alpine
 
 pnpm --filter @zhili/db exec vitest run --config vitest.integration.config.ts test/b1-schema.integration.test.ts
 # exit 0; 1 file, 12 tests passed
@@ -154,5 +166,7 @@ git diff --check
 
 The unit suite includes the no-follow-up Drizzle migration-chain gate. The integration suite
 includes the fresh generated migration apply, live/snapshot key and index parity, PostgreSQL 17
-down/up fingerprint equality, pre-existing cluster-resource preservation, scoped authorization,
-active DENY, idempotency hash mismatch, true concurrent CAS, and constant-shape authentication.
+down/up fingerprint equality, recorded old-foundation migration upgrades for both missing and
+pre-existing prerequisite variants, pre-existing cluster-resource preservation, scoped
+authorization, active DENY, idempotency hash mismatch, true concurrent CAS, and constant-shape
+authentication.
