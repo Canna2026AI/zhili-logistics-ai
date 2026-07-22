@@ -74,6 +74,16 @@ try {
     desktop.getByRole('heading', { name: '支付订单已创建' }),
     '支付订单未进入等待回执状态'
   );
+  await desktop.reload({ waitUntil: 'networkidle' });
+  await assertVisible(
+    desktop.getByRole('heading', { name: '下午好，张伟 👋' }),
+    '支付等待期间刷新后门户未恢复'
+  );
+  await navigateDesktop(desktop, '账单与付款');
+  await assertVisible(
+    desktop.getByRole('heading', { name: '支付订单已创建' }),
+    '刷新后未恢复 PENDING 支付订单'
+  );
   await desktop.getByRole('button', { name: '查询支付结果' }).click();
   await assertVisible(
     desktop.getByRole('heading', { name: '付款成功，部分金额待分配' }),
