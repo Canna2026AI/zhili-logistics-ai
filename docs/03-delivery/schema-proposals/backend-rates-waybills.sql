@@ -180,6 +180,86 @@ CREATE TABLE rate_rules (
   ) WHERE (state = 'ACTIVE')
 );
 
+CREATE FUNCTION reject_rate_rule_semantic_priority_tie()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.state <> 'ACTIVE' THEN
+    RETURN NEW;
+  END IF;
+
+  -- The lock key covers every rule that could tie after wildcard expansion. It
+  -- closes the read-then-insert race that a plain trigger query would leave.
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended(
+      NEW.tenant_id || '|' || NEW.rate_card_version_id || '|' ||
+      NEW.rule_type || '|' || NEW.priority::text,
+      0
+    )
+  );
+
+  IF EXISTS (
+    SELECT 1
+    FROM rate_rules existing
+    WHERE existing.tenant_id = NEW.tenant_id
+      AND existing.rate_card_version_id = NEW.rate_card_version_id
+      AND existing.rule_type = NEW.rule_type
+      AND existing.priority = NEW.priority
+      AND existing.state = 'ACTIVE'
+      AND existing.id <> NEW.id
+      AND existing.min_weight_grams <= NEW.max_weight_grams
+      AND existing.max_weight_grams >= NEW.min_weight_grams
+      AND (
+        existing.channel_id IS NULL OR NEW.channel_id IS NULL OR
+        existing.channel_id = NEW.channel_id
+      )
+      AND (
+        existing.service_code = '*' OR NEW.service_code = '*' OR
+        existing.service_code = NEW.service_code
+      )
+      AND (
+        existing.origin_country_code = '*' OR NEW.origin_country_code = '*' OR
+        existing.origin_country_code = NEW.origin_country_code
+      )
+      AND (
+        existing.destination_country_code = '*' OR NEW.destination_country_code = '*' OR
+        existing.destination_country_code = NEW.destination_country_code
+      )
+      AND (
+        existing.package_type = '*' OR NEW.package_type = '*' OR
+        existing.package_type = NEW.package_type
+      )
+  ) THEN
+    RAISE EXCEPTION 'rate rule priority tie after wildcard expansion'
+      USING ERRCODE = '23P01', CONSTRAINT = 'rate_rules_semantic_priority_tie';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER rate_rules_semantic_tie_insert
+BEFORE INSERT ON rate_rules
+FOR EACH ROW EXECUTE FUNCTION reject_rate_rule_semantic_priority_tie();
+
+CREATE TRIGGER rate_rules_semantic_tie_update
+BEFORE UPDATE OF
+  tenant_id,
+  rate_card_version_id,
+  rule_type,
+  priority,
+  channel_id,
+  service_code,
+  origin_country_code,
+  destination_country_code,
+  package_type,
+  min_weight_grams,
+  max_weight_grams,
+  state
+ON rate_rules
+FOR EACH ROW EXECUTE FUNCTION reject_rate_rule_semantic_priority_tie();
+
 CREATE TABLE quotes (
   id text PRIMARY KEY,
   tenant_id text NOT NULL,
@@ -233,6 +313,7 @@ CREATE TABLE quote_versions (
   CONSTRAINT quote_versions_input_check CHECK (jsonb_typeof(input_snapshot) = 'object'),
   CONSTRAINT quote_versions_validity_check CHECK (valid_until > created_at),
   CONSTRAINT quote_versions_tenant_id_unique UNIQUE (tenant_id, id),
+  CONSTRAINT quote_versions_ownership_key_unique UNIQUE (tenant_id, id, quote_id),
   CONSTRAINT quote_versions_quote_version_unique UNIQUE (tenant_id, quote_id, version_number),
   CONSTRAINT quote_versions_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenants (id)
     ON UPDATE RESTRICT ON DELETE RESTRICT,
@@ -267,6 +348,7 @@ CREATE TABLE quote_options (
   id text PRIMARY KEY,
   tenant_id text NOT NULL,
   quote_version_id text NOT NULL,
+  quote_id text NOT NULL,
   option_code text NOT NULL,
   channel_id text NOT NULL,
   service_code text NOT NULL,
@@ -290,14 +372,17 @@ CREATE TABLE quote_options (
   CONSTRAINT quote_options_tenant_id_unique UNIQUE (tenant_id, id),
   CONSTRAINT quote_options_code_unique UNIQUE (tenant_id, quote_version_id, option_code),
   CONSTRAINT quote_options_version_key_unique UNIQUE (tenant_id, id, quote_version_id),
+  CONSTRAINT quote_options_ownership_key_unique UNIQUE (
+    tenant_id, id, quote_version_id, quote_id
+  ),
   CONSTRAINT quote_options_acceptance_key_unique UNIQUE (
-    tenant_id, id, quote_version_id, currency, total_amount_minor
+    tenant_id, id, quote_version_id, quote_id, currency, total_amount_minor
   ),
   CONSTRAINT quote_options_money_key_unique UNIQUE (tenant_id, id, currency),
   CONSTRAINT quote_options_tenant_fk FOREIGN KEY (tenant_id) REFERENCES tenants (id)
     ON UPDATE RESTRICT ON DELETE RESTRICT,
-  CONSTRAINT quote_options_version_fk FOREIGN KEY (tenant_id, quote_version_id)
-    REFERENCES quote_versions (tenant_id, id) ON UPDATE RESTRICT ON DELETE CASCADE,
+  CONSTRAINT quote_options_version_fk FOREIGN KEY (tenant_id, quote_version_id, quote_id)
+    REFERENCES quote_versions (tenant_id, id, quote_id) ON UPDATE RESTRICT ON DELETE CASCADE,
   CONSTRAINT quote_options_channel_fk FOREIGN KEY (tenant_id, channel_id)
     REFERENCES shipping_channels (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT
 );
@@ -381,19 +466,25 @@ CREATE TABLE quote_acceptances (
     ON UPDATE RESTRICT ON DELETE RESTRICT,
   CONSTRAINT quote_acceptances_quote_fk FOREIGN KEY (tenant_id, quote_id)
     REFERENCES quotes (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+  CONSTRAINT quote_acceptances_version_ownership_fk FOREIGN KEY (
+    tenant_id, quote_version_id, quote_id
+  ) REFERENCES quote_versions (tenant_id, id, quote_id)
+    ON UPDATE RESTRICT ON DELETE RESTRICT,
   CONSTRAINT quote_acceptances_option_fk FOREIGN KEY (
-    tenant_id, quote_option_id, quote_version_id, currency, total_amount_minor
+    tenant_id, quote_option_id, quote_version_id, quote_id, currency, total_amount_minor
   ) REFERENCES quote_options (
-    tenant_id, id, quote_version_id, currency, total_amount_minor
+    tenant_id, id, quote_version_id, quote_id, currency, total_amount_minor
   ) ON UPDATE RESTRICT ON DELETE RESTRICT
 );
 
 ALTER TABLE quotes
-  ADD CONSTRAINT quotes_accepted_version_fk FOREIGN KEY (tenant_id, accepted_quote_version_id)
-    REFERENCES quote_versions (tenant_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+  ADD CONSTRAINT quotes_accepted_version_fk FOREIGN KEY (
+    tenant_id, accepted_quote_version_id, id
+  ) REFERENCES quote_versions (tenant_id, id, quote_id)
+    ON UPDATE RESTRICT ON DELETE RESTRICT,
   ADD CONSTRAINT quotes_accepted_option_fk FOREIGN KEY (
-    tenant_id, accepted_quote_option_id, accepted_quote_version_id
-  ) REFERENCES quote_options (tenant_id, id, quote_version_id)
+    tenant_id, accepted_quote_option_id, accepted_quote_version_id, id
+  ) REFERENCES quote_options (tenant_id, id, quote_version_id, quote_id)
     ON UPDATE RESTRICT ON DELETE RESTRICT;
 
 CREATE TABLE orders (
@@ -706,6 +797,54 @@ CREATE TABLE import_jobs (
 CREATE UNIQUE INDEX import_jobs_single_rollback_unique
   ON import_jobs (tenant_id, rollback_of_job_id) WHERE rollback_of_job_id IS NOT NULL;
 
+CREATE FUNCTION validate_import_rollback_job()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+  original_type text;
+  original_state text;
+  original_rollback_of_job_id text;
+BEGIN
+  IF NEW.rollback_of_job_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  SELECT import_type, state, rollback_of_job_id
+    INTO original_type, original_state, original_rollback_of_job_id
+  FROM import_jobs
+  WHERE tenant_id = NEW.tenant_id AND id = NEW.rollback_of_job_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'rollback target does not exist in the tenant'
+      USING ERRCODE = '23503';
+  END IF;
+  IF original_rollback_of_job_id IS NOT NULL THEN
+    RAISE EXCEPTION 'a rollback job cannot itself be rolled back'
+      USING ERRCODE = '23514';
+  END IF;
+  IF original_state <> 'COMMITTED' THEN
+    RAISE EXCEPTION 'only a committed import job can be rolled back'
+      USING ERRCODE = '23514';
+  END IF;
+  IF original_type <> NEW.import_type THEN
+    RAISE EXCEPTION 'rollback import type must match its original job'
+      USING ERRCODE = '23514';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER import_jobs_rollback_validate_insert
+BEFORE INSERT ON import_jobs
+FOR EACH ROW EXECUTE FUNCTION validate_import_rollback_job();
+
+CREATE TRIGGER import_jobs_rollback_validate_update
+BEFORE UPDATE OF tenant_id, rollback_of_job_id, import_type ON import_jobs
+FOR EACH ROW EXECUTE FUNCTION validate_import_rollback_job();
+
 CREATE TABLE import_rows (
   id text PRIMARY KEY,
   tenant_id text NOT NULL,
@@ -749,9 +888,17 @@ CREATE TABLE import_rows (
     (commit_status <> 'APPLIED' AND applied_at IS NULL
       AND created_order_id IS NULL AND created_waybill_id IS NULL)
   ),
-  CONSTRAINT import_rows_rolled_back_check CHECK (
-    (rollback_status = 'ROLLED_BACK' AND rolled_back_at IS NOT NULL) OR
-    (rollback_status <> 'ROLLED_BACK' AND rolled_back_at IS NULL)
+  CONSTRAINT import_rows_rollback_shape_check CHECK (
+    (
+      commit_status = 'APPLIED' AND (
+        (rollback_status = 'ROLLED_BACK' AND rolled_back_at IS NOT NULL) OR
+        (rollback_status IN ('NOT_REQUIRED', 'PENDING', 'FAILED') AND rolled_back_at IS NULL)
+      )
+    ) OR (
+      commit_status <> 'APPLIED' AND
+      rollback_status = 'NOT_REQUIRED' AND
+      rolled_back_at IS NULL
+    )
   ),
   CONSTRAINT import_rows_timestamps_check CHECK (updated_at >= created_at),
   CONSTRAINT import_rows_tenant_id_unique UNIQUE (tenant_id, id),
@@ -867,13 +1014,14 @@ AS $$
 DECLARE
   quote_row quotes%ROWTYPE;
   quote_valid_until timestamptz;
+  quote_option_state text;
   charge_total bigint;
   charge_count bigint;
 BEGIN
   SELECT * INTO quote_row
   FROM quotes
   WHERE tenant_id = NEW.tenant_id AND id = NEW.quote_id
-  FOR KEY SHARE;
+  FOR UPDATE;
 
   IF quote_row.state <> 'ACCEPTED'
      OR quote_row.accepted_quote_version_id <> NEW.quote_version_id
@@ -884,9 +1032,22 @@ BEGIN
 
   SELECT valid_until INTO quote_valid_until
   FROM quote_versions
-  WHERE tenant_id = NEW.tenant_id AND id = NEW.quote_version_id;
-  IF quote_valid_until < NEW.accepted_at THEN
+  WHERE tenant_id = NEW.tenant_id
+    AND id = NEW.quote_version_id
+    AND quote_id = NEW.quote_id;
+  IF quote_valid_until <= NEW.accepted_at THEN
     RAISE EXCEPTION 'quote version expired at %', quote_valid_until
+      USING ERRCODE = '23514';
+  END IF;
+
+  SELECT state INTO quote_option_state
+  FROM quote_options
+  WHERE tenant_id = NEW.tenant_id
+    AND id = NEW.quote_option_id
+    AND quote_version_id = NEW.quote_version_id
+    AND quote_id = NEW.quote_id;
+  IF quote_option_state <> 'OFFERED' THEN
+    RAISE EXCEPTION 'only offered quote options can be accepted'
       USING ERRCODE = '23514';
   END IF;
 

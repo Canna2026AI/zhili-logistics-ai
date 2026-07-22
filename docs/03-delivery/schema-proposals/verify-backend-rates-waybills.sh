@@ -7,6 +7,10 @@ PROPOSAL="$SCRIPT_DIR/backend-rates-waybills.sql"
 FOUNDATION="$REPOSITORY_ROOT/packages/db/migrations/0000_foundation.sql"
 CONTAINER_NAME="zhili-rates-waybills-proposal-$$"
 POSTGRES_IMAGE=${POSTGRES_IMAGE:-postgres:17-alpine}
+RATE_CONCRETE_LOG=
+RATE_WILDCARD_LOG=
+QUOTE_ACCEPT_LOG=
+QUOTE_HEAD_LOG=
 
 fail() {
   printf 'proposal contract: FAIL: %s\n' "$*" >&2
@@ -23,6 +27,11 @@ expect_text() {
 
 cleanup() {
   docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  rm -f \
+    "${RATE_CONCRETE_LOG:-}" \
+    "${RATE_WILDCARD_LOG:-}" \
+    "${QUOTE_ACCEPT_LOG:-}" \
+    "${QUOTE_HEAD_LOG:-}"
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -234,6 +243,27 @@ BEGIN
 END
 $$;
 
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO rate_rules (
+      id, tenant_id, rate_card_version_id, rule_type, priority, channel_id,
+      service_code, origin_country_code, destination_country_code, package_type,
+      min_weight_grams, max_weight_grams, calculation_method, amount_minor,
+      currency, percentage_bps, state, version
+    ) VALUES (
+      '01ARZ3NDEKTSV4RRFFQ69G5FAE', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      '01ARZ3NDEKTSV4RRFFQ69G5FA3', 'BASE', 100,
+      NULL, 'EXPRESS', '*', '*', 'PARCEL',
+      500, 2000, 'FLAT', 600, 'USD', NULL, 'ACTIVE', 1
+    );
+    RAISE EXCEPTION 'wildcard and concrete rules tied at the same priority';
+  EXCEPTION
+    WHEN exclusion_violation THEN NULL;
+  END;
+END
+$$;
+
 INSERT INTO quotes (
   id, tenant_id, quote_number, customer_id, state, requested_currency,
   idempotency_key, version
@@ -241,11 +271,24 @@ INSERT INTO quotes (
   '01ARZ3NDEKTSV4RRFFQ69G5FA6', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
   'Q-1', '01ARZ3NDEKTSV4RRFFQ69G5FAX', 'OPEN', 'USD', 'quote-request-1', 1
 );
+INSERT INTO quotes (
+  id, tenant_id, quote_number, customer_id, state, requested_currency,
+  idempotency_key, version
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FB0', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  'Q-2', '01ARZ3NDEKTSV4RRFFQ69G5FAX', 'OPEN', 'USD', 'quote-request-2', 1
+);
 INSERT INTO quote_versions (
   id, tenant_id, quote_id, version_number, input_snapshot, valid_until
 ) VALUES (
   '01ARZ3NDEKTSV4RRFFQ69G5FA7', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
   '01ARZ3NDEKTSV4RRFFQ69G5FA6', 1, '{"route":"CN-US"}', now() + interval '1 hour'
+);
+INSERT INTO quote_versions (
+  id, tenant_id, quote_id, version_number, input_snapshot, valid_until
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FB1', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  '01ARZ3NDEKTSV4RRFFQ69G5FB0', 1, '{"route":"CN-GB"}', now() + interval '1 hour'
 );
 INSERT INTO quote_parcels (
   id, tenant_id, quote_version_id, parcel_number, actual_weight_grams,
@@ -255,12 +298,22 @@ INSERT INTO quote_parcels (
   '01ARZ3NDEKTSV4RRFFQ69G5FA7', 1, 1000, 100, 100, 100
 );
 INSERT INTO quote_options (
-  id, tenant_id, quote_version_id, option_code, channel_id, service_code,
+  id, tenant_id, quote_version_id, quote_id, option_code, channel_id, service_code,
   currency, total_amount_minor, chargeable_weight_grams, state
 ) VALUES (
   '01ARZ3NDEKTSV4RRFFQ69G5FA9', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-  '01ARZ3NDEKTSV4RRFFQ69G5FA7', 'FASTEST', '01ARZ3NDEKTSV4RRFFQ69G5FA0',
+  '01ARZ3NDEKTSV4RRFFQ69G5FA7', '01ARZ3NDEKTSV4RRFFQ69G5FA6',
+  'FASTEST', '01ARZ3NDEKTSV4RRFFQ69G5FA0',
   'EXPRESS', 'USD', 500, 1000, 'OFFERED'
+);
+INSERT INTO quote_options (
+  id, tenant_id, quote_version_id, quote_id, option_code, channel_id, service_code,
+  currency, total_amount_minor, chargeable_weight_grams, state
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FB2', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  '01ARZ3NDEKTSV4RRFFQ69G5FB1', '01ARZ3NDEKTSV4RRFFQ69G5FB0',
+  'FOREIGN', '01ARZ3NDEKTSV4RRFFQ69G5FA0',
+  'EXPRESS', 'USD', 700, 1000, 'OFFERED'
 );
 INSERT INTO quote_charge_lines (
   id, tenant_id, quote_option_id, line_number, charge_code, description,
@@ -278,6 +331,22 @@ INSERT INTO quote_explanations (
   '01ARZ3NDEKTSV4RRFFQ69G5FA9', 1, 'RULE_APPLIED', 'Base rule selected',
   '{"rule":"01ARZ3NDEKTSV4RRFFQ69G5FA4"}'
 );
+DO $$
+BEGIN
+  BEGIN
+    UPDATE quotes
+    SET state = 'ACCEPTED',
+        accepted_quote_version_id = '01ARZ3NDEKTSV4RRFFQ69G5FB1',
+        accepted_quote_option_id = '01ARZ3NDEKTSV4RRFFQ69G5FB2',
+        version = 2,
+        updated_at = now()
+    WHERE id = '01ARZ3NDEKTSV4RRFFQ69G5FA6';
+    RAISE EXCEPTION 'quote accepted a version and option owned by another quote';
+  EXCEPTION
+    WHEN foreign_key_violation THEN NULL;
+  END;
+END
+$$;
 UPDATE quotes
 SET state = 'ACCEPTED',
     accepted_quote_version_id = '01ARZ3NDEKTSV4RRFFQ69G5FA7',
@@ -312,6 +381,287 @@ BEGIN
   EXCEPTION
     WHEN SQLSTATE '55000' THEN NULL;
   END;
+END
+$$;
+
+INSERT INTO orders (
+  id, tenant_id, order_number, customer_id, pickup_address_id,
+  delivery_address_id, state, idempotency_key, version
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FC0', '01ARZ3NDEKTSV4RRFFQ69G5FAV', 'ORD-IMPORT-1',
+  '01ARZ3NDEKTSV4RRFFQ69G5FAX', '01ARZ3NDEKTSV4RRFFQ69G5FAY',
+  '01ARZ3NDEKTSV4RRFFQ69G5FAY', 'DRAFT', 'order-import-1', 1
+);
+INSERT INTO import_jobs (
+  id, tenant_id, import_number, import_type, source_object_key, source_sha256,
+  state, idempotency_key, total_rows, succeeded_rows, failed_rows, committed_at
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FC1', '01ARZ3NDEKTSV4RRFFQ69G5FAV', 'IMP-ORIGINAL-1',
+  'ORDERS', 'imports/original-1.csv', repeat('a', 64), 'COMMITTED',
+  'import-original-1', 1, 1, 0, now()
+);
+INSERT INTO import_rows (
+  id, tenant_id, import_job_id, row_number, source_fingerprint, input_payload,
+  validation_status, commit_status, rollback_status, result_code,
+  created_order_id, applied_at
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FC2', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  '01ARZ3NDEKTSV4RRFFQ69G5FC1', 1, repeat('b', 64), '{"order":"ORD-IMPORT-1"}',
+  'VALID', 'APPLIED', 'PENDING', 'CREATED', '01ARZ3NDEKTSV4RRFFQ69G5FC0', now()
+);
+UPDATE import_rows
+SET rollback_status = 'ROLLED_BACK', rolled_back_at = now(), updated_at = now()
+WHERE id = '01ARZ3NDEKTSV4RRFFQ69G5FC2';
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO import_rows (
+      id, tenant_id, import_job_id, row_number, source_fingerprint, input_payload,
+      validation_status, commit_status, rollback_status, result_code, rolled_back_at
+    ) VALUES (
+      '01ARZ3NDEKTSV4RRFFQ69G5FC6', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      '01ARZ3NDEKTSV4RRFFQ69G5FC1', 2, repeat('c', 64), '{"bad":true}',
+      'INVALID', 'FAILED', 'ROLLED_BACK', 'INVALID_ROW', now()
+    );
+    RAISE EXCEPTION 'a failed import row claimed a successful rollback';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+END
+$$;
+
+INSERT INTO import_jobs (
+  id, tenant_id, import_number, import_type, source_object_key, source_sha256,
+  state, idempotency_key, rollback_of_job_id
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FC3', '01ARZ3NDEKTSV4RRFFQ69G5FAV', 'IMP-ROLLBACK-1',
+  'ORDERS', 'imports/rollback-1.json', repeat('d', 64), 'UPLOADED',
+  'import-rollback-1', '01ARZ3NDEKTSV4RRFFQ69G5FC1'
+);
+
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO import_jobs (
+      id, tenant_id, import_number, import_type, source_object_key, source_sha256,
+      state, idempotency_key, rollback_of_job_id
+    ) VALUES (
+      '01ARZ3NDEKTSV4RRFFQ69G5FC4', '01ARZ3NDEKTSV4RRFFQ69G5FAV', 'IMP-ROLLBACK-DUP',
+      'ORDERS', 'imports/rollback-duplicate.json', repeat('e', 64), 'UPLOADED',
+      'import-rollback-duplicate', '01ARZ3NDEKTSV4RRFFQ69G5FC1'
+    );
+    RAISE EXCEPTION 'duplicate rollback job was accepted';
+  EXCEPTION
+    WHEN unique_violation THEN NULL;
+  END;
+
+  BEGIN
+    INSERT INTO import_jobs (
+      id, tenant_id, import_number, import_type, source_object_key, source_sha256,
+      state, idempotency_key, rollback_of_job_id
+    ) VALUES (
+      '01ARZ3NDEKTSV4RRFFQ69G5FC5', '01ARZ3NDEKTSV4RRFFQ69G5FAV', 'IMP-ROLLBACK-NESTED',
+      'ORDERS', 'imports/rollback-nested.json', repeat('f', 64), 'UPLOADED',
+      'import-rollback-nested', '01ARZ3NDEKTSV4RRFFQ69G5FC3'
+    );
+    RAISE EXCEPTION 'rollback-of-rollback job was accepted';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+END
+$$;
+SQL
+
+RATE_CONCRETE_LOG=$(mktemp)
+RATE_WILDCARD_LOG=$(mktemp)
+
+docker exec -i "$CONTAINER_NAME" psql -v ON_ERROR_STOP=1 -U postgres -d zhili_proposal \
+  >"$RATE_CONCRETE_LOG" 2>&1 <<'SQL' &
+BEGIN;
+INSERT INTO rate_rules (
+  id, tenant_id, rate_card_version_id, rule_type, priority, channel_id,
+  service_code, origin_country_code, destination_country_code, package_type,
+  min_weight_grams, max_weight_grams, calculation_method, amount_minor,
+  currency, percentage_bps, state, version
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FD0', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  '01ARZ3NDEKTSV4RRFFQ69G5FA3', 'BASE', 300,
+  '01ARZ3NDEKTSV4RRFFQ69G5FA0', 'EXPRESS', 'CN', 'US', 'PARCEL',
+  1, 1000, 'FLAT', 500, 'USD', NULL, 'ACTIVE', 1
+);
+SELECT pg_sleep(2);
+COMMIT;
+SQL
+rate_concrete_pid=$!
+sleep 1
+
+set +e
+docker exec -i "$CONTAINER_NAME" psql -v ON_ERROR_STOP=1 -U postgres -d zhili_proposal \
+  >"$RATE_WILDCARD_LOG" 2>&1 <<'SQL'
+INSERT INTO rate_rules (
+  id, tenant_id, rate_card_version_id, rule_type, priority, channel_id,
+  service_code, origin_country_code, destination_country_code, package_type,
+  min_weight_grams, max_weight_grams, calculation_method, amount_minor,
+  currency, percentage_bps, state, version
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FD1', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  '01ARZ3NDEKTSV4RRFFQ69G5FA3', 'BASE', 300,
+  NULL, 'EXPRESS', '*', '*', 'PARCEL',
+  500, 2000, 'FLAT', 600, 'USD', NULL, 'ACTIVE', 1
+);
+SQL
+rate_wildcard_status=$?
+wait "$rate_concrete_pid"
+rate_concrete_status=$?
+set -e
+
+[ "$rate_concrete_status" -eq 0 ] || fail "concrete rate-rule transaction did not commit"
+[ "$rate_wildcard_status" -ne 0 ] || fail "concurrent wildcard rate-rule tie committed"
+grep -q "rate rule priority tie after wildcard expansion" "$RATE_WILDCARD_LOG" ||
+  fail "concurrent wildcard rate-rule tie did not fail by semantic exclusion"
+
+docker exec -i "$CONTAINER_NAME" psql -v ON_ERROR_STOP=1 -U postgres -d zhili_proposal \
+  >/dev/null <<'SQL'
+INSERT INTO quote_options (
+  id, tenant_id, quote_version_id, quote_id, option_code, channel_id, service_code,
+  currency, total_amount_minor, chargeable_weight_grams, state
+) VALUES
+  (
+    '01ARZ3NDEKTSV4RRFFQ69G5FD3', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    '01ARZ3NDEKTSV4RRFFQ69G5FB1', '01ARZ3NDEKTSV4RRFFQ69G5FB0',
+    'SECOND', '01ARZ3NDEKTSV4RRFFQ69G5FA0', 'EXPRESS', 'USD', 800, 1000, 'OFFERED'
+  ),
+  (
+    '01ARZ3NDEKTSV4RRFFQ69G5FD5', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    '01ARZ3NDEKTSV4RRFFQ69G5FB1', '01ARZ3NDEKTSV4RRFFQ69G5FB0',
+    'UNAVAILABLE', '01ARZ3NDEKTSV4RRFFQ69G5FA0', 'EXPRESS', 'USD', 900, 1000, 'UNAVAILABLE'
+  );
+INSERT INTO quote_charge_lines (
+  id, tenant_id, quote_option_id, line_number, charge_code, description,
+  currency, amount_minor
+) VALUES
+  (
+    '01ARZ3NDEKTSV4RRFFQ69G5FD7', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    '01ARZ3NDEKTSV4RRFFQ69G5FB2', 1, 'BASE', 'Base charge', 'USD', 700
+  ),
+  (
+    '01ARZ3NDEKTSV4RRFFQ69G5FD8', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    '01ARZ3NDEKTSV4RRFFQ69G5FD3', 1, 'BASE', 'Second charge', 'USD', 800
+  ),
+  (
+    '01ARZ3NDEKTSV4RRFFQ69G5FD9', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    '01ARZ3NDEKTSV4RRFFQ69G5FD5', 1, 'BASE', 'Unavailable charge', 'USD', 900
+  );
+UPDATE quotes
+SET state = 'ACCEPTED',
+    accepted_quote_version_id = '01ARZ3NDEKTSV4RRFFQ69G5FB1',
+    accepted_quote_option_id = '01ARZ3NDEKTSV4RRFFQ69G5FB2',
+    version = 2,
+    updated_at = now()
+WHERE id = '01ARZ3NDEKTSV4RRFFQ69G5FB0';
+
+DO $$
+DECLARE boundary timestamptz;
+BEGIN
+  SELECT valid_until INTO boundary
+  FROM quote_versions
+  WHERE id = '01ARZ3NDEKTSV4RRFFQ69G5FB1';
+  BEGIN
+    INSERT INTO quote_acceptances (
+      id, tenant_id, quote_id, quote_version_id, quote_option_id, currency,
+      total_amount_minor, explanation_snapshot, accepted_by_subject_id,
+      accepted_at, created_at
+    ) VALUES (
+      '01ARZ3NDEKTSV4RRFFQ69G5FD4', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      '01ARZ3NDEKTSV4RRFFQ69G5FB0', '01ARZ3NDEKTSV4RRFFQ69G5FB1',
+      '01ARZ3NDEKTSV4RRFFQ69G5FB2', 'USD', 700, '[{"code":"BOUNDARY"}]',
+      'subject-boundary', boundary, boundary
+    );
+    RAISE EXCEPTION 'quote was accepted at the exclusive valid_until boundary';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+
+  BEGIN
+    UPDATE quotes
+    SET accepted_quote_option_id = '01ARZ3NDEKTSV4RRFFQ69G5FD5',
+        version = version + 1,
+        updated_at = now()
+    WHERE id = '01ARZ3NDEKTSV4RRFFQ69G5FB0';
+    INSERT INTO quote_acceptances (
+      id, tenant_id, quote_id, quote_version_id, quote_option_id, currency,
+      total_amount_minor, explanation_snapshot, accepted_by_subject_id
+    ) VALUES (
+      '01ARZ3NDEKTSV4RRFFQ69G5FD6', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      '01ARZ3NDEKTSV4RRFFQ69G5FB0', '01ARZ3NDEKTSV4RRFFQ69G5FB1',
+      '01ARZ3NDEKTSV4RRFFQ69G5FD5', 'USD', 900, '[{"code":"UNAVAILABLE"}]',
+      'subject-unavailable'
+    );
+    RAISE EXCEPTION 'an unavailable quote option was accepted';
+  EXCEPTION
+    WHEN check_violation THEN NULL;
+  END;
+END
+$$;
+SQL
+
+QUOTE_ACCEPT_LOG=$(mktemp)
+QUOTE_HEAD_LOG=$(mktemp)
+
+docker exec -i "$CONTAINER_NAME" psql -v ON_ERROR_STOP=1 -U postgres -d zhili_proposal \
+  >"$QUOTE_ACCEPT_LOG" 2>&1 <<'SQL' &
+BEGIN;
+INSERT INTO quote_acceptances (
+  id, tenant_id, quote_id, quote_version_id, quote_option_id, currency,
+  total_amount_minor, explanation_snapshot, accepted_by_subject_id
+) VALUES (
+  '01ARZ3NDEKTSV4RRFFQ69G5FD2', '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  '01ARZ3NDEKTSV4RRFFQ69G5FB0', '01ARZ3NDEKTSV4RRFFQ69G5FB1',
+  '01ARZ3NDEKTSV4RRFFQ69G5FB2', 'USD', 700, '[{"code":"ACCEPTED"}]',
+  'subject-concurrent'
+);
+SELECT pg_sleep(2);
+COMMIT;
+SQL
+quote_accept_pid=$!
+sleep 1
+
+set +e
+docker exec -i "$CONTAINER_NAME" psql -v ON_ERROR_STOP=1 -U postgres -d zhili_proposal \
+  >"$QUOTE_HEAD_LOG" 2>&1 <<'SQL'
+UPDATE quotes
+SET accepted_quote_option_id = '01ARZ3NDEKTSV4RRFFQ69G5FD3',
+    version = version + 1,
+    updated_at = now()
+WHERE id = '01ARZ3NDEKTSV4RRFFQ69G5FB0';
+SQL
+quote_head_status=$?
+wait "$quote_accept_pid"
+quote_accept_status=$?
+set -e
+
+[ "$quote_accept_status" -eq 0 ] || fail "concurrent quote acceptance did not commit"
+[ "$quote_head_status" -ne 0 ] || fail "concurrent accepted quote head update committed"
+grep -q "accepted quotes are immutable" "$QUOTE_HEAD_LOG" ||
+  fail "concurrent quote head update failed for an unexpected reason"
+
+docker exec -i "$CONTAINER_NAME" psql -v ON_ERROR_STOP=1 -U postgres -d zhili_proposal \
+  >/dev/null <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM quotes q
+    JOIN quote_acceptances a
+      ON a.tenant_id = q.tenant_id
+     AND a.quote_id = q.id
+     AND a.quote_version_id = q.accepted_quote_version_id
+     AND a.quote_option_id = q.accepted_quote_option_id
+    WHERE q.id = '01ARZ3NDEKTSV4RRFFQ69G5FB0'
+  ) THEN
+    RAISE EXCEPTION 'quote head and immutable acceptance diverged after concurrent updates';
+  END IF;
 END
 $$;
 SQL
