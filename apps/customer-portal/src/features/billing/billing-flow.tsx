@@ -92,11 +92,11 @@ const meta: Record<
     description: '支付已确认，正在显示服务端权威核销快照。',
     active: 2,
     tone: 'warning',
-    status: 'PARTIAL · 已核销 99.12%',
+    status: 'PARTIAL · 以服务端核销快照为准',
   },
   conflict: {
     title: '账单已被其他操作员更新',
-    description: '陈思刚刚完成一笔核销，请刷新数据后继续。',
+    description: '服务端版本发生变化，请刷新权威核销快照后继续。',
     active: 2,
     tone: 'warning',
     status: 'CONFLICT · 乐观锁已阻止重复核销',
@@ -360,7 +360,7 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
               onClick={() =>
                 receipt &&
                 void customerPort
-                  .uploadReceipt(receipt.name)
+                  .uploadReceipt(receipt)
                   .then(() => {
                     localStorage.setItem(receiptKey, receipt.name);
                     setReceiptName(receipt.name);

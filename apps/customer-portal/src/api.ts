@@ -809,11 +809,11 @@ export const customerPort = {
     });
     ensure(response.data, response.error);
   },
-  async uploadReceipt(fileName: string) {
-    await customerCommand('/api/v1/portal/payment-vouchers', {
-      fileName,
-      statementNo: 'ST202605-0008',
-    });
+  async uploadReceipt(file: File) {
+    const form = new FormData();
+    form.set('file', file, file.name);
+    form.set('statementNo', 'ST202605-0008');
+    await customerUpload('/api/v1/portal/payment-vouchers', form);
   },
   submitIssueEvidence(issueId: string, input: { file: File; contact: string; note: string }) {
     const form = new FormData();
