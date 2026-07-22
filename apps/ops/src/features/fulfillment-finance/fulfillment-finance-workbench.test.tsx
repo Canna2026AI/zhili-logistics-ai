@@ -243,4 +243,43 @@ describe('fulfillment and finance workbench', () => {
     }
     expect(screen.getByLabelText('财务流程状态')).toHaveTextContent('发票 INV-202607-018 已审批');
   });
+
+  it('renders flow-specific linehaul branches and recovers without losing the workbench', () => {
+    render(
+      <FulfillmentFinanceWorkbench commandPort={successfulPort()} initialSection="linehaul" />
+    );
+
+    expect(screen.getByRole('combobox', { name: '业务流程' })).toHaveValue('F04');
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'failed-incompatible' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('装载兼容性失败');
+    expect(screen.getByText(/3 票运单不符合/)).toBeVisible();
+    expect(screen.getByRole('button', { name: '下载失败报告' })).toBeEnabled();
+
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'forbidden-release' },
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('缺少放货权限');
+    expect(screen.getByText(/hold\.release/)).toBeVisible();
+    expect(screen.queryByRole('button', { name: '确认放货' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回正常流程' }));
+    expect(screen.getByRole('heading', { name: '干线与尾程履约' })).toBeVisible();
+  });
+
+  it('switches finance flows and preserves partial payable import recovery', () => {
+    render(<FulfillmentFinanceWorkbench commandPort={successfulPort()} initialSection="finance" />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '业务流程' }), {
+      target: { value: 'F07' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'partial' },
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('部分提交');
+    expect(screen.getByText(/成功 98 条，失败 2 条/)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '只重试失败项' }));
+    expect(screen.getByText('失败清单已保留，等待重新校验')).toBeVisible();
+  });
 });
