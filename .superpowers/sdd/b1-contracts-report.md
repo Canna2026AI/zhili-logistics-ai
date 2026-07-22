@@ -2,14 +2,38 @@
 
 ## Status
 
-DONE for the contract-hardening scope. Database migrations, repositories, services, controllers and
-visual form work were intentionally not modified by this branch.
+DONE for the contract-hardening scope, including the independent C0 / I7 / M1 review remediation.
+Database migrations, repositories, services, controllers and visual form work were intentionally
+not modified by this branch.
 
 ## Commits
 
 - Review base: `a769e39`
 - Immutable implementation commit: `7a7c8f858db95d3ccd96278e04f074b3fba8099a`
-- This report is committed separately so it can name the immutable implementation commit.
+- Independent review evidence commit: `bd8a1589b13f2270fbdcd906ad880d8542938868`
+- Review remediation commit: `578782160e64db524341188429206d2cca26223a`
+- This report is committed separately so it can name both immutable implementation commits.
+
+## Independent review remediation
+
+- ORD-08 batch requests now carry one `{waybillId, expectedVersion}` per input and return one ordered
+  authoritative outcome per input. Split and merge return explicit lineage with every aggregate
+  version and do not expose an ambiguous global ETag.
+- Shipment/load validation returns failed rules, warnings and alternatives. Rate rules now encode
+  scope, weight range, calculation-specific values, measurement/rounding, effective dates, priority
+  and status.
+- Seven upsert families now use closed CREATE/UPDATE unions with explicit discriminator mappings.
+  The machine-readable `x-upsert-precondition` boundary is covered by semantic tests and documented
+  in `b1-upsert-precondition-boundary.md`.
+- Accepted-quote linkage carries `acceptedQuoteVersion`, returns quote/link/order/waybill versions,
+  documents the order ETag, and declares scoped 404 and 410 outcomes.
+- Nine workbench list families now publish real filters, signed filter-bound cursors, immutable order
+  tuples, snapshot metadata and `CURSOR_FILTER_MISMATCH` behavior.
+- Waybill PII is accompanied by READ/MASK/DENY, copy and export decisions. The adapter preserves
+  server-masked values and never reconstructs denied data.
+- Rate, order, waybill and platform adapters no longer invent IDs, statuses, timestamps, currencies
+  or committed versions. They collect required caller inputs, propagate current ETags and fail closed
+  on incomplete responses. Order submission now has an authoritative `submitOrder` contract.
 
 ## Delivered contract surface
 
@@ -43,6 +67,13 @@ Observed before implementation: 9 failed and 13 passed. Failures covered missing
 schemas, OAuth/reauth separation, preview semantics, upsert preconditions, quote-to-order linkage,
 cursor workbench reads, waybill detail fields and ETag/412 behavior.
 
+Independent review tests were also added before remediation:
+
+- Contract semantics: 7 failed / 22 passed, one failure for each I1–I7 gap.
+- Waybill/order adapters: 5 failed / 42 passed, covering field decisions, ordered batch outcomes and
+  removal of submit/copy/label/renumber/split/merge fallbacks.
+- Rates: 2 failed / 19 passed; customer portal: 1 failed / 32 passed; platform: 2 failed / 16 passed.
+
 ### GREEN
 
 The following fresh gates passed after implementation:
@@ -55,7 +86,7 @@ pnpm contracts:generate:check
 generated api.d.ts matches the staged OpenAPI source
 
 pnpm --filter @zhili/contracts test
-22/22 tests passed
+29/29 tests passed
 
 pnpm format:check
 all files matched Prettier formatting
@@ -76,8 +107,8 @@ git diff --check
 passed
 ```
 
-Focused affected-module verification also passed: identity/master data 11/11, rates/routing 20/20,
-waybills 43/43, customer portal 33/33, PDA 137/137, platform 17/17, website 11/11 and mocks 6/6.
+Focused affected-module verification also passed: identity/master data 11/11, rates/routing 21/21,
+waybills 47/47, customer portal 33/33, PDA 137/137, platform 18/18, website 11/11 and mocks 6/6.
 Platform tests still print pre-existing React `act(...)` warnings while passing.
 
 ## Remaining integration blockers
@@ -95,6 +126,9 @@ Platform tests still print pre-existing React `act(...)` warnings while passing.
    inventing address data. The UI form must be expanded before real address creation can succeed.
 4. Canonical status enums and address snapshot persistence must be aligned with the eventual SQL
    migration before the contract branch is merged with the database/service worktrees.
+5. The seven upsert controller implementations must enforce the documented CREATE/UPDATE
+   `id`/`If-Match` matrix atomically. The contract and boundary document are complete, but controllers
+   remain intentionally outside this branch.
 
 ## Scope guard
 
