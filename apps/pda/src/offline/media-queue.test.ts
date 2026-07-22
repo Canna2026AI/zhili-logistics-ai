@@ -24,7 +24,7 @@ describe('MediaQueue', () => {
     );
     const restored = await new MediaQueue(store).restore();
 
-    expect(item.contentHash).toMatch(/^sha256:/);
+    expect(item.contentHash).toMatch(/^[a-f0-9]{64}$/);
     expect(restored[0]).toMatchObject({
       mediaId: item.mediaId,
       status: 'PENDING',

@@ -1,11 +1,16 @@
 import type { components } from '@zhili/contracts';
 import type { PdaPort } from './pda-port';
+import type { UploadEncryptedTakeoverInput } from './pda-port';
 import type {
   DeliveryEvent,
+  DeliveryTaskTransitionReceipt,
+  AuthorizeDeviceTakeoverExportRequest,
+  DeviceTakeoverExportAuthorization,
+  DeviceTakeoverExportReceipt,
   DeviceConflict,
   DeviceEventEnvelope,
   DeviceSession,
-  ProofOfDelivery,
+  ProofOfDeliveryCaptureReceipt,
 } from '../domain/types';
 
 const future = '2099-12-31T23:59:59.000Z';
@@ -33,6 +38,7 @@ export class MemoryPdaPort implements PdaPort {
         'pda.use',
         'pda.sync',
         'pda.conflict.resolve',
+        'pda.takeover.export',
         'lastmile.delivery.execute',
         'lastmile.pod.write',
       ],
@@ -67,12 +73,18 @@ export class MemoryPdaPort implements PdaPort {
     this.syncCallCount += 1;
     return events.map((event) => {
       if (this.synchronized.has(event.idempotencyKey)) {
-        return { eventId: event.eventId, disposition: 'DUPLICATE' as const, serverVersion: 8 };
+        return {
+          eventId: event.eventId,
+          disposition: 'DUPLICATE' as const,
+          claimedMediaRefs: event.mediaRefs,
+          serverVersion: 8,
+        };
       }
       if (event.entityRef.toUpperCase().includes('CONFLICT')) {
         return {
           eventId: event.eventId,
           disposition: 'CONFLICT' as const,
+          claimedMediaRefs: [],
           serverVersion: 9,
           conflictId: '01JCONFLICT000000000000001',
           conflictVersion: 1,
@@ -82,13 +94,19 @@ export class MemoryPdaPort implements PdaPort {
         return {
           eventId: event.eventId,
           disposition: 'REJECTED' as const,
+          claimedMediaRefs: [],
           serverVersion: 8,
           errorCode: 'INVALID_STATE',
           errorMessage: '当前业务状态不允许执行',
         };
       }
       this.synchronized.add(event.idempotencyKey);
-      return { eventId: event.eventId, disposition: 'APPLIED' as const, serverVersion: 8 };
+      return {
+        eventId: event.eventId,
+        disposition: 'APPLIED' as const,
+        claimedMediaRefs: event.mediaRefs,
+        serverVersion: 8,
+      };
     });
   }
 
@@ -161,11 +179,18 @@ export class MemoryPdaPort implements PdaPort {
     _etag: string,
     _idempotencyKey: string,
     body: DeliveryEvent
-  ) {
+  ): Promise<DeliveryTaskTransitionReceipt> {
     return {
-      resourceId: deliveryTaskId,
-      status: 'SUCCEEDED' as const,
-      version: (body.version ?? 0) + 1,
+      deviceEventId: body.deviceEventId,
+      disposition: 'APPLIED' as const,
+      deliveryTask: {
+        id: deliveryTaskId,
+        taskNo: 'LM250722001',
+        status: body.targetStatus,
+        waybillCount: 1,
+        version: Number(_etag.replaceAll('"', '')) + 1,
+      },
+      claimedMediaRefs: body.mediaRefs,
     };
   }
 
@@ -174,16 +199,52 @@ export class MemoryPdaPort implements PdaPort {
     _etag: string,
     _idempotencyKey: string,
     body: components['schemas']['CaptureProofOfDeliveryRequest']
-  ): Promise<ProofOfDelivery> {
+  ): Promise<ProofOfDeliveryCaptureReceipt> {
     return {
-      id: '01JPOD0000000000000000001',
-      deliveryTaskId,
-      versionNo: 1,
-      recipientName: body.recipientName,
-      signedAt: body.signedAt,
-      evidenceRefs: body.evidenceRefs,
+      deviceEventId: body.deviceEventId,
+      disposition: 'APPLIED' as const,
+      deliveryTask: {
+        id: deliveryTaskId,
+        taskNo: 'LM250722001',
+        status: 'COMPLETED' as const,
+        waybillCount: 1,
+        version: Number(_etag.replaceAll('"', '')) + 1,
+      },
+      proofOfDelivery: {
+        id: '01JPOD0000000000000000001',
+        deliveryTaskId,
+        versionNo: 1,
+        recipientName: body.recipientName,
+        signedAt: body.signedAt,
+        evidenceRefs: body.evidenceRefs,
+      },
+      claimedMediaRefs: body.evidenceRefs,
     };
   }
 
   async amendProofOfDelivery() {}
+
+  async authorizeDeviceTakeoverExport(
+    _deviceId: string,
+    _idempotencyKey: string,
+    _body: AuthorizeDeviceTakeoverExportRequest
+  ): Promise<DeviceTakeoverExportAuthorization> {
+    void _deviceId;
+    void _idempotencyKey;
+    void _body;
+    throw new Error('MemoryPdaPort 不提供管理员接管密钥；请使用测试专用端口或真实 API。');
+  }
+
+  async uploadEncryptedDeviceTakeoverExport(
+    _deviceId: string,
+    _authorizationId: string,
+    _idempotencyKey: string,
+    _input: UploadEncryptedTakeoverInput
+  ): Promise<DeviceTakeoverExportReceipt> {
+    void _deviceId;
+    void _authorizationId;
+    void _idempotencyKey;
+    void _input;
+    throw new Error('MemoryPdaPort 不提供管理员接管上传；请使用测试专用端口或真实 API。');
+  }
 }

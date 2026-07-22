@@ -227,6 +227,10 @@ describe('OfflineQueue', () => {
     const results: SyncResult[] = events.map((event, index) => ({
       eventId: event.envelope.eventId,
       disposition: dispositions[index]!,
+      claimedMediaRefs:
+        dispositions[index] === 'APPLIED' || dispositions[index] === 'DUPLICATE'
+          ? event.envelope.mediaRefs
+          : [],
       serverVersion: 9,
       conflictId: dispositions[index] === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
       errorCode: dispositions[index] === 'REJECTED' ? 'INVALID_STATE' : undefined,
@@ -272,7 +276,12 @@ describe('OfflineQueue', () => {
       });
 
       await queue.applySyncResults([
-        { eventId: event.envelope.eventId, disposition, serverVersion: 8 },
+        {
+          eventId: event.envelope.eventId,
+          disposition,
+          claimedMediaRefs: [mediaId],
+          serverVersion: 8,
+        },
       ]);
 
       expect(await store.getEvents()).toEqual([]);
@@ -297,6 +306,7 @@ describe('OfflineQueue', () => {
         {
           eventId: first.envelope.eventId,
           disposition,
+          claimedMediaRefs: [],
           conflictId: disposition === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
           errorCode: disposition === 'REJECTED' ? 'INVALID_STATE' : undefined,
         },
@@ -307,4 +317,44 @@ describe('OfflineQueue', () => {
       expect(queue.snapshot().events).toHaveLength(1);
     }
   );
+
+  it('keeps all work when an authoritative receipt claims a different media set', async () => {
+    const store = new MemoryQueueStore();
+    const queue = createQueue(store);
+    await queue.restore();
+    const mediaId = 'media-exact-claim';
+    const event = await queue.enqueue(context, {
+      action: 'CAPTURE_POD',
+      entityRef: 'LM250722001',
+      payload: {},
+      mediaRefs: [mediaId],
+      mediaItems: [
+        {
+          mediaId,
+          eventId: '01JY8Z8F6ME4F0Y9QH2X6D4R7',
+          contentHash: '0'.repeat(64),
+          mimeType: 'image/png',
+          blob: new Blob(['photo']),
+          status: 'PROCESSING',
+          remoteStatus: 'UPLOADED',
+          progress: 70,
+          attempts: 1,
+          context,
+        },
+      ],
+      baseVersion: 7,
+    });
+
+    await expect(
+      queue.confirmClaimedWork({
+        eventId: event.envelope.eventId,
+        disposition: 'APPLIED',
+        claimedMediaRefs: ['media-other'],
+        serverVersion: 8,
+        operation: 'PROOF_OF_DELIVERY',
+      })
+    ).rejects.toThrow('媒体认领回执');
+    expect(await store.getEvents()).toHaveLength(1);
+    expect(await store.getMedia()).toHaveLength(1);
+  });
 });

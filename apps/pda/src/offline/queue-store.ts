@@ -11,6 +11,7 @@ export interface QueueStore {
   putMedia(item: MediaQueueItem): Promise<void>;
   deleteMedia(mediaId: string): Promise<void>;
   clearMedia(): Promise<void>;
+  clearWork(): Promise<void>;
   getNextSequence(): Promise<number>;
   setNextSequence(value: number): Promise<void>;
   getMeta<T>(key: string): Promise<T | undefined>;
@@ -73,6 +74,12 @@ export class MemoryQueueStore implements QueueStore {
   }
 
   async clearMedia() {
+    this.media.clear();
+  }
+
+  async clearWork() {
+    this.events.clear();
+    this.eventDedupe.clear();
     this.media.clear();
   }
 
@@ -326,6 +333,16 @@ export class IndexedDbQueueStore implements QueueStore {
 
   async clearMedia() {
     await (await this.database).clear('media');
+  }
+
+  async clearWork() {
+    const database = await this.database;
+    const transaction = database.transaction(['events', 'media'], 'readwrite');
+    await Promise.all([
+      transaction.objectStore('events').clear(),
+      transaction.objectStore('media').clear(),
+    ]);
+    await transaction.done;
   }
 
   async getNextSequence() {

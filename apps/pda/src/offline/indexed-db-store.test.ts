@@ -112,6 +112,7 @@ describe('IndexedDbQueueStore', () => {
       {
         eventId: queue.snapshot().events[0]!.envelope.eventId,
         disposition: 'APPLIED',
+        claimedMediaRefs: ['media-atomic'],
         serverVersion: 2,
       },
     ]);
@@ -139,6 +140,7 @@ describe('IndexedDbQueueStore', () => {
         {
           eventId: first.envelope.eventId,
           disposition,
+          claimedMediaRefs: [],
           conflictId: disposition === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
           errorCode: disposition === 'REJECTED' ? 'INVALID_STATE' : undefined,
         },

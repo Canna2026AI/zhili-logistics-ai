@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button } from '@zhili/ui';
 import type { QueuedEvent } from '../domain/types';
 import type { PdaSyncService } from '../sync/pda-sync-service';
+import { PdaApiError } from '../ports/pda-port';
 
 const decisions = [
   { value: 'KEEP_SERVER', label: '保留服务器', impact: '放弃本地事件，保留服务器现状。' },
@@ -29,7 +30,7 @@ export function ConflictPanel({
   const [currentEvent, setCurrentEvent] = useState(event);
   const [resolution, setResolution] = useState<(typeof decisions)[number]['value']>('KEEP_SERVER');
   const [reason, setReason] = useState('');
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<PdaApiError | Error>();
   const [busy, setBusy] = useState(false);
   const submit = async () => {
     setBusy(true);
@@ -46,7 +47,7 @@ export function ConflictPanel({
       )
         await onUnauthorized(caught);
       setCurrentEvent(service.getEvent(currentEvent.envelope.eventId) ?? currentEvent);
-      setError(caught instanceof Error ? caught.message : '冲突处理失败');
+      setError(caught instanceof Error ? caught : new Error('冲突处理失败'));
     } finally {
       setBusy(false);
     }
@@ -130,7 +131,22 @@ export function ConflictPanel({
       </label>
       {error && (
         <div className="pda-message pda-message--danger" role="alert">
-          {error}
+          <strong>{error.message}</strong>
+          {error instanceof PdaApiError && (
+            <dl>
+              <dt>错误代码</dt>
+              <dd>{error.code}</dd>
+              <dt>修复建议</dt>
+              <dd>{error.remediation ?? '复核最新差异后重试。'}</dd>
+              <dt>requestId</dt>
+              <dd>{error.requestId ?? '未返回'}</dd>
+              {error.details?.map((detail, index) => (
+                <div key={`${detail.field ?? 'detail'}-${index}`}>
+                  {detail.field ?? '详情'}：{detail.reason}
+                </div>
+              ))}
+            </dl>
+          )}
         </div>
       )}
       {!canResolve && (

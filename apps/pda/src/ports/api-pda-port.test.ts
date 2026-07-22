@@ -43,7 +43,14 @@ describe('createApiPdaPort', () => {
         });
       if (path.endsWith('/tasks')) return Response.json({ data: [], meta });
       return Response.json({
-        data: [{ eventId: envelope.eventId, disposition: 'APPLIED', serverVersion: 8 }],
+        data: [
+          {
+            eventId: envelope.eventId,
+            disposition: 'APPLIED',
+            claimedMediaRefs: [],
+            serverVersion: 8,
+          },
+        ],
         meta,
       });
     };
@@ -94,19 +101,42 @@ describe('createApiPdaPort', () => {
         return Response.json(
           {
             data: {
-              id: '01JPOD0000000000000000001',
-              deliveryTaskId: '01JDELIVERY000000000000001',
-              versionNo: 1,
-              recipientName: '陈女士',
-              signedAt: '2026-07-22T10:00:00.000Z',
-              evidenceRefs: ['media-pod'],
+              deviceEventId: envelope.eventId,
+              disposition: 'APPLIED',
+              deliveryTask: {
+                id: '01JDELIVERY000000000000001',
+                taskNo: 'LM250722001',
+                status: 'COMPLETED',
+                waybillCount: 1,
+                version: 9,
+              },
+              proofOfDelivery: {
+                id: '01JPOD0000000000000000001',
+                deliveryTaskId: '01JDELIVERY000000000000001',
+                versionNo: 1,
+                recipientName: '陈女士',
+                signedAt: '2026-07-22T10:00:00.000Z',
+                evidenceRefs: ['media-pod'],
+              },
+              claimedMediaRefs: ['media-pod'],
             },
             meta,
           },
           { status: 201 }
         );
       return Response.json({
-        data: { resourceId: '01JDELIVERY000000000000001', status: 'SUCCEEDED', version: 8 },
+        data: {
+          deviceEventId: envelope.eventId,
+          disposition: 'APPLIED',
+          deliveryTask: {
+            id: '01JDELIVERY000000000000001',
+            taskNo: 'LM250722001',
+            status: 'PALLETIZED',
+            waybillCount: 1,
+            version: 8,
+          },
+          claimedMediaRefs: [],
+        },
         meta,
       });
     };
@@ -120,9 +150,16 @@ describe('createApiPdaPort', () => {
       '01JDELIVERY000000000000001',
       '"7"',
       'delivery-status-0001',
-      { id: '01JDELIVERY000000000000001', version: 7 }
+      {
+        deviceEventId: envelope.eventId,
+        targetStatus: 'PALLETIZED',
+        occurredAt: '2026-07-22T10:00:00.000Z',
+        mediaRefs: [],
+        scanEvidence: { scannedCode: 'LM250722001', palletId: 'PLT-001' },
+      }
     );
     await port.captureProofOfDelivery('01JDELIVERY000000000000001', '"8"', 'capture-pod-0000001', {
+      deviceEventId: envelope.eventId,
       recipientName: '陈女士',
       signedAt: '2026-07-22T10:00:00.000Z',
       latitude: 22.5431,
@@ -156,10 +193,14 @@ describe('createApiPdaPort', () => {
       reason: '服务器记录已确认',
     });
     await expect(requests[1]!.json()).resolves.toEqual({
-      id: '01JDELIVERY000000000000001',
-      version: 7,
+      deviceEventId: envelope.eventId,
+      targetStatus: 'PALLETIZED',
+      occurredAt: '2026-07-22T10:00:00.000Z',
+      mediaRefs: [],
+      scanEvidence: { scannedCode: 'LM250722001', palletId: 'PLT-001' },
     });
     await expect(requests[2]!.json()).resolves.toMatchObject({
+      deviceEventId: envelope.eventId,
       recipientName: '陈女士',
       evidenceRefs: ['media-pod'],
     });
@@ -225,7 +266,7 @@ describe('createApiPdaPort', () => {
       {
         eventId: envelope.eventId,
         mediaId: 'media-1',
-        contentHash: 'sha256:abc123',
+        contentHash: 'a'.repeat(64),
         file: new Blob(['photo'], { type: 'image/jpeg' }),
       },
       'upload-media-000001'
@@ -235,8 +276,114 @@ describe('createApiPdaPort', () => {
     expect(captured!.headers.get('Idempotency-Key')).toBe('upload-media-000001');
     const form = await captured!.formData();
     expect(form.get('eventId')).toBe(envelope.eventId);
-    expect(form.get('contentHash')).toBe('sha256:abc123');
+    expect(form.get('contentHash')).toBe('a'.repeat(64));
     expect(form.get('file')).toBeInstanceOf(Blob);
+  });
+
+  it('uses the two-stage takeover authorization and encrypted multipart routes', async () => {
+    const requests: Request[] = [];
+    const authorizationId = '01JTAKEOVERAUTH00000000001';
+    const scope = {
+      deviceId: envelope.deviceId,
+      tenantId: envelope.tenantId,
+      warehouseId: envelope.warehouseId,
+      subjectId: envelope.subjectId,
+    };
+    const fetch: typeof globalThis.fetch = async (input) => {
+      const request = input instanceof Request ? input : new Request(input);
+      requests.push(request.clone());
+      if (new URL(request.url).pathname.endsWith(':authorize')) {
+        return Response.json(
+          {
+            data: {
+              authorizationId,
+              deviceId: envelope.deviceId,
+              scope,
+              manifestHash: 'a'.repeat(64),
+              eventCount: 1,
+              mediaCount: 1,
+              expiresAt: '2099-12-31T23:59:59.000Z',
+              keyEncryptionAlgorithm: 'RSA-OAEP-256',
+              contentEncryptionAlgorithm: 'A256GCM',
+              publicKeyJwk: {
+                kty: 'RSA',
+                kid: 'key-1',
+                use: 'enc',
+                alg: 'RSA-OAEP-256',
+                key_ops: ['wrapKey'],
+                n: 'abc',
+                e: 'AQAB',
+              },
+              maxCiphertextBytes: 1_000_000,
+              status: 'AUTHORIZED',
+            },
+            meta,
+          },
+          { status: 201 }
+        );
+      }
+      return Response.json(
+        {
+          data: {
+            exportId: '01JTAKEOVEREXPORT0000000001',
+            authorizationId,
+            deviceId: envelope.deviceId,
+            scope,
+            manifestHash: 'a'.repeat(64),
+            ciphertextHash: 'b'.repeat(64),
+            eventCount: 1,
+            mediaCount: 1,
+            checksumAlgorithm: 'SHA-256',
+            status: 'VERIFIED',
+            receivedAt: '2026-07-22T12:00:00.000Z',
+            verifiedAt: '2026-07-22T12:00:01.000Z',
+          },
+          meta,
+        },
+        { status: 201 }
+      );
+    };
+    const port = createApiPdaPort(createZhiliClient({ baseUrl: 'https://pda.test/api/v1', fetch }));
+
+    await port.authorizeDeviceTakeoverExport(envelope.deviceId, 'takeover-auth-000001', {
+      reason: '设备损坏，由主管接管',
+      manifestHash: 'a'.repeat(64),
+      eventCount: 1,
+      mediaCount: 1,
+    });
+    await port.uploadEncryptedDeviceTakeoverExport(
+      envelope.deviceId,
+      authorizationId,
+      'takeover-upload-0001',
+      {
+        manifestHash: 'a'.repeat(64),
+        ciphertextHash: 'b'.repeat(64),
+        ciphertext: new Blob(['ciphertext']),
+        iv: 'AAAAAAAAAAAAAAAA',
+        wrappedKey: new Blob(['wrapped']),
+      }
+    );
+
+    expect(requests.map((request) => new URL(request.url).pathname)).toEqual([
+      `/api/v1/devices/${envelope.deviceId}/takeover-exports:authorize`,
+      `/api/v1/devices/${envelope.deviceId}/takeover-exports/${authorizationId}`,
+    ]);
+    expect(requests.map((request) => request.headers.get('Idempotency-Key'))).toEqual([
+      'takeover-auth-000001',
+      'takeover-upload-0001',
+    ]);
+    await expect(requests[0]!.json()).resolves.toMatchObject({
+      reason: '设备损坏，由主管接管',
+      eventCount: 1,
+      mediaCount: 1,
+    });
+    const form = await requests[1]!.formData();
+    expect(form.get('manifestHash')).toBe('a'.repeat(64));
+    expect(form.get('ciphertextHash')).toBe('b'.repeat(64));
+    expect(form.get('iv')).toBe('AAAAAAAAAAAAAAAA');
+    expect(form.get('ciphertext')).toBeInstanceOf(Blob);
+    expect(form.get('wrappedKey')).toBeInstanceOf(Blob);
+    expect(await (form.get('ciphertext') as Blob).text()).not.toContain('CAPTURE_POD');
   });
 
   it.each([

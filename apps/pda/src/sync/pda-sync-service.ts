@@ -2,6 +2,7 @@ import type { OfflineQueue } from '../offline/offline-queue';
 import type { MediaQueue } from '../offline/media-queue';
 import type { PdaPort } from '../ports/pda-port';
 import type { ConflictResolution, DeviceContext, SyncResult } from '../domain/types';
+import { PdaApiError } from '../ports/pda-port';
 
 type ActiveSyncContext = DeviceContext & { expiresAt: string; permissions: string[] };
 
@@ -46,7 +47,7 @@ export class PdaSyncService {
     const pending = this.queue
       .snapshot()
       .events.filter((event) => event.state === 'PENDING')
-      .filter((event) => this.media.areReady(event.envelope.mediaRefs))
+      .filter((event) => this.media.areReserved(event.envelope.mediaRefs))
       .sort((left, right) => left.envelope.localSequence - right.envelope.localSequence);
     const total = { applied: 0, duplicate: 0, conflict: 0, rejected: 0 };
     for (let index = 0; index < pending.length; index += 100) {
@@ -100,7 +101,17 @@ export class PdaSyncService {
         typeof error === 'object' && error && 'status' in error ? Number(error.status) : 0;
       if (status === 409) {
         await this.loadConflict(eventId);
-        throw new Error('服务器版本再次变化，已刷新差异；处理原因已保留，请复核后重试。');
+        if (error instanceof PdaApiError) {
+          throw new PdaApiError(
+            `${error.message}；服务器版本再次变化，已刷新差异，处理原因已保留，请复核后重试。`,
+            error.status,
+            error.code,
+            error.requestId,
+            error.remediation,
+            error.details
+          );
+        }
+        throw error;
       }
       throw error;
     }

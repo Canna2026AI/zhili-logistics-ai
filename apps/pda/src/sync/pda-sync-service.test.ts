@@ -3,6 +3,7 @@ import { OfflineQueue } from '../offline/offline-queue';
 import { MediaQueue } from '../offline/media-queue';
 import { MemoryQueueStore } from '../offline/queue-store';
 import { MemoryPdaPort } from '../ports/memory-pda-port';
+import { PdaApiError } from '../ports/pda-port';
 import { PdaSyncService } from './pda-sync-service';
 import type { DeviceContext } from '../domain/types';
 
@@ -144,7 +145,7 @@ describe('PdaSyncService', () => {
     expect(port.uploadedMedia.has(item.mediaId)).toBe(true);
   });
 
-  it('does not sync an event whose uploaded evidence is not READY yet', async () => {
+  it('syncs an uploaded reservation and waits for the event receipt to claim it READY', async () => {
     const store = new MemoryQueueStore();
     const queue = new OfflineQueue(store);
     const media = new MediaQueue(store);
@@ -168,9 +169,9 @@ describe('PdaSyncService', () => {
 
     await media.restore();
     await new PdaSyncService(queue, media, port).synchronize(syncContext);
-    expect(sync).not.toHaveBeenCalled();
-    expect(queue.snapshot().events).toHaveLength(1);
-    expect(media.snapshot()[0]).toMatchObject({ status: 'PROCESSING', remoteStatus: 'SCANNING' });
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(queue.snapshot().events).toEqual([]);
+    expect(media.snapshot()).toEqual([]);
   });
 
   it('resolves KEEP_SERVER REAPPLY_LOCAL SUBMIT_MANUAL only after a valid audited API decision', async () => {
@@ -191,6 +192,7 @@ describe('PdaSyncService', () => {
         {
           eventId: event.envelope.eventId,
           disposition: 'CONFLICT',
+          claimedMediaRefs: [],
           conflictId: '01JCONFLICT000000000000001',
           serverVersion: 9,
           conflictVersion: 1,
@@ -209,5 +211,77 @@ describe('PdaSyncService', () => {
       });
       expect(queue.snapshot().events).toHaveLength(0);
     }
+  });
+
+  it('preserves the complete 409 envelope after refreshing the newest conflict snapshot', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const event = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'CONFLICT',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 7,
+    });
+    await queue.applySyncResults([
+      {
+        eventId: event.envelope.eventId,
+        disposition: 'CONFLICT',
+        claimedMediaRefs: [],
+        conflictId: '01JCONFLICT000000000000001',
+        serverVersion: 9,
+        conflictVersion: 1,
+      },
+    ]);
+    const port = new MemoryPdaPort();
+    const originalSnapshot = port.getDeviceConflict.bind(port);
+    let reads = 0;
+    port.getDeviceConflict = async (conflictId) => {
+      const result = await originalSnapshot(conflictId);
+      reads += 1;
+      return reads === 2
+        ? {
+            ...result,
+            etag: '"4"',
+            conflict: { ...result.conflict, serverVersion: 10, version: 4 },
+          }
+        : result;
+    };
+    port.resolveDeviceConflict = vi
+      .fn()
+      .mockRejectedValue(
+        new PdaApiError(
+          '版本过期',
+          409,
+          'STALE_VERSION',
+          'req-conflict-409',
+          '读取最新 ETag 后重试',
+          [{ field: 'If-Match', reason: 'expected version 4' }]
+        )
+      );
+    const service = new PdaSyncService(queue, media, port);
+
+    let captured: unknown;
+    try {
+      await service.resolveConflict(event.envelope.eventId, 'KEEP_SERVER', '现场主管复核确认');
+    } catch (error) {
+      captured = error;
+    }
+    expect(captured).toMatchObject({
+      status: 409,
+      code: 'STALE_VERSION',
+      requestId: 'req-conflict-409',
+      remediation: '读取最新 ETag 后重试',
+      details: [{ field: 'If-Match', reason: 'expected version 4' }],
+    });
+    expect((captured as Error).message).toContain('已刷新差异');
+    expect(service.getEvent(event.envelope.eventId)?.conflict).toMatchObject({
+      serverVersion: 10,
+      version: 4,
+      etag: '"4"',
+    });
+    expect(queue.snapshot().events).toHaveLength(1);
   });
 });

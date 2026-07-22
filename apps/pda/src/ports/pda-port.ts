@@ -1,12 +1,17 @@
 import type { components } from '@zhili/contracts';
 import type {
   ConflictResolution,
+  AuthorizeDeviceTakeoverExportRequest,
   DeliveryEvent,
+  DeliveryTaskTransitionReceipt,
+  DeviceTakeoverExportAuthorization,
+  DeviceTakeoverExportReceipt,
   DeviceConflict,
   DeviceEventEnvelope,
   DeviceSession,
   DeviceTask,
   ProofOfDelivery,
+  ProofOfDeliveryCaptureReceipt,
   ProofOfDeliveryInput,
   SyncResult,
 } from '../domain/types';
@@ -16,6 +21,14 @@ export interface UploadMediaInput {
   mediaId: string;
   contentHash: string;
   file: Blob;
+}
+
+export interface UploadEncryptedTakeoverInput {
+  manifestHash: string;
+  ciphertextHash: string;
+  ciphertext: Blob;
+  iv: string;
+  wrappedKey: Blob;
 }
 
 export class PdaApiError extends Error {
@@ -61,17 +74,28 @@ export interface PdaPort {
     etag: string,
     idempotencyKey: string,
     body: DeliveryEvent
-  ): Promise<components['schemas']['CommandResult']>;
+  ): Promise<DeliveryTaskTransitionReceipt>;
   captureProofOfDelivery(
     deliveryTaskId: string,
     etag: string,
     idempotencyKey: string,
     body: ProofOfDeliveryInput
-  ): Promise<ProofOfDelivery>;
+  ): Promise<ProofOfDeliveryCaptureReceipt>;
   amendProofOfDelivery(
     deliveryTaskId: string,
     etag: string,
     idempotencyKey: string,
     body: ProofOfDelivery
   ): Promise<void>;
+  authorizeDeviceTakeoverExport(
+    deviceId: string,
+    idempotencyKey: string,
+    body: AuthorizeDeviceTakeoverExportRequest
+  ): Promise<DeviceTakeoverExportAuthorization>;
+  uploadEncryptedDeviceTakeoverExport(
+    deviceId: string,
+    authorizationId: string,
+    idempotencyKey: string,
+    input: UploadEncryptedTakeoverInput
+  ): Promise<DeviceTakeoverExportReceipt>;
 }

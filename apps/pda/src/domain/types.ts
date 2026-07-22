@@ -8,6 +8,14 @@ export type ConflictResolution = components['schemas']['ResolveDeviceConflictReq
 export type ProofOfDeliveryInput = components['schemas']['CaptureProofOfDeliveryRequest'];
 export type ProofOfDelivery = components['schemas']['ProofOfDelivery'];
 export type DeliveryEvent = components['schemas']['DeliveryEvent'];
+export type DeliveryTaskStatus = components['schemas']['DeliveryTaskStatus'];
+export type DeliveryTaskTransitionReceipt = components['schemas']['DeliveryTaskTransitionReceipt'];
+export type ProofOfDeliveryCaptureReceipt = components['schemas']['ProofOfDeliveryCaptureReceipt'];
+export type AuthorizeDeviceTakeoverExportRequest =
+  components['schemas']['AuthorizeDeviceTakeoverExportRequest'];
+export type DeviceTakeoverExportAuthorization =
+  components['schemas']['DeviceTakeoverExportAuthorization'];
+export type DeviceTakeoverExportReceipt = components['schemas']['DeviceTakeoverExportReceipt'];
 
 export interface DeviceContext {
   deviceId: string;
@@ -23,6 +31,7 @@ export type SyncDisposition = 'APPLIED' | 'DUPLICATE' | 'CONFLICT' | 'REJECTED';
 export interface SyncResult {
   eventId: string;
   disposition: SyncDisposition;
+  claimedMediaRefs: string[];
   serverVersion?: number;
   conflictId?: string;
   conflictVersion?: number;

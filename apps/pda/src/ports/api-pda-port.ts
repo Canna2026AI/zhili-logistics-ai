@@ -51,6 +51,7 @@ export function createApiPdaPort(client: ZhiliApiClient): PdaPort {
       return response.data.data.map((result) => ({
         eventId: result.eventId,
         disposition: result.disposition,
+        claimedMediaRefs: result.claimedMediaRefs,
         serverVersion: result.serverVersion,
         conflictId: result.conflictId ?? undefined,
         conflictVersion: result.conflictVersion,
@@ -137,6 +138,34 @@ export function createApiPdaPort(client: ZhiliApiClient): PdaPort {
         }
       );
       if (response.error) throw failure(response.error, response.response.status);
+    },
+
+    async authorizeDeviceTakeoverExport(deviceId, idempotencyKey, body) {
+      const response = await client.POST('/devices/{deviceId}/takeover-exports:authorize', {
+        params: { path: { deviceId }, header: { 'Idempotency-Key': idempotencyKey } },
+        body,
+      });
+      if (!response.data || response.error) throw failure(response.error, response.response.status);
+      return response.data.data;
+    },
+
+    async uploadEncryptedDeviceTakeoverExport(deviceId, authorizationId, idempotencyKey, input) {
+      const form = new FormData();
+      form.set('manifestHash', input.manifestHash);
+      form.set('ciphertextHash', input.ciphertextHash);
+      form.set('ciphertext', input.ciphertext, 'takeover.enc');
+      form.set('iv', input.iv);
+      form.set('wrappedKey', input.wrappedKey, 'takeover.key');
+      const response = await client.POST('/devices/{deviceId}/takeover-exports/{authorizationId}', {
+        params: {
+          path: { deviceId, authorizationId },
+          header: { 'Idempotency-Key': idempotencyKey },
+        },
+        body: form as unknown as components['schemas']['UploadEncryptedDeviceTakeoverExportRequest'],
+        bodySerializer: (body) => body as unknown as BodyInit,
+      });
+      if (!response.data || response.error) throw failure(response.error, response.response.status);
+      return response.data.data;
     },
   };
 }

@@ -1,0 +1,215 @@
+import { describe, expect, it, vi } from 'vitest';
+import { MediaQueue } from '../offline/media-queue';
+import { OfflineQueue } from '../offline/offline-queue';
+import { MemoryQueueStore } from '../offline/queue-store';
+import { MemoryPdaPort } from '../ports/memory-pda-port';
+import type { LocalDeviceSession } from '../session/session-guard';
+import { DeviceTakeoverService } from './takeover-service';
+
+const eventId = '01JTAKEOVEREVENT0000000001';
+const authorizationId = '01JTAKEOVERAUTH00000000001';
+const session: LocalDeviceSession = {
+  deviceId: '01JDEVICE00000000000000003',
+  tenantId: '01JTENANT0000000000000001',
+  warehouseId: '01JWAREHOUSE00000000000001',
+  subjectId: '01JSUBJECT0000000000000001',
+  timezone: 'Asia/Shanghai',
+  appVersion: '0.2.0',
+  expiresAt: '2099-12-31T23:59:59.000Z',
+  permissions: ['pda.use', 'pda.takeover.export'],
+};
+const scope = {
+  deviceId: session.deviceId,
+  tenantId: session.tenantId,
+  warehouseId: session.warehouseId,
+  subjectId: session.subjectId,
+};
+
+async function setup() {
+  const store = new MemoryQueueStore();
+  const queue = new OfflineQueue(store, { createId: () => eventId });
+  const media = new MediaQueue(store);
+  await Promise.all([queue.restore(), media.restore()]);
+  const item = await media.prepare(
+    session,
+    eventId,
+    new Blob(['photo-secret'], { type: 'image/jpeg' }),
+    'image/jpeg',
+    'media-takeover'
+  );
+  await queue.enqueue(session, {
+    eventId,
+    action: 'CAPTURE_POD',
+    entityRef: 'LM250722001',
+    payload: { recipientName: '陈女士' },
+    mediaRefs: [item.mediaId],
+    mediaItems: [item],
+    baseVersion: 8,
+  });
+  await media.restore();
+  return { store, queue, media };
+}
+
+async function createKeyPair() {
+  const keyPair = await crypto.subtle.generateKey(
+    {
+      name: 'RSA-OAEP',
+      modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: 'SHA-256',
+    },
+    true,
+    ['wrapKey', 'unwrapKey']
+  );
+  const jwk = await crypto.subtle.exportKey('jwk', keyPair.publicKey);
+  return { keyPair, jwk };
+}
+
+function bytesFromBase64(value: string) {
+  return Uint8Array.from(atob(value), (character) => character.charCodeAt(0));
+}
+
+describe('DeviceTakeoverService', () => {
+  it('encrypts the complete package and clears only after a matching VERIFIED receipt', async () => {
+    const { store, queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const { keyPair, jwk } = await createKeyPair();
+    vi.spyOn(port, 'authorizeDeviceTakeoverExport').mockImplementation(
+      async (deviceId, _key, body) => ({
+        authorizationId,
+        deviceId,
+        scope,
+        manifestHash: body.manifestHash,
+        eventCount: body.eventCount,
+        mediaCount: body.mediaCount,
+        expiresAt: '2099-12-31T23:59:59.000Z',
+        keyEncryptionAlgorithm: 'RSA-OAEP-256',
+        contentEncryptionAlgorithm: 'A256GCM',
+        publicKeyJwk: {
+          kty: 'RSA',
+          kid: 'takeover-key-1',
+          use: 'enc',
+          alg: 'RSA-OAEP-256',
+          key_ops: ['wrapKey'],
+          n: jwk.n!,
+          e: jwk.e!,
+        },
+        maxCiphertextBytes: 5_000_000,
+        status: 'AUTHORIZED',
+      })
+    );
+    const upload = vi
+      .spyOn(port, 'uploadEncryptedDeviceTakeoverExport')
+      .mockImplementation(async (deviceId, receivedAuthorizationId, _key, input) => ({
+        exportId: '01JTAKEOVEREXPORT0000000001',
+        authorizationId: receivedAuthorizationId,
+        deviceId,
+        scope,
+        manifestHash: input.manifestHash,
+        ciphertextHash: input.ciphertextHash,
+        eventCount: 1,
+        mediaCount: 1,
+        checksumAlgorithm: 'SHA-256',
+        status: 'VERIFIED',
+        receivedAt: '2026-07-22T12:00:00.000Z',
+        verifiedAt: '2026-07-22T12:00:01.000Z',
+      }));
+
+    const receipt = await new DeviceTakeoverService(queue, media, port).exportAndClear(
+      session,
+      '设备损坏，由主管接管'
+    );
+
+    const input = upload.mock.calls[0]![3];
+    const aesKey = await crypto.subtle.unwrapKey(
+      'raw',
+      await input.wrappedKey.arrayBuffer(),
+      keyPair.privateKey,
+      { name: 'RSA-OAEP' },
+      'AES-GCM',
+      false,
+      ['decrypt']
+    );
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: bytesFromBase64(input.iv) },
+      aesKey,
+      await input.ciphertext.arrayBuffer()
+    );
+    const archive = new TextDecoder().decode(plaintext);
+
+    expect(archive).toContain(eventId);
+    expect(archive).toContain('CAPTURE_POD');
+    expect(archive).toContain('cGhvdG8tc2VjcmV0');
+    expect(input.ciphertext.type).toBe('application/octet-stream');
+    expect(queue.snapshot().events).toEqual([]);
+    expect(media.snapshot()).toEqual([]);
+    expect(await store.getEvents()).toEqual([]);
+    expect(await store.getMedia()).toEqual([]);
+    expect(await queue.getMeta('last-takeover-export-receipt')).toEqual(receipt);
+  });
+
+  it('retains event and media when the server has not VERIFIED the receipt', async () => {
+    const { store, queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const { jwk } = await createKeyPair();
+    vi.spyOn(port, 'authorizeDeviceTakeoverExport').mockImplementation(
+      async (deviceId, _key, body) => ({
+        authorizationId,
+        deviceId,
+        scope,
+        manifestHash: body.manifestHash,
+        eventCount: 1,
+        mediaCount: 1,
+        expiresAt: '2099-12-31T23:59:59.000Z',
+        keyEncryptionAlgorithm: 'RSA-OAEP-256',
+        contentEncryptionAlgorithm: 'A256GCM',
+        publicKeyJwk: {
+          kty: 'RSA',
+          kid: 'takeover-key-1',
+          use: 'enc',
+          alg: 'RSA-OAEP-256',
+          key_ops: ['wrapKey'],
+          n: jwk.n!,
+          e: jwk.e!,
+        },
+        maxCiphertextBytes: 5_000_000,
+        status: 'AUTHORIZED',
+      })
+    );
+    vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport').mockImplementation(
+      async (deviceId, receivedAuthorizationId, _key, input) => ({
+        exportId: '01JTAKEOVEREXPORT0000000001',
+        authorizationId: receivedAuthorizationId,
+        deviceId,
+        scope,
+        manifestHash: input.manifestHash,
+        ciphertextHash: input.ciphertextHash,
+        eventCount: 1,
+        mediaCount: 1,
+        checksumAlgorithm: 'SHA-256',
+        status: 'RECEIVED',
+        receivedAt: '2026-07-22T12:00:00.000Z',
+      })
+    );
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port).exportAndClear(session, '设备损坏，由主管接管')
+    ).rejects.toThrow('未通过完整性验证');
+    expect(await store.getEvents()).toHaveLength(1);
+    expect(await store.getMedia()).toHaveLength(1);
+  });
+
+  it('requires the dedicated permission before requesting authorization', async () => {
+    const { queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const authorize = vi.spyOn(port, 'authorizeDeviceTakeoverExport');
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port).exportAndClear(
+        { ...session, permissions: ['pda.use'] },
+        '设备损坏，由主管接管'
+      )
+    ).rejects.toThrow('pda.takeover.export');
+    expect(authorize).not.toHaveBeenCalled();
+  });
+});

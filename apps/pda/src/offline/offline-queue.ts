@@ -37,6 +37,22 @@ export interface EnqueueCommand {
   mediaItems?: MediaQueueItem[];
 }
 
+export interface ClaimedWorkReceipt {
+  eventId: string;
+  disposition: 'APPLIED' | 'DUPLICATE';
+  claimedMediaRefs: string[];
+  serverVersion: number;
+  operation: 'EVENT_SYNC' | 'DELIVERY_TRANSITION' | 'PROOF_OF_DELIVERY';
+}
+
+function exactlySameRefs(expected: string[], actual: string[]) {
+  return (
+    expected.length === actual.length &&
+    new Set(expected).size === expected.length &&
+    expected.every((ref) => actual.includes(ref))
+  );
+}
+
 function defaultId(sequence: number) {
   const random = crypto.randomUUID().replaceAll('-', '').slice(0, 16).toUpperCase();
   return `01J${random}${String(sequence).padStart(7, '0')}`.slice(0, 26);
@@ -143,11 +159,12 @@ export class OfflineQueue {
       if (!event) continue;
       if (result.disposition === 'APPLIED' || result.disposition === 'DUPLICATE') {
         counts[result.disposition === 'APPLIED' ? 'applied' : 'duplicate'] += 1;
-        await this.store.deleteWork(result.eventId, event.envelope.mediaRefs);
-        await this.store.setMeta('sync-cursor', {
-          localSequence: event.envelope.localSequence,
-          serverVersion: result.serverVersion,
+        await this.confirmClaimedWork({
+          eventId: result.eventId,
           disposition: result.disposition,
+          claimedMediaRefs: result.claimedMediaRefs,
+          serverVersion: result.serverVersion ?? event.envelope.baseVersion,
+          operation: 'EVENT_SYNC',
         });
         continue;
       }
@@ -171,6 +188,21 @@ export class OfflineQueue {
     }
     this.events = await this.store.getEvents();
     return counts;
+  }
+
+  async confirmClaimedWork(receipt: ClaimedWorkReceipt) {
+    const event = this.events.find((candidate) => candidate.envelope.eventId === receipt.eventId);
+    if (!event) throw new Error(`服务器回执对应的本地事件 ${receipt.eventId} 不存在，禁止清理。`);
+    if (!exactlySameRefs(event.envelope.mediaRefs, receipt.claimedMediaRefs)) {
+      throw new Error('服务器媒体认领回执与本地事件不一致，已保留事件和全部媒体。');
+    }
+    await this.store.deleteWork(receipt.eventId, event.envelope.mediaRefs);
+    await this.store.setMeta('last-authoritative-receipt', {
+      ...receipt,
+      localSequence: event.envelope.localSequence,
+      confirmedAt: this.now().toISOString(),
+    });
+    this.events = await this.store.getEvents();
   }
 
   async resolveLocalConflict(eventId: string, resolution: string, serverVersion: number) {
@@ -228,7 +260,7 @@ export class OfflineQueue {
   }
 
   async clear() {
-    await Promise.all([this.store.clearEvents(), this.store.clearMedia()]);
+    await this.store.clearWork();
     this.events = [];
   }
 

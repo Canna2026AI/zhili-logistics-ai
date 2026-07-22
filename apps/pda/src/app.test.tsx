@@ -120,6 +120,7 @@ describe('PDA application', () => {
       {
         eventId: event.envelope.eventId,
         disposition: 'CONFLICT',
+        claimedMediaRefs: [],
         conflictId: '01JCONFLICT000000000000001',
         serverVersion: 9,
         conflictVersion: 1,

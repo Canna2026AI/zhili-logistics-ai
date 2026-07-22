@@ -7,7 +7,7 @@ async function contentHash(blob: Blob) {
   const value = [...new Uint8Array(digest)]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
-  return `sha256:${value}`;
+  return value;
 }
 
 function sameContext(left: DeviceContext | undefined, right: DeviceContext) {
@@ -139,5 +139,12 @@ export class MediaQueue {
     return mediaRefs.every(
       (mediaId) => this.items.find((item) => item.mediaId === mediaId)?.remoteStatus === 'READY'
     );
+  }
+
+  areReserved(mediaRefs: string[]) {
+    return mediaRefs.every((mediaId) => {
+      const status = this.items.find((item) => item.mediaId === mediaId)?.remoteStatus;
+      return status === 'UPLOADED' || status === 'SCANNING' || status === 'READY';
+    });
   }
 }
