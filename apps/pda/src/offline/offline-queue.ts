@@ -8,6 +8,7 @@ import type {
   MediaQueueItem,
 } from '../domain/types';
 import type { QueueStore } from './queue-store';
+import type { TakeoverManifest } from '../takeover/manifest';
 
 const DEFAULT_LIMIT = 200;
 const DEFAULT_WARNING = 183;
@@ -16,6 +17,16 @@ export class QueueCapacityError extends Error {
   constructor() {
     super('离线队列已满，请先同步；管理员加密接管契约未完成，当前禁止导出。');
     this.name = 'QueueCapacityError';
+  }
+}
+
+export class TakeoverRehydrateError extends Error {
+  constructor(
+    readonly receipt: DeviceTakeoverExportReceipt,
+    readonly cause: unknown
+  ) {
+    super('接管本地提交已完成，但运行时快照恢复失败；无需重新执行清理。');
+    this.name = 'TakeoverRehydrateError';
   }
 }
 
@@ -279,13 +290,19 @@ export class OfflineQueue {
   async finalizeTakeoverPackage(
     receipt: DeviceTakeoverExportReceipt,
     eventIds: string[],
-    mediaIds: string[]
+    mediaIds: string[],
+    manifest: TakeoverManifest
   ) {
     if (new Set(eventIds).size !== eventIds.length || new Set(mediaIds).size !== mediaIds.length) {
       throw new Error('接管清理清单包含重复 ID，已保留全部本地数据。');
     }
-    await this.store.finalizeTakeoverPackage(receipt, eventIds, mediaIds);
-    this.events = await this.store.getEvents();
+    await this.store.finalizeTakeoverPackage(receipt, eventIds, mediaIds, manifest);
+    try {
+      this.events = await this.store.getEvents();
+    } catch (error) {
+      this.events = this.events.filter((event) => !eventIds.includes(event.envelope.eventId));
+      throw new TakeoverRehydrateError(receipt, error);
+    }
   }
 
   async deleteWork(eventId: string) {

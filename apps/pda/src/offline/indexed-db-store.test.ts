@@ -3,8 +3,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { IndexedDbQueueStore, WebCryptoQueueCodec } from './queue-store';
 import { OfflineQueue } from './offline-queue';
 import { MediaQueue } from './media-queue';
-import type { DeviceContext } from '../domain/types';
+import type { DeviceContext, MediaQueueItem, QueuedEvent } from '../domain/types';
 import type { DeviceTakeoverExportReceipt } from '../domain/types';
+import { hashTakeoverManifest, type TakeoverManifest } from '../takeover/manifest';
 
 const context: DeviceContext = {
   deviceId: '01JDEVICE00000000000000003',
@@ -34,6 +35,36 @@ const takeoverReceipt: DeviceTakeoverExportReceipt = {
   receivedAt: '2026-07-23T01:00:00.000Z',
   verifiedAt: '2026-07-23T01:00:01.000Z',
 };
+
+async function takeoverFixture(events: QueuedEvent[], media: MediaQueueItem[]) {
+  const manifest: TakeoverManifest = {
+    schemaVersion: 1,
+    scope: takeoverReceipt.scope,
+    eventCount: events.length,
+    mediaCount: media.length,
+    events: events.map((event) => ({
+      eventId: event.envelope.eventId,
+      localSequence: event.envelope.localSequence,
+      idempotencyKey: event.envelope.idempotencyKey,
+      mediaRefs: event.envelope.mediaRefs,
+    })),
+    media: media.map((item) => ({
+      mediaId: item.mediaId,
+      eventId: item.eventId,
+      contentHash: item.contentHash,
+      mimeType: item.mimeType,
+    })),
+  };
+  return {
+    manifest,
+    receipt: {
+      ...takeoverReceipt,
+      manifestHash: await hashTakeoverManifest(manifest),
+      eventCount: events.length,
+      mediaCount: media.length,
+    },
+  };
+}
 
 afterEach(() => indexedDB.deleteDatabase('zhili-pda-test'));
 
@@ -259,15 +290,18 @@ describe('IndexedDbQueueStore', () => {
       mediaRefs: [],
       baseVersion: 1,
     });
+    const event = queue.snapshot().events.find((item) => item.envelope.eventId === eventId)!;
+    const { manifest, receipt } = await takeoverFixture([event], [evidence]);
     await store.setMeta('pending-takeover-finalize', {
-      receipt: takeoverReceipt,
+      receipt,
+      manifest,
       eventIds: [eventId],
       mediaIds: [evidence.mediaId],
     });
 
-    await store.finalizeTakeoverPackage(takeoverReceipt, [eventId], [evidence.mediaId]);
+    await store.finalizeTakeoverPackage(receipt, [eventId], [evidence.mediaId], manifest);
 
-    expect(await store.getMeta('last-takeover-export-receipt')).toEqual(takeoverReceipt);
+    expect(await store.getMeta('last-takeover-export-receipt')).toEqual(receipt);
     expect(await store.getMeta('pending-takeover-finalize')).toBeUndefined();
     expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([
       laterEventId,
@@ -298,9 +332,16 @@ describe('IndexedDbQueueStore', () => {
       mediaItems: [evidence],
       baseVersion: 1,
     });
+    const event = queue.snapshot().events.find((item) => item.envelope.eventId === eventId)!;
+    const { manifest, receipt } = await takeoverFixture([event], [evidence]);
 
     await expect(
-      store.finalizeTakeoverPackage(takeoverReceipt, [eventId, 'missing-event'], [evidence.mediaId])
+      store.finalizeTakeoverPackage(
+        receipt,
+        [eventId, 'missing-event'],
+        [evidence.mediaId],
+        manifest
+      )
     ).rejects.toThrow('接管清理清单');
 
     expect(await store.getMeta('last-takeover-export-receipt')).toBeUndefined();
@@ -331,12 +372,15 @@ describe('IndexedDbQueueStore', () => {
       mediaItems: [evidence],
       baseVersion: 1,
     });
+    const event = queue.snapshot().events.find((item) => item.envelope.eventId === eventId)!;
+    const { manifest, receipt } = await takeoverFixture([event], [evidence]);
     const pendingFinalize = {
-      receipt: takeoverReceipt,
+      receipt,
+      manifest,
       eventIds: [eventId],
       mediaIds: [evidence.mediaId],
     };
-    const pendingUpload = { authorizationId: takeoverReceipt.authorizationId };
+    const pendingUpload = { authorizationId: receipt.authorizationId };
     await Promise.all([
       store.setMeta('pending-takeover-finalize', pendingFinalize),
       store.setMeta('pending-takeover-upload', pendingUpload),
@@ -350,7 +394,7 @@ describe('IndexedDbQueueStore', () => {
     });
 
     await expect(
-      store.finalizeTakeoverPackage(takeoverReceipt, [eventId], [evidence.mediaId])
+      store.finalizeTakeoverPackage(receipt, [eventId], [evidence.mediaId], manifest)
     ).rejects.toThrow();
 
     expect(faultInjected).toBe(true);

@@ -1,6 +1,7 @@
 import type { OfflineQueue } from '../offline/offline-queue';
 import type { MediaQueue } from '../offline/media-queue';
 import type { PdaPort } from '../ports/pda-port';
+import { deviceTaskCacheKey } from '../tasks/task-cache';
 import type { ConflictResolution, DeviceContext, DeviceTask, SyncResult } from '../domain/types';
 import { PdaApiError } from '../ports/pda-port';
 
@@ -102,7 +103,7 @@ export class PdaSyncService {
         let refreshed: DeviceTask[] | undefined;
         try {
           refreshed = await this.port.getDeviceTasks(context.deviceId);
-          await this.queue.setMeta('device-tasks', refreshed);
+          await this.queue.setMeta(deviceTaskCacheKey(context), refreshed);
           authoritativeTasks = refreshed;
         } catch (error) {
           refreshed = undefined;

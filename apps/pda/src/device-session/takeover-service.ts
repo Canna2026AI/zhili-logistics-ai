@@ -1,15 +1,17 @@
-import type {
-  DeviceContext,
-  DeviceTakeoverExportReceipt,
-  MediaQueueItem,
-  QueuedEvent,
-} from '../domain/types';
+import type { DeviceTakeoverExportReceipt, MediaQueueItem, QueuedEvent } from '../domain/types';
 import type { MediaQueue } from '../offline/media-queue';
 import type { OfflineQueue } from '../offline/offline-queue';
 import { readBlobBytes } from '../offline/blob-bytes';
 import type { PdaPort } from '../ports/pda-port';
 import type { LocalDeviceSession } from '../session/session-guard';
 import { decodeBase64 } from '../takeover/package-codec';
+import {
+  assertTakeoverManifestBinding,
+  hashTakeoverManifest,
+  type TakeoverManifest,
+  type TakeoverScope,
+} from '../takeover/manifest';
+import { TakeoverRehydrateError } from '../offline/offline-queue';
 
 function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -39,8 +41,6 @@ function base64(bytes: Uint8Array) {
   }
   return btoa(binary);
 }
-
-type TakeoverScope = Pick<DeviceContext, 'deviceId' | 'tenantId' | 'warehouseId' | 'subjectId'>;
 
 function sameScope(left: TakeoverScope, right: TakeoverScope) {
   return (
@@ -74,12 +74,14 @@ export type TakeoverProgressStage =
   | 'ENCRYPTING'
   | 'UPLOADING'
   | 'SERVER_VERIFIED_CLEANUP_PENDING'
+  | 'VERIFIED_REHYDRATE_PENDING'
   | 'VERIFIED'
   | 'EXPIRED'
   | 'FAILED';
 
 export interface PendingTakeoverFinalize {
   receipt: DeviceTakeoverExportReceipt;
+  manifest: TakeoverManifest;
   eventIds: string[];
   mediaIds: string[];
 }
@@ -96,6 +98,7 @@ export interface PendingTakeoverUpload {
   wrappedKeyBase64: string;
   eventIds: string[];
   mediaIds: string[];
+  manifest: TakeoverManifest;
 }
 
 function assertVerifiedReceipt(
@@ -134,9 +137,13 @@ export class DeviceTakeoverService {
     private readonly onProgress?: (stage: TakeoverProgressStage) => void
   ) {}
 
-  async retryPendingFinalize(session: LocalDeviceSession) {
+  async retryPendingFinalize(session: LocalDeviceSession, includeCommittedReceipt = false) {
     const pending = await this.queue.getMeta<PendingTakeoverFinalize>('pending-takeover-finalize');
     if (pending) {
+      if (!pending.manifest) {
+        this.onProgress?.('FAILED');
+        throw new Error('待恢复的接管 manifest 缺失，已保留全部数据。');
+      }
       if (
         pending.receipt.status !== 'VERIFIED' ||
         pending.receipt.eventCount !== pending.eventIds.length ||
@@ -146,15 +153,39 @@ export class DeviceTakeoverService {
         throw new Error('待恢复的接管回执与本地清理清单不一致，已保留全部数据。');
       }
       assertExactScope(pending.receipt.scope, session);
+      await assertTakeoverManifestBinding(pending.manifest, {
+        manifestHash: pending.receipt.manifestHash,
+        scope: pending.receipt.scope,
+        eventIds: pending.eventIds,
+        mediaIds: pending.mediaIds,
+        eventCount: pending.receipt.eventCount,
+        mediaCount: pending.receipt.mediaCount,
+      });
       this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
-      await this.queue.finalizeTakeoverPackage(pending.receipt, pending.eventIds, pending.mediaIds);
-      await this.media.restore();
-      this.onProgress?.('VERIFIED');
+      await this.finalizeAndRehydrate(
+        pending.receipt,
+        pending.eventIds,
+        pending.mediaIds,
+        pending.manifest
+      );
       return pending.receipt;
     }
 
     const upload = await this.queue.getMeta<PendingTakeoverUpload>('pending-takeover-upload');
-    if (!upload) return undefined;
+    if (!upload) {
+      if (!includeCommittedReceipt) return undefined;
+      const committed = await this.queue.getMeta<DeviceTakeoverExportReceipt>(
+        'last-takeover-export-receipt'
+      );
+      if (!committed || committed.status !== 'VERIFIED') return undefined;
+      assertExactScope(committed.scope, session);
+      this.onProgress?.('VERIFIED');
+      return committed;
+    }
+    if (!upload.manifest) {
+      this.onProgress?.('FAILED');
+      throw new Error('待恢复的接管 manifest 缺失，已保留全部数据。');
+    }
     assertExactScope(upload.scope, session);
     if (
       upload.deviceId !== session.deviceId ||
@@ -165,6 +196,14 @@ export class DeviceTakeoverService {
       this.onProgress?.('FAILED');
       throw new Error('待恢复的接管上传清单无效，已保留全部数据。');
     }
+    await assertTakeoverManifestBinding(upload.manifest, {
+      manifestHash: upload.manifestHash,
+      scope: upload.scope,
+      eventIds: upload.eventIds,
+      mediaIds: upload.mediaIds,
+      eventCount: upload.eventIds.length,
+      mediaCount: upload.mediaIds.length,
+    });
     let serverVerified = false;
     try {
       this.onProgress?.('UPLOADING');
@@ -197,13 +236,12 @@ export class DeviceTakeoverService {
       this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
       const finalize = {
         receipt,
+        manifest: upload.manifest,
         eventIds: upload.eventIds,
         mediaIds: upload.mediaIds,
       };
       await this.queue.setMeta('pending-takeover-finalize', finalize);
-      await this.queue.finalizeTakeoverPackage(receipt, upload.eventIds, upload.mediaIds);
-      await this.media.restore();
-      this.onProgress?.('VERIFIED');
+      await this.finalizeAndRehydrate(receipt, upload.eventIds, upload.mediaIds, upload.manifest);
       return receipt;
     } catch (error) {
       if (serverVerified) this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
@@ -233,8 +271,7 @@ export class DeviceTakeoverService {
 
       const manifest = this.createManifest(session, events, media);
       const encoder = new TextEncoder();
-      const manifestBytes = encoder.encode(canonical(manifest));
-      const manifestHash = await sha256(manifestBytes);
+      const manifestHash = await hashTakeoverManifest(manifest);
       this.onProgress?.('AUTHORIZING');
       const authorization = await this.port.authorizeDeviceTakeoverExport(
         session.deviceId,
@@ -306,6 +343,7 @@ export class DeviceTakeoverService {
         wrappedKeyBase64: base64(new Uint8Array(wrappedKey)),
         eventIds: events.map((event) => event.envelope.eventId),
         mediaIds: media.map((item) => item.mediaId),
+        manifest,
       };
       await this.queue.setMeta('pending-takeover-upload', pendingUpload);
       const receipt = await this.port.uploadEncryptedDeviceTakeoverExport(
@@ -333,14 +371,13 @@ export class DeviceTakeoverService {
       serverVerified = true;
       const pending: PendingTakeoverFinalize = {
         receipt,
+        manifest,
         eventIds: events.map((event) => event.envelope.eventId),
         mediaIds: media.map((item) => item.mediaId),
       };
       await this.queue.setMeta('pending-takeover-finalize', pending);
       this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
-      await this.queue.finalizeTakeoverPackage(receipt, pending.eventIds, pending.mediaIds);
-      await this.media.restore();
-      this.onProgress?.('VERIFIED');
+      await this.finalizeAndRehydrate(receipt, pending.eventIds, pending.mediaIds, manifest);
       return receipt;
     } catch (error) {
       if (serverVerified) this.onProgress?.('SERVER_VERIFIED_CLEANUP_PENDING');
@@ -352,11 +389,41 @@ export class DeviceTakeoverService {
     }
   }
 
+  private async finalizeAndRehydrate(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[],
+    manifest: TakeoverManifest
+  ) {
+    try {
+      await this.queue.finalizeTakeoverPackage(receipt, eventIds, mediaIds, manifest);
+      await this.media.restore();
+      this.onProgress?.('VERIFIED');
+    } catch (error) {
+      const committed =
+        error instanceof TakeoverRehydrateError || (await this.hasCommittedReceipt(receipt));
+      if (!committed) throw error;
+      this.onProgress?.('VERIFIED_REHYDRATE_PENDING');
+    }
+  }
+
+  private async hasCommittedReceipt(receipt: DeviceTakeoverExportReceipt) {
+    const committed = await this.queue
+      .getMeta<DeviceTakeoverExportReceipt>('last-takeover-export-receipt')
+      .catch(() => undefined);
+    return (
+      committed?.status === 'VERIFIED' &&
+      committed.exportId === receipt.exportId &&
+      committed.manifestHash === receipt.manifestHash &&
+      committed.ciphertextHash === receipt.ciphertextHash
+    );
+  }
+
   private createManifest(
     session: LocalDeviceSession,
     events: QueuedEvent[],
     media: MediaQueueItem[]
-  ) {
+  ): TakeoverManifest {
     return {
       schemaVersion: 1,
       scope: {

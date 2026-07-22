@@ -84,6 +84,8 @@ type TakeoverArchive = {
 async function createEncryptedTakeover(options?: {
   tamperManifest?: boolean;
   withMedia?: boolean;
+  orphanMedia?: boolean;
+  unreferencedMedia?: boolean;
   duplicateEventField?: 'eventId' | 'localSequence' | 'idempotencyKey';
   mutateArchive?: (archive: TakeoverArchive) => void;
 }) {
@@ -111,7 +113,7 @@ async function createEncryptedTakeover(options?: {
       eventId: '01JCRYPTOEVENT000000000001',
       localSequence: 1,
       idempotencyKey: 'pda:crypto:event:1',
-      mediaRefs: options?.withMedia ? [mediaId] : [],
+      mediaRefs: options?.withMedia && !options.unreferencedMedia ? [mediaId] : [],
     },
   ];
   if (options?.duplicateEventField) {
@@ -132,7 +134,7 @@ async function createEncryptedTakeover(options?: {
     ? [
         {
           mediaId,
-          eventId: eventEntries[0]!.eventId,
+          eventId: options.orphanMedia ? '01JCRYPTOORPHAN00000000001' : eventEntries[0]!.eventId,
           contentHash: await sha256Hex(mediaBytes),
           mimeType: 'image/jpeg',
         },
@@ -495,6 +497,38 @@ describe('MemoryPdaPort F09 demo tasks', () => {
         input
       )
     ).rejects.toThrow(/SHA-256|哈希|媒体/);
+  });
+
+  it('rejects an otherwise authentic archive whose media points to a missing event', async () => {
+    const { port, authorization, input } = await createEncryptedTakeover({
+      withMedia: true,
+      orphanMedia: true,
+    });
+
+    await expect(
+      port.uploadEncryptedDeviceTakeoverExport(
+        authorization.deviceId,
+        authorization.authorizationId,
+        'takeover-upload-orphan-media',
+        input
+      )
+    ).rejects.toThrow(/引用|事件|媒体|orphan/i);
+  });
+
+  it('rejects an otherwise authentic archive whose event does not reference its media', async () => {
+    const { port, authorization, input } = await createEncryptedTakeover({
+      withMedia: true,
+      unreferencedMedia: true,
+    });
+
+    await expect(
+      port.uploadEncryptedDeviceTakeoverExport(
+        authorization.deviceId,
+        authorization.authorizationId,
+        'takeover-upload-unreferenced-media',
+        input
+      )
+    ).rejects.toThrow(/引用|事件|媒体|orphan/i);
   });
 
   it.each([

@@ -136,6 +136,24 @@ async function validateTakeoverArchiveContents(
     }
   }
 
+  const eventEntriesById = new Map(
+    manifestEvents.map((event) => [event.eventId as string, event] as const)
+  );
+  const mediaEntriesById = new Map(
+    manifestMedia.map((item) => [item.mediaId as string, item] as const)
+  );
+  for (const event of manifestEvents) {
+    const refs = readStringArray(event.mediaRefs) ?? [];
+    if (
+      refs.some((mediaId) => {
+        const item = mediaEntriesById.get(mediaId);
+        return !item || item.eventId !== event.eventId;
+      })
+    ) {
+      throw new Error('模拟接管事件与媒体引用关系不完整。');
+    }
+  }
+
   for (let index = 0; index < manifestMedia.length; index += 1) {
     const declared = manifestMedia[index]!;
     const archived = archiveMedia[index]!;
@@ -154,6 +172,11 @@ async function validateTakeoverArchiveContents(
       typeof archived.bytesBase64 !== 'string'
     ) {
       throw new Error(`模拟接管 archive 媒体 #${index + 1} 与 manifest 清单或作用域不一致。`);
+    }
+    const owner = eventEntriesById.get(declared.eventId);
+    const ownerRefs = owner ? readStringArray(owner.mediaRefs) : undefined;
+    if (!owner || !ownerRefs?.includes(declared.mediaId)) {
+      throw new Error(`模拟接管 archive 媒体 #${index + 1} 没有有效的双向事件引用。`);
     }
     let bytes: Uint8Array;
     try {

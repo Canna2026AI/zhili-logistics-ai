@@ -34,6 +34,12 @@ const takeoverCopy: Record<
     detail: '已保存 VERIFIED 回执与清理清单；重启后只重试本地提交，不会重传或降级为明文。',
     tone: 'info',
   },
+  VERIFIED_REHYDRATE_PENDING: {
+    title: '接管提交已验证',
+    summary: '本地原子提交已完成，界面快照待恢复',
+    detail: 'VERIFIED 回执已持久化且清理事务已提交；无需重新上传或重新执行清理。',
+    tone: 'success',
+  },
   VERIFIED: {
     title: '加密接管上传已验证',
     summary: '服务器返回 VERIFIED 完整性回执',

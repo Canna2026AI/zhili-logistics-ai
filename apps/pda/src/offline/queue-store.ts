@@ -1,6 +1,11 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { DeviceTakeoverExportReceipt, MediaQueueItem, QueuedEvent } from '../domain/types';
 import { readBlobBytes } from './blob-bytes';
+import {
+  assertTakeoverManifestBinding,
+  assertTakeoverWorkMatchesManifest,
+  type TakeoverManifest,
+} from '../takeover/manifest';
 
 export interface QueueStore {
   getEvents(): Promise<QueuedEvent[]>;
@@ -22,7 +27,8 @@ export interface QueueStore {
   finalizeTakeoverPackage(
     receipt: DeviceTakeoverExportReceipt,
     eventIds: string[],
-    mediaIds: string[]
+    mediaIds: string[],
+    manifest: TakeoverManifest
   ): Promise<void>;
   appendEvent(
     create: (sequence: number) => QueuedEvent,
@@ -127,7 +133,8 @@ export class MemoryQueueStore implements QueueStore {
   async finalizeTakeoverPackage(
     receipt: DeviceTakeoverExportReceipt,
     eventIds: string[],
-    mediaIds: string[]
+    mediaIds: string[],
+    manifest: TakeoverManifest
   ) {
     if (
       receipt.status !== 'VERIFIED' ||
@@ -140,6 +147,12 @@ export class MemoryQueueStore implements QueueStore {
     ) {
       throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
     }
+    await assertTakeoverWorkMatchesManifest(
+      receipt,
+      manifest,
+      eventIds.map((eventId) => this.events.get(eventId)!),
+      mediaIds.map((mediaId) => this.media.get(mediaId)!)
+    );
     this.meta.set('last-takeover-export-receipt', receipt);
     this.meta.delete('pending-takeover-finalize');
     this.meta.delete('pending-takeover-upload');
@@ -226,6 +239,24 @@ interface StoredEncryptedRecord {
   id: string;
   dedupeHash?: string;
   value: CipherRecord;
+}
+
+function sameStoredRecord(
+  left: StoredEncryptedRecord | undefined,
+  right: StoredEncryptedRecord | undefined
+) {
+  if (!left || !right || left.id !== right.id || left.dedupeHash !== right.dedupeHash) return false;
+  if (
+    left.value.iv.length !== right.value.iv.length ||
+    left.value.iv.some((value, index) => value !== right.value.iv[index])
+  )
+    return false;
+  const leftBytes = new Uint8Array(left.value.ciphertext);
+  const rightBytes = new Uint8Array(right.value.ciphertext);
+  return (
+    leftBytes.length === rightBytes.length &&
+    leftBytes.every((value, index) => value === rightBytes[index])
+  );
 }
 
 interface PdaQueueDatabase extends DBSchema {
@@ -445,7 +476,8 @@ export class IndexedDbQueueStore implements QueueStore {
   async finalizeTakeoverPackage(
     receipt: DeviceTakeoverExportReceipt,
     eventIds: string[],
-    mediaIds: string[]
+    mediaIds: string[],
+    manifest: TakeoverManifest
   ) {
     if (
       receipt.status !== 'VERIFIED' ||
@@ -457,6 +489,38 @@ export class IndexedDbQueueStore implements QueueStore {
       throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
     }
     const [database, codec] = await Promise.all([this.database, this.codec()]);
+    await assertTakeoverManifestBinding(manifest, {
+      manifestHash: receipt.manifestHash,
+      scope: receipt.scope,
+      eventIds,
+      mediaIds,
+      eventCount: receipt.eventCount,
+      mediaCount: receipt.mediaCount,
+    });
+    const [validatedEventRecords, validatedMediaRecords] = await Promise.all([
+      Promise.all(eventIds.map((eventId) => database.get('events', eventId))),
+      Promise.all(mediaIds.map((mediaId) => database.get('media', mediaId))),
+    ]);
+    if (
+      validatedEventRecords.some((record) => !record) ||
+      validatedMediaRecords.some((record) => !record)
+    ) {
+      throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
+    }
+    const [validatedEvents, validatedMedia] = await Promise.all([
+      Promise.all(validatedEventRecords.map((record) => codec.decode<QueuedEvent>(record!.value))),
+      Promise.all(
+        validatedMediaRecords.map(async (record) => {
+          const stored = await codec.decode<SerializableMedia>(record!.value);
+          const { fileBytes, ...item } = stored;
+          return {
+            ...item,
+            blob: new Blob([new Uint8Array(fileBytes)], { type: item.mimeType }),
+          };
+        })
+      ),
+    ]);
+    await assertTakeoverWorkMatchesManifest(receipt, manifest, validatedEvents, validatedMedia);
     const encryptedReceipt = await codec.encode(receipt);
     const transaction = database.transaction(['meta', 'events', 'media'], 'readwrite');
     const eventStore = transaction.objectStore('events');
@@ -465,7 +529,10 @@ export class IndexedDbQueueStore implements QueueStore {
       Promise.all(eventIds.map((eventId) => eventStore.get(eventId))),
       Promise.all(mediaIds.map((mediaId) => mediaStore.get(mediaId))),
     ]);
-    if (events.some((event) => !event) || media.some((item) => !item)) {
+    if (
+      events.some((event, index) => !sameStoredRecord(event, validatedEventRecords[index])) ||
+      media.some((item, index) => !sameStoredRecord(item, validatedMediaRecords[index]))
+    ) {
       transaction.abort();
       try {
         await transaction.done;

@@ -25,6 +25,7 @@ import {
 import { PdaSyncService } from './sync/pda-sync-service';
 import { LoginScreen, type BindingInput } from './device-session/login-screen';
 import { TaskHome } from './tasks/task-home';
+import { deviceTaskCacheKey } from './tasks/task-cache';
 import { ScannerScreen } from './scanner/scanner-screen';
 import { OfflinePanel } from './offline/offline-panel';
 import { ConflictPanel } from './conflicts/conflict-panel';
@@ -104,7 +105,8 @@ export function App({
     (event) => event.envelope.eventId === selectedConflictId
   );
   const replaceTasks = async (next: DeviceTask[]) => {
-    await queue.setMeta('device-tasks', next);
+    if (!session) return;
+    await queue.setMeta(deviceTaskCacheKey(session), next);
     setTasks(next);
     setSelectedTask((current) =>
       current ? next.find((task) => task.id === current.id) : undefined
@@ -162,7 +164,7 @@ export function App({
         }
         setSession(restored);
         try {
-          const finalized = await takeoverService.retryPendingFinalize(restored);
+          const finalized = await takeoverService.retryPendingFinalize(restored, true);
           if (finalized) {
             setSyncMessage(
               `已恢复接管回执并完成本地提交：${finalized.exportId}。未创建新的接管业务提交。`
@@ -171,12 +173,12 @@ export function App({
         } catch (caught) {
           setSyncMessage(explain(caught));
         }
-        const cachedTasks = await queue.getMeta<DeviceTask[]>('device-tasks');
-        if (!navigator.onLine && cachedTasks) setTasks(cachedTasks);
+        const cachedTasks = await queue.getMeta<DeviceTask[]>(deviceTaskCacheKey(restored));
+        if (!navigator.onLine) setTasks(cachedTasks ?? []);
         else {
           const loadedTasks = await port.getDeviceTasks(restored.deviceId);
           setTasks(loadedTasks);
-          await queue.setMeta('device-tasks', loadedTasks);
+          await queue.setMeta(deviceTaskCacheKey(restored), loadedTasks);
         }
         setPhase('ready');
         changed();
@@ -236,13 +238,13 @@ export function App({
       )
         throw new UnsafeBindingChangeError();
       const next: LocalDeviceSession = { ...bound, timezone, appVersion };
+      const loadedTasks = await port.getDeviceTasks(next.deviceId);
       await guard.persistSession(next);
+      await queue.setMeta(deviceTaskCacheKey(next), loadedTasks);
       setSession(next);
       setBindingMismatchLocked(false);
-      const loadedTasks = await port.getDeviceTasks(next.deviceId);
       setTasks(loadedTasks);
       setSelectedTask(undefined);
-      await queue.setMeta('device-tasks', loadedTasks);
       setPhase('ready');
       setTab('tasks');
       changed();
@@ -284,7 +286,7 @@ export function App({
         setPhase('login');
       } else {
         const persistedTasks = await queue
-          .getMeta<DeviceTask[]>('device-tasks')
+          .getMeta<DeviceTask[]>(deviceTaskCacheKey(session))
           .catch(() => undefined);
         if (persistedTasks) {
           setTasks(persistedTasks);

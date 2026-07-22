@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DeviceTakeoverExportReceipt, QueuedEvent } from '../domain/types';
 import { MemoryQueueStore } from './queue-store';
+import { hashTakeoverManifest, type TakeoverManifest } from '../takeover/manifest';
 
 const receipt: DeviceTakeoverExportReceipt = {
   exportId: '01JMEMORYEXPORT000000000001',
@@ -43,29 +44,57 @@ const event: QueuedEvent = {
   },
 };
 
+const manifest: TakeoverManifest = {
+  schemaVersion: 1,
+  scope: receipt.scope,
+  eventCount: 1,
+  mediaCount: 0,
+  events: [
+    {
+      eventId: event.envelope.eventId,
+      localSequence: event.envelope.localSequence,
+      idempotencyKey: event.envelope.idempotencyKey,
+      mediaRefs: event.envelope.mediaRefs,
+    },
+  ],
+  media: [],
+};
+
+async function boundReceipt() {
+  return { ...receipt, manifestHash: await hashTakeoverManifest(manifest) };
+}
+
 describe('MemoryQueueStore takeover finalization', () => {
   it('commits the receipt and authorized deletion as one state change', async () => {
     const store = new MemoryQueueStore();
     await store.putEvent(event);
+    const verifiedReceipt = await boundReceipt();
     await store.setMeta('pending-takeover-finalize', {
-      receipt,
+      receipt: verifiedReceipt,
+      manifest,
       eventIds: [event.envelope.eventId],
       mediaIds: [],
     });
 
-    await store.finalizeTakeoverPackage(receipt, [event.envelope.eventId], []);
+    await store.finalizeTakeoverPackage(verifiedReceipt, [event.envelope.eventId], [], manifest);
 
     expect(await store.getEvents()).toEqual([]);
-    expect(await store.getMeta('last-takeover-export-receipt')).toEqual(receipt);
+    expect(await store.getMeta('last-takeover-export-receipt')).toEqual(verifiedReceipt);
     expect(await store.getMeta('pending-takeover-finalize')).toBeUndefined();
   });
 
   it('does not write a receipt or delete work when any target is missing', async () => {
     const store = new MemoryQueueStore();
     await store.putEvent(event);
+    const verifiedReceipt = await boundReceipt();
 
     await expect(
-      store.finalizeTakeoverPackage(receipt, [event.envelope.eventId, 'missing-event'], [])
+      store.finalizeTakeoverPackage(
+        verifiedReceipt,
+        [event.envelope.eventId, 'missing-event'],
+        [],
+        manifest
+      )
     ).rejects.toThrow('接管清理清单');
 
     expect(await store.getEvents()).toEqual([event]);
@@ -75,9 +104,15 @@ describe('MemoryQueueStore takeover finalization', () => {
   it('rejects a receipt whose authoritative counts do not match the cleanup list', async () => {
     const store = new MemoryQueueStore();
     await store.putEvent(event);
+    const verifiedReceipt = await boundReceipt();
 
     await expect(
-      store.finalizeTakeoverPackage({ ...receipt, eventCount: 2 }, [event.envelope.eventId], [])
+      store.finalizeTakeoverPackage(
+        { ...verifiedReceipt, eventCount: 2 },
+        [event.envelope.eventId],
+        [],
+        manifest
+      )
     ).rejects.toThrow('接管清理清单');
 
     expect(await store.getEvents()).toEqual([event]);

@@ -304,6 +304,107 @@ describe('DeviceTakeoverService', () => {
     ]);
   });
 
+  it('fails closed when pending-upload IDs are replaced with same-count later work', async () => {
+    const { store, queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const originalSetMeta = store.setMeta.bind(store);
+    let failPendingReceiptOnce = true;
+    vi.spyOn(store, 'setMeta').mockImplementation(async (key, value) => {
+      if (key === 'pending-takeover-finalize' && failPendingReceiptOnce) {
+        failPendingReceiptOnce = false;
+        throw new Error('browser closed before receipt persistence');
+      }
+      await originalSetMeta(key, value);
+    });
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port).exportAndClear(session, '设备损坏，由主管接管')
+    ).rejects.toThrow('before receipt persistence');
+    const laterEventId = '01JTAKEOVERLATER00000000001';
+    await queue.enqueue(session, {
+      eventId: laterEventId,
+      action: 'WAREHOUSE_RECEIVE',
+      entityRef: 'LATER-NOT-ARCHIVED',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const pending = await queue.getMeta<Record<string, unknown>>('pending-takeover-upload');
+    await queue.setMeta('pending-takeover-upload', { ...pending, eventIds: [laterEventId] });
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port).retryPendingFinalize(session)
+    ).rejects.toThrow(/manifest|清单|完整性/);
+    expect((await store.getEvents()).map((item) => item.envelope.eventId)).toEqual([
+      eventId,
+      laterEventId,
+    ]);
+    expect(await store.getMedia()).toHaveLength(1);
+  });
+
+  it('fails closed when pending-finalize IDs are replaced with same-count later work', async () => {
+    const { store, queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    vi.spyOn(store, 'finalizeTakeoverPackage').mockRejectedValueOnce(
+      new Error('browser closed during local commit')
+    );
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port).exportAndClear(session, '设备损坏，由主管接管')
+    ).rejects.toThrow('browser closed');
+    const laterEventId = '01JTAKEOVERLATER00000000002';
+    await queue.enqueue(session, {
+      eventId: laterEventId,
+      action: 'WAREHOUSE_RECEIVE',
+      entityRef: 'LATER-NOT-ARCHIVED',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const pending = await queue.getMeta<Record<string, unknown>>('pending-takeover-finalize');
+    await queue.setMeta('pending-takeover-finalize', { ...pending, eventIds: [laterEventId] });
+
+    await expect(
+      new DeviceTakeoverService(queue, media, port).retryPendingFinalize(session)
+    ).rejects.toThrow(/manifest|清单|完整性/);
+    expect((await store.getEvents()).map((item) => item.envelope.eventId)).toEqual([
+      eventId,
+      laterEventId,
+    ]);
+    expect(await store.getMedia()).toHaveLength(1);
+  });
+
+  it('reports committed rehydration failure without claiming local cleanup is pending', async () => {
+    const { store, queue, media } = await setup();
+    const progress = vi.fn();
+    vi.spyOn(store, 'getEvents').mockRejectedValueOnce(new Error('rehydrate unavailable'));
+
+    const receipt = await new DeviceTakeoverService(
+      queue,
+      media,
+      new MemoryPdaPort(),
+      undefined,
+      progress
+    ).exportAndClear(session, '设备损坏，由主管接管');
+
+    expect(receipt.status).toBe('VERIFIED');
+    expect(progress.mock.calls.at(-1)?.[0]).toBe('VERIFIED_REHYDRATE_PENDING');
+    expect(await queue.getMeta('pending-takeover-upload')).toBeUndefined();
+    expect(await queue.getMeta('pending-takeover-finalize')).toBeUndefined();
+    expect(await queue.getMeta('last-takeover-export-receipt')).toEqual(receipt);
+
+    const restartedQueue = new OfflineQueue(store);
+    const restartedMedia = new MediaQueue(store);
+    await Promise.all([restartedQueue.restore(), restartedMedia.restore()]);
+    await expect(
+      new DeviceTakeoverService(
+        restartedQueue,
+        restartedMedia,
+        new MemoryPdaPort()
+      ).retryPendingFinalize(session, true)
+    ).resolves.toEqual(receipt);
+  });
+
   it('encrypts the complete package and clears only after a matching VERIFIED receipt', async () => {
     const { store, queue, media } = await setup();
     const port = new MemoryPdaPort();

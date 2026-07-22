@@ -5,6 +5,7 @@ import { MemoryQueueStore } from '../offline/queue-store';
 import { MemoryPdaPort } from '../ports/memory-pda-port';
 import { PdaApiError } from '../ports/pda-port';
 import { PdaSyncService } from './pda-sync-service';
+import { deviceTaskCacheKey } from '../tasks/task-cache';
 import type { DeviceContext } from '../domain/types';
 
 const context: DeviceContext = {
@@ -193,7 +194,7 @@ describe('PdaSyncService', () => {
 
       expect(order).toEqual(['sync', 'tasks']);
       expect(result.authoritativeTasks).toEqual(authoritative);
-      expect(await queue.getMeta('device-tasks')).toEqual(authoritative);
+      expect(await queue.getMeta(deviceTaskCacheKey(syncContext))).toEqual(authoritative);
       expect(queue.snapshot().events).toEqual([]);
     }
   );

@@ -13,8 +13,6 @@ describe('LoginScreen F09 binding state', () => {
     expect(screen.getByRole('heading', { name: '绑定设备与仓库' })).toBeVisible();
     expect(screen.getByText(/tenant \/ subject \/ device \/ warehouse 四重绑定/)).toBeVisible();
     expect(screen.getByText('当前设备尚未完成安全绑定')).toBeVisible();
-    expect(screen.getByRole('button', { name: '绑定设备并登录' })).toHaveTextContent(
-      '绑定并继续'
-    );
+    expect(screen.getByRole('button', { name: '绑定设备并登录' })).toHaveTextContent('绑定并继续');
   });
 });
