@@ -78,9 +78,9 @@ export const shippingChannels = pgTable(
   (table) => [
     index('shipping_channels_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -136,9 +136,9 @@ export const rateCards = pgTable(
   (table) => [
     index('rate_cards_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -207,9 +207,9 @@ export const rateCardVersions = pgTable(
   (table) => [
     index('rate_card_versions_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -298,9 +298,9 @@ export const rateRules = pgTable(
   (table) => [
     index('rate_rules_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -399,9 +399,9 @@ export const quotes = pgTable(
     ...acceptedQuoteForeignKeys(table),
     index('quotes_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId, table.deliveryAddressId],
@@ -476,9 +476,9 @@ export const quoteVersions = pgTable(
   (table) => [
     index('quote_versions_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -537,9 +537,9 @@ export const quoteParcels = pgTable(
   (table) => [
     index('quote_parcels_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('timestamptz_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -601,9 +601,9 @@ export const quoteOptions = pgTable(
   (table) => [
     index('quote_options_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('text_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -696,9 +696,9 @@ export const quoteChargeLines = pgTable(
   (table) => [
     index('quote_charge_lines_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('timestamptz_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -768,9 +768,9 @@ export const quoteExplanations = pgTable(
   (table) => [
     index('quote_explanations_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -836,9 +836,9 @@ export const quoteAcceptances = pgTable(
   (table) => [
     index('quote_acceptances_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -930,9 +930,9 @@ export const orders = pgTable(
   (table) => [
     index('orders_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1022,9 +1022,9 @@ export const orderBatchJobs = pgTable(
   (table) => [
     index('order_batch_jobs_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1092,9 +1092,9 @@ export const orderBatchItems = pgTable(
   (table) => [
     index('order_batch_items_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1179,9 +1179,9 @@ export const waybills = pgTable(
   (table) => [
     index('waybills_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1259,16 +1259,12 @@ export const waybillPackages = pgTable(
   (table) => [
     index('waybill_packages_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     uniqueIndex('waybill_packages_tenant_tracking_unique')
-      .using(
-        'btree',
-        table.tenantId.asc().nullsLast().op('text_ops'),
-        table.trackingNumber.asc().nullsLast().op('text_ops')
-      )
+      .using('btree', table.tenantId.asc().nullsLast(), table.trackingNumber.asc().nullsLast())
       .where(sql`(tracking_number IS NOT NULL)`),
     foreignKey({
       columns: [table.tenantId],
@@ -1341,9 +1337,9 @@ export const customsDeclarations = pgTable(
   (table) => [
     index('customs_declarations_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1410,9 +1406,9 @@ export const declarationItems = pgTable(
   (table) => [
     index('declaration_items_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('timestamptz_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1486,9 +1482,9 @@ export const attachments = pgTable(
   (table) => [
     index('attachments_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1576,16 +1572,12 @@ export const importJobs = pgTable(
   (table) => [
     index('import_jobs_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('timestamptz_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     uniqueIndex('import_jobs_single_rollback_unique')
-      .using(
-        'btree',
-        table.tenantId.asc().nullsLast().op('text_ops'),
-        table.rollbackOfJobId.asc().nullsLast().op('text_ops')
-      )
+      .using('btree', table.tenantId.asc().nullsLast(), table.rollbackOfJobId.asc().nullsLast())
       .where(sql`(rollback_of_job_id IS NOT NULL)`),
     foreignKey({
       columns: [table.tenantId],
@@ -1677,9 +1669,9 @@ export const importRows = pgTable(
   (table) => [
     index('import_rows_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],

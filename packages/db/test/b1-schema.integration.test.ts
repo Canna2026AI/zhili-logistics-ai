@@ -149,6 +149,8 @@ const actorB = '01J1000000000000000000052B';
 const deviceA = '01J1000000000000000000060A';
 const controlRoleA = '01J1000000000000000000070A';
 const controlAssignmentA = '01J1000000000000000000071A';
+const narrowControlRoleA = '01J1000000000000000000075A';
+const narrowControlAssignmentA = '01J1000000000000000000076A';
 const controlTenantC = '01J1000000000000000000000C';
 const deniedTenantD = '01J1000000000000000000000D';
 const realPasswordHash =
@@ -254,6 +256,32 @@ interface ConstraintMapping {
   readonly name: string;
   readonly tableFrom: string;
   readonly tableTo?: string;
+}
+
+interface IndexColumnMapping {
+  readonly asc: boolean;
+  readonly expression: string;
+  readonly nulls: 'first' | 'last';
+  readonly opclass: string;
+}
+
+interface IndexMapping {
+  readonly columns: readonly IndexColumnMapping[];
+  readonly isUnique: boolean;
+  readonly method: string;
+  readonly name: string;
+  readonly tableFrom: string;
+}
+
+function normalizeIndexExpression(expression: string): string {
+  const normalized = expression
+    .replace(/::text/g, '')
+    .replace(/\s+(?:ASC|DESC)(?:\s+NULLS\s+(?:FIRST|LAST))?$/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized.startsWith('(') && normalized.endsWith(')')
+    ? normalized.slice(1, -1).trim()
+    : normalized;
 }
 
 async function liveConstraintMappings(): Promise<{
@@ -371,6 +399,137 @@ async function snapshotConstraintMappings(): Promise<{
   };
 }
 
+async function liveIndexMappings(): Promise<readonly IndexMapping[]> {
+  const rows = await admin<
+    {
+      asc: boolean;
+      expression: string;
+      is_expression: boolean;
+      is_unique: boolean;
+      method: string;
+      name: string;
+      nulls: 'first' | 'last';
+      opclass: string;
+      position: number;
+      table_from: string;
+    }[]
+  >`
+    SELECT
+      child.relname AS table_from,
+      index_relation.relname AS name,
+      access_method.amname AS method,
+      index_row.indisunique AS is_unique,
+      key_column.position::integer AS position,
+      key_column.attnum = 0 AS is_expression,
+      CASE
+        WHEN key_column.attnum = 0
+          THEN pg_get_indexdef(index_row.indexrelid, key_column.position::integer, true)
+        ELSE attribute_row.attname
+      END AS expression,
+      (key_column.options & 1) = 0 AS asc,
+      CASE WHEN (key_column.options & 2) = 2 THEN 'first' ELSE 'last' END AS nulls,
+      CASE WHEN operator_class.opcdefault THEN '<default>' ELSE operator_class.opcname END AS opclass
+    FROM pg_index index_row
+    JOIN pg_class child ON child.oid = index_row.indrelid
+    JOIN pg_namespace child_namespace ON child_namespace.oid = child.relnamespace
+    JOIN pg_class index_relation ON index_relation.oid = index_row.indexrelid
+    JOIN pg_am access_method ON access_method.oid = index_relation.relam
+    CROSS JOIN LATERAL unnest(
+      index_row.indkey::smallint[],
+      index_row.indclass::oid[],
+      index_row.indoption::smallint[]
+    ) WITH ORDINALITY AS key_column(attnum, opclass_oid, options, position)
+    LEFT JOIN pg_attribute attribute_row
+      ON attribute_row.attrelid = index_row.indrelid
+     AND attribute_row.attnum = key_column.attnum
+    JOIN pg_opclass operator_class ON operator_class.oid = key_column.opclass_oid
+    WHERE child_namespace.nspname = 'public'
+      AND child.relname = ANY(${expectedDomainTables as unknown as string[]})
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_constraint constraint_row
+        WHERE constraint_row.conindid = index_row.indexrelid
+      )
+    ORDER BY child.relname, index_relation.relname, key_column.position
+  `;
+
+  const indexes = new Map<string, IndexMapping>();
+  for (const row of rows) {
+    const key = `${row.table_from}.${row.name}`;
+    const existing = indexes.get(key);
+    const column = {
+      expression: row.is_expression ? '<expression>' : normalizeIndexExpression(row.expression),
+      asc: row.asc,
+      nulls: row.nulls,
+      opclass: row.opclass,
+    } as const;
+    if (existing) {
+      indexes.set(key, { ...existing, columns: [...existing.columns, column] });
+    } else {
+      indexes.set(key, {
+        tableFrom: row.table_from,
+        name: row.name,
+        method: row.method,
+        isUnique: row.is_unique,
+        columns: [column],
+      });
+    }
+  }
+  return [...indexes.values()];
+}
+
+async function snapshotIndexMappings(): Promise<readonly IndexMapping[]> {
+  const snapshot = JSON.parse(await readFile(snapshotPath, 'utf8')) as {
+    readonly tables: Readonly<
+      Record<
+        string,
+        {
+          readonly indexes: Readonly<
+            Record<
+              string,
+              {
+                readonly columns: readonly {
+                  readonly asc: boolean;
+                  readonly expression: string;
+                  readonly isExpression: boolean;
+                  readonly nulls: 'first' | 'last';
+                  readonly opclass?: string;
+                }[];
+                readonly isUnique: boolean;
+                readonly method: string;
+                readonly name: string;
+              }
+            >
+          >;
+          readonly name: string;
+        }
+      >
+    >;
+  };
+  const domainTableNames = new Set<string>(expectedDomainTables);
+  return Object.values(snapshot.tables)
+    .filter(({ name }) => domainTableNames.has(name))
+    .flatMap(({ indexes, name: tableFrom }) =>
+      Object.values(indexes).map(({ columns, isUnique, method, name }) => ({
+        tableFrom,
+        name,
+        method,
+        isUnique,
+        columns: columns.map(({ asc, expression, isExpression, nulls, opclass }) => {
+          const expressionDeclaresDescending = isExpression && /\s+DESC$/i.test(expression);
+          return {
+            expression: isExpression ? '<expression>' : normalizeIndexExpression(expression),
+            asc: expressionDeclaresDescending ? false : asc,
+            nulls: expressionDeclaresDescending ? 'first' : nulls,
+            opclass: opclass ?? '<default>',
+          };
+        }),
+      }))
+    )
+    .sort((left, right) =>
+      `${left.tableFrom}.${left.name}`.localeCompare(`${right.tableFrom}.${right.name}`)
+    );
+}
+
 async function seedCrossDomainParents(): Promise<void> {
   await admin`
     INSERT INTO tenants (id, slug, display_name) VALUES
@@ -430,12 +589,13 @@ afterAll(async () => {
 });
 
 describe('B1 ordered domain migration', () => {
-  it('keeps every live compound FK and candidate-key mapping identical to Drizzle snapshot', async () => {
+  it('keeps live keys and index column/opclass mappings identical to Drizzle snapshot', async () => {
     const live = await liveConstraintMappings();
     const snapshot = await snapshotConstraintMappings();
 
     expect(snapshot.foreignKeys).toEqual(live.foreignKeys);
     expect(snapshot.uniqueConstraints).toEqual(live.uniqueConstraints);
+    expect(await snapshotIndexMappings()).toEqual(await liveIndexMappings());
   });
 
   it('creates the reviewed identity, rates/waybills and warehouse/linehaul schema', async () => {
@@ -637,6 +797,7 @@ describe('B1 ordered domain migration', () => {
     await admin`
       INSERT INTO permission_actions (action_code, resource_type, description)
       VALUES ('platform.tenant.manage', 'tenant', 'Manage tenants')
+      ON CONFLICT (action_code) DO NOTHING
     `;
     await expect(
       admin`
@@ -988,14 +1149,49 @@ describe('B1 ordered domain migration', () => {
       `
     ).rejects.toMatchObject({ code: '40001' });
 
-    const [resolved] = await admin<{ status: string; version: string }[]>`
-      UPDATE device_sync_conflicts
-      SET status = 'RESOLVED', resolution = 'KEEP_SERVER', resolution_payload = '{}'::jsonb,
-          resolved_at = now(), version = 2
-      WHERE id = '01J1000000000000000001220A' AND version = 1
-      RETURNING status, version::text
-    `;
-    expect(resolved).toEqual({ status: 'RESOLVED', version: '2' });
+    const contenderA = postgres(container.getConnectionUri(), { max: 1 });
+    const contenderB = postgres(container.getConnectionUri(), { max: 1 });
+    let releaseWinner: () => void = () => {};
+    let markWinnerUpdated: () => void = () => {};
+    const holdWinner = new Promise<void>((resolveHold) => {
+      releaseWinner = resolveHold;
+    });
+    const winnerUpdated = new Promise<void>((resolveUpdated) => {
+      markWinnerUpdated = resolveUpdated;
+    });
+    try {
+      const winnerTransaction = contenderA.begin(async (transaction) => {
+        const rows = await transaction<{ resolution: string; status: string; version: string }[]>`
+          UPDATE device_sync_conflicts
+          SET status = 'RESOLVED', resolution = 'KEEP_SERVER', resolution_payload = '{}'::jsonb,
+              resolved_at = now(), version = 2
+          WHERE id = '01J1000000000000000001220A' AND version = 1
+          RETURNING status, resolution, version::text
+        `;
+        markWinnerUpdated();
+        await holdWinner;
+        return rows;
+      });
+      await winnerUpdated;
+      const blockedContender = Promise.resolve(
+        contenderB<{ resolution: string; status: string; version: string }[]>`
+          UPDATE device_sync_conflicts
+          SET status = 'RESOLVED', resolution = 'SUBMIT_MANUAL',
+              resolution_payload = '{"concurrent":true}'::jsonb,
+              resolved_at = now(), version = 2
+          WHERE id = '01J1000000000000000001220A' AND version = 1
+          RETURNING status, resolution, version::text
+        `
+      );
+      await new Promise((resolveStarted) => setTimeout(resolveStarted, 100));
+      releaseWinner();
+      const [winnerRows, contenderRows] = await Promise.all([winnerTransaction, blockedContender]);
+      expect(winnerRows).toEqual([{ status: 'RESOLVED', resolution: 'KEEP_SERVER', version: '2' }]);
+      expect(contenderRows).toEqual([]);
+    } finally {
+      releaseWinner();
+      await Promise.all([contenderA.end(), contenderB.end()]);
+    }
 
     await expect(
       admin`
@@ -1013,31 +1209,35 @@ describe('B1 ordered domain migration', () => {
     `;
     if (!seedState?.seeded) await seedCrossDomainParents();
 
+    const canonicalActions = await admin<{ action_code: string }[]>`
+      SELECT action_code FROM permission_actions
+      WHERE action_code IN ('platform.tenant.manage', 'platform.entitlement.write')
+      ORDER BY action_code
+    `;
+    expect(canonicalActions.map(({ action_code }) => action_code)).toEqual([
+      'platform.entitlement.write',
+      'platform.tenant.manage',
+    ]);
     await admin`
-      INSERT INTO permission_actions (action_code, resource_type, description) VALUES
-        ('platform.tenant.create', 'tenant', 'Create a tenant'),
-        ('platform.tenant.status', 'tenant', 'Change tenant status'),
-        ('platform.entitlement.manage', 'entitlement', 'Manage tenant entitlements')
-      ON CONFLICT (action_code) DO NOTHING
+      INSERT INTO roles (id, tenant_id, role_code, display_name) VALUES
+        (${controlRoleA}, ${tenantA}, 'PLATFORM_CONTROL', 'Platform control'),
+        (${narrowControlRoleA}, ${tenantA}, 'NARROW_CONTROL', 'Narrow control')
     `;
     await admin`
-      INSERT INTO roles (id, tenant_id, role_code, display_name)
-      VALUES (${controlRoleA}, ${tenantA}, 'PLATFORM_CONTROL', 'Platform control')
-    `;
-    await admin`
-      INSERT INTO user_role_assignments (id, tenant_id, user_id, role_id, assigned_by_user_id)
-      VALUES (${controlAssignmentA}, ${tenantA}, ${actorA}, ${controlRoleA}, ${actorA})
+      INSERT INTO user_role_assignments (
+        id, tenant_id, user_id, role_id, assigned_by_user_id
+      ) VALUES
+        (${controlAssignmentA}, ${tenantA}, ${actorA}, ${controlRoleA}, ${actorA}),
+        (${narrowControlAssignmentA}, ${tenantA}, ${subjectA}, ${narrowControlRoleA}, ${actorA})
     `;
     await admin`
       INSERT INTO role_grants (
         id, tenant_id, role_id, action_code, effect, data_scope_kind
       ) VALUES
         ('01J1000000000000000000072A', ${tenantA}, ${controlRoleA},
-          'platform.tenant.create', 'ALLOW', 'TENANT'),
-        ('01J1000000000000000000073A', ${tenantA}, ${controlRoleA},
-          'platform.tenant.status', 'ALLOW', 'TENANT'),
+          'platform.tenant.manage', 'ALLOW', 'PLATFORM'),
         ('01J1000000000000000000074A', ${tenantA}, ${controlRoleA},
-          'platform.entitlement.manage', 'ALLOW', 'TENANT')
+          'platform.entitlement.write', 'ALLOW', 'PLATFORM')
     `;
 
     const functions = await admin<
@@ -1136,6 +1336,84 @@ describe('B1 ordered domain migration', () => {
         code: '42501',
       });
 
+      const narrowCases = [
+        {
+          scope: 'SELF',
+          grantId: '01J1000000000000000001400A',
+          targetId: '01J1000000000000000001410A',
+          operationId: '01J1000000000000000001420A',
+        },
+        {
+          scope: 'TENANT',
+          grantId: '01J1000000000000000001401A',
+          targetId: '01J1000000000000000001411A',
+          operationId: '01J1000000000000000001421A',
+        },
+        {
+          scope: 'ORGANIZATION',
+          grantId: '01J1000000000000000001402A',
+          targetId: '01J1000000000000000001412A',
+          operationId: '01J1000000000000000001422A',
+        },
+        {
+          scope: 'CUSTOMER',
+          grantId: '01J1000000000000000001403A',
+          targetId: '01J1000000000000000001413A',
+          operationId: '01J1000000000000000001423A',
+        },
+        {
+          scope: 'WAREHOUSE',
+          grantId: '01J1000000000000000001404A',
+          targetId: '01J1000000000000000001414A',
+          operationId: '01J1000000000000000001424A',
+        },
+      ] as const;
+      for (const narrowCase of narrowCases) {
+        await admin`
+          INSERT INTO role_grants (
+            id, tenant_id, role_id, action_code, effect, data_scope_kind
+          ) VALUES (
+            ${narrowCase.grantId}, ${tenantA}, ${narrowControlRoleA},
+            'platform.tenant.manage', 'ALLOW', ${narrowCase.scope}
+          )
+        `;
+        await expect(
+          control`
+            SELECT * FROM control_plane_create_tenant(
+              ${tenantA}, ${subjectA}, ${narrowCase.targetId},
+              ${`narrow-${narrowCase.scope.toLowerCase()}`}, 'Narrow tenant',
+              ${narrowCase.operationId}, ${`narrow-${narrowCase.scope.toLowerCase()}`},
+              ${'a'.repeat(64)}
+            )
+          `
+        ).rejects.toMatchObject({ code: '42501' });
+        await admin`DELETE FROM role_grants WHERE id = ${narrowCase.grantId}`;
+      }
+      const [narrowWrites] = await admin<
+        {
+          audit_count: number;
+          idempotency_count: number;
+          outbox_count: number;
+          tenant_count: number;
+        }[]
+      >`
+        SELECT
+          (SELECT count(*)::int FROM tenants
+            WHERE id = ANY(${narrowCases.map(({ targetId }) => targetId)})) AS tenant_count,
+          (SELECT count(*)::int FROM idempotency_records
+            WHERE id = ANY(${narrowCases.map(({ operationId }) => operationId)})) AS idempotency_count,
+          (SELECT count(*)::int FROM audit_events
+            WHERE id = ANY(${narrowCases.map(({ operationId }) => operationId)})) AS audit_count,
+          (SELECT count(*)::int FROM outbox_events
+            WHERE id = ANY(${narrowCases.map(({ operationId }) => operationId)})) AS outbox_count
+      `;
+      expect(narrowWrites).toEqual({
+        tenant_count: 0,
+        idempotency_count: 0,
+        audit_count: 0,
+        outbox_count: 0,
+      });
+
       const [created] = await control<
         { replayed: boolean; status: string; tenant_id: string; version: string }[]
       >`
@@ -1162,6 +1440,14 @@ describe('B1 ordered domain migration', () => {
         )
       `;
       expect(replayedCreate).toEqual({ ...created, replayed: true });
+      await expect(
+        control`
+          SELECT * FROM control_plane_create_tenant(
+            ${tenantA}, ${actorA}, ${controlTenantC}, 'tenant-c', 'Tenant C',
+            '01J1000000000000000001300A', 'control-create-c', ${'9'.repeat(64)}
+          )
+        `
+      ).rejects.toMatchObject({ code: '23514' });
 
       const [afterReplay] = await admin<
         {
@@ -1236,6 +1522,39 @@ describe('B1 ordered domain migration', () => {
         replayed: false,
       });
 
+      await admin`
+        INSERT INTO role_grants (
+          id, tenant_id, role_id, action_code, effect, data_scope_kind
+        ) VALUES (
+          '01J1000000000000000001500A', ${tenantA}, ${controlRoleA},
+          'platform.tenant.manage', 'DENY', 'PLATFORM'
+        )
+      `;
+      await expect(
+        control`
+          SELECT * FROM control_plane_create_tenant(
+            ${tenantA}, ${actorA}, '01J1000000000000000001510A',
+            'platform-denied', 'Platform denied',
+            '01J1000000000000000001520A', 'platform-denied', ${'8'.repeat(64)}
+          )
+        `
+      ).rejects.toMatchObject({ code: '42501' });
+
+      const auditActions = await admin<{ action: string; id: string }[]>`
+        SELECT id, action FROM audit_events
+        WHERE id IN (
+          '01J1000000000000000001300A',
+          '01J1000000000000000001310A',
+          '01J1000000000000000001340A'
+        )
+        ORDER BY id
+      `;
+      expect(auditActions).toEqual([
+        { id: '01J1000000000000000001300A', action: 'platform.tenant.created' },
+        { id: '01J1000000000000000001310A', action: 'platform.tenant.status-changed' },
+        { id: '01J1000000000000000001340A', action: 'platform.tenant-entitlements.updated' },
+      ]);
+
       await expect(
         control`
           SELECT * FROM control_plane_create_tenant(
@@ -1256,12 +1575,21 @@ describe('B1 ordered domain migration', () => {
         SELECT
           (SELECT count(*)::int FROM tenants WHERE id = ${deniedTenantD}) AS tenant_count,
           (SELECT count(*)::int FROM idempotency_records
-            WHERE tenant_id = ${tenantA} AND idempotency_key IN ('control-stale-c', 'control-denied-d'))
+            WHERE tenant_id = ${tenantA}
+              AND idempotency_key IN ('control-stale-c', 'control-denied-d', 'platform-denied'))
             AS idempotency_count,
           (SELECT count(*)::int FROM audit_events
-            WHERE id IN ('01J1000000000000000001320A', '01J1000000000000000001350A')) AS audit_count,
+            WHERE id IN (
+              '01J1000000000000000001320A',
+              '01J1000000000000000001350A',
+              '01J1000000000000000001520A'
+            )) AS audit_count,
           (SELECT count(*)::int FROM outbox_events
-            WHERE id IN ('01J1000000000000000001320A', '01J1000000000000000001350A')) AS outbox_count
+            WHERE id IN (
+              '01J1000000000000000001320A',
+              '01J1000000000000000001350A',
+              '01J1000000000000000001520A'
+            )) AS outbox_count
       `;
       expect(negative).toEqual({
         tenant_count: 0,
@@ -1271,6 +1599,7 @@ describe('B1 ordered domain migration', () => {
       });
     } finally {
       await control.end();
+      await admin.unsafe('ALTER ROLE zhili_control_plane WITH NOLOGIN');
     }
   });
 
@@ -1369,13 +1698,104 @@ describe('B1 ordered domain migration', () => {
       await expect(auth`SELECT id FROM users LIMIT 1`).rejects.toMatchObject({ code: '42501' });
     } finally {
       await auth.end();
+      await admin.unsafe('ALTER ROLE zhili_auth WITH NOLOGIN');
     }
   });
+
+  it('preserves pre-existing cluster roles, owned objects, and btree_gist dependencies on B1 down', async () => {
+    const preservedContainer = await new PostgreSqlContainer('postgres:17-alpine').start();
+    const preservedAdmin = postgres(preservedContainer.getConnectionUri(), { max: 1 });
+    try {
+      await preservedAdmin.unsafe(`
+        CREATE ROLE zhili_auth NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;
+        CREATE ROLE zhili_control_plane
+          NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE INHERIT NOBYPASSRLS;
+        CREATE EXTENSION btree_gist;
+        CREATE SCHEMA unrelated_auth AUTHORIZATION zhili_auth;
+        CREATE TABLE unrelated_auth.marker (id integer PRIMARY KEY);
+        CREATE SCHEMA unrelated_control AUTHORIZATION zhili_control_plane;
+        CREATE TABLE unrelated_control.marker (id integer PRIMARY KEY);
+        CREATE TABLE public.unrelated_extension_probe (
+          id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+          external_key text NOT NULL,
+          EXCLUDE USING gist (external_key WITH =)
+        );
+      `);
+      await preservedAdmin.unsafe(
+        await readFile(resolve(packageRoot, 'migrations/0000_foundation.sql'), 'utf8')
+      );
+
+      const captureClusterResources = async () => ({
+        roles: await preservedAdmin<
+          {
+            rolbypassrls: boolean;
+            rolcanlogin: boolean;
+            rolcreatedb: boolean;
+            rolcreaterole: boolean;
+            rolinherit: boolean;
+            rolname: string;
+            rolsuper: boolean;
+          }[]
+        >`
+          SELECT rolname, rolsuper, rolinherit, rolcreatedb, rolcreaterole,
+                 rolcanlogin, rolbypassrls
+          FROM pg_roles
+          WHERE rolname IN ('zhili_auth', 'zhili_control_plane')
+          ORDER BY rolname
+        `,
+        objects: await preservedAdmin<
+          { object_name: string; object_owner: string; object_type: string }[]
+        >`
+          SELECT namespace_row.nspname AS object_name, owner_role.rolname AS object_owner,
+                 'schema'::text AS object_type
+          FROM pg_namespace namespace_row
+          JOIN pg_roles owner_role ON owner_role.oid = namespace_row.nspowner
+          WHERE namespace_row.nspname IN ('unrelated_auth', 'unrelated_control')
+          UNION ALL
+          SELECT namespace_row.nspname || '.' || class_row.relname,
+                 owner_role.rolname, 'table'::text
+          FROM pg_class class_row
+          JOIN pg_namespace namespace_row ON namespace_row.oid = class_row.relnamespace
+          JOIN pg_roles owner_role ON owner_role.oid = class_row.relowner
+          WHERE namespace_row.nspname IN ('unrelated_auth', 'unrelated_control')
+            AND class_row.relkind = 'r'
+          ORDER BY object_type, object_name
+        `,
+        extension: await preservedAdmin<
+          { extname: string; extowner: string; extversion: string; schema_name: string }[]
+        >`
+          SELECT extension_row.extname, extension_row.extversion,
+                 owner_role.rolname AS extowner, namespace_row.nspname AS schema_name
+          FROM pg_extension extension_row
+          JOIN pg_roles owner_role ON owner_role.oid = extension_row.extowner
+          JOIN pg_namespace namespace_row ON namespace_row.oid = extension_row.extnamespace
+          WHERE extension_row.extname = 'btree_gist'
+        `,
+        dependency: await preservedAdmin<{ definition: string }[]>`
+          SELECT pg_get_constraintdef(constraint_row.oid, true) AS definition
+          FROM pg_constraint constraint_row
+          WHERE constraint_row.conrelid = 'public.unrelated_extension_probe'::regclass
+            AND constraint_row.contype = 'x'
+        `,
+      });
+
+      const beforeB1 = await captureClusterResources();
+      await preservedAdmin.unsafe(
+        await readFile(resolve(packageRoot, 'migrations/0001_b1_domains.sql'), 'utf8')
+      );
+      await preservedAdmin.unsafe(await readFile(downMigrationPath, 'utf8'));
+      expect(await captureClusterResources()).toEqual(beforeB1);
+    } finally {
+      await preservedAdmin.end();
+      await preservedContainer.stop();
+    }
+  }, 120_000);
 
   it('executes the checked-in B1 down migration, preserves foundation, and reapplies identically', async () => {
     const beforeDownFingerprint = firstFingerprint || (await schemaFingerprint());
     const downSql = await readFile(downMigrationPath, 'utf8');
     expect(downSql).not.toMatch(/DROP\s+SCHEMA/i);
+    expect(downSql).not.toMatch(/DROP\s+(?:OWNED|ROLE|EXTENSION)/i);
     await admin.unsafe(downSql);
 
     const remainingTables = await admin<{ table_name: string }[]>`
@@ -1392,11 +1812,24 @@ describe('B1 ordered domain migration', () => {
     const remainingRoles = await admin<{ rolname: string }[]>`
       SELECT rolname FROM pg_roles WHERE rolname LIKE 'zhili_%' ORDER BY rolname
     `;
-    expect(remainingRoles.map(({ rolname }) => rolname)).toEqual(['zhili_app', 'zhili_worker']);
+    expect(remainingRoles.map(({ rolname }) => rolname)).toEqual([
+      'zhili_app',
+      'zhili_auth',
+      'zhili_control_plane',
+      'zhili_worker',
+    ]);
     const remainingFunctions = await admin<{ proname: string }[]>`
       SELECT p.proname
       FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
       WHERE n.nspname = 'public'
+        AND NOT EXISTS (
+          SELECT 1
+          FROM pg_depend dependency_row
+          JOIN pg_extension extension_row ON extension_row.oid = dependency_row.refobjid
+          WHERE dependency_row.classid = 'pg_proc'::regclass
+            AND dependency_row.objid = p.oid
+            AND dependency_row.deptype = 'e'
+        )
       ORDER BY p.proname
     `;
     expect(remainingFunctions.map(({ proname }) => proname)).toEqual([
@@ -1405,7 +1838,7 @@ describe('B1 ordered domain migration', () => {
     const b1Extension = await admin<{ extname: string }[]>`
       SELECT extname FROM pg_extension WHERE extname = 'btree_gist'
     `;
-    expect(b1Extension).toEqual([]);
+    expect(b1Extension).toEqual([{ extname: 'btree_gist' }]);
 
     await admin`DELETE FROM drizzle.__drizzle_migrations WHERE id = (
       SELECT max(id) FROM drizzle.__drizzle_migrations

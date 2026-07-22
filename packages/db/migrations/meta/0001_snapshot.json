@@ -1,5 +1,5 @@
 {
-  "id": "9e840ba9-68f8-4376-8d90-7ef1e1b0837b",
+  "id": "d1770341-3bcf-4708-84db-15427f75d651",
   "prevId": "5df13a32-ce8b-4416-b8e8-7c638de491d0",
   "version": "7",
   "dialect": "postgresql",
@@ -243,22 +243,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "customer_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "status",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -598,15 +595,13 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "device_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -839,22 +834,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "assigned_device_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "status",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "(CASE priority WHEN 'URGENT' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'NORMAL' THEN 2 ELSE 1 END) DESC",
@@ -866,15 +858,13 @@
               "expression": "available_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1248,22 +1238,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "provider",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "expires_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1440,15 +1427,13 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "parent_organization_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1828,22 +1813,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "family_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "issued_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -1858,15 +1840,13 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "parent_token_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -2552,22 +2532,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "role_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "status",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -2643,7 +2620,7 @@
         },
         "role_grants_data_scope_check": {
           "name": "role_grants_data_scope_check",
-          "value": "data_scope_kind = ANY (ARRAY['TENANT'::text, 'ORGANIZATION'::text, 'CUSTOMER'::text, 'WAREHOUSE'::text, 'SELF'::text])"
+          "value": "data_scope_kind = ANY (ARRAY['PLATFORM'::text, 'TENANT'::text, 'ORGANIZATION'::text, 'CUSTOMER'::text, 'WAREHOUSE'::text, 'SELF'::text])"
         },
         "role_grants_status_check": {
           "name": "role_grants_status_check",
@@ -2886,22 +2863,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "user_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "expires_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -3168,22 +3142,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "user_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "role_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -3530,15 +3501,13 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "organization_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -5358,22 +5327,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -5574,22 +5540,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -5759,22 +5722,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -5984,22 +5944,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -6014,15 +5971,13 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "rollback_of_job_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -6248,22 +6203,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -6474,22 +6426,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -6690,22 +6639,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -6884,22 +6830,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -7092,22 +7035,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -7289,22 +7229,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -7451,22 +7388,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -7635,22 +7569,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -7838,22 +7769,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -7977,22 +7905,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -8177,22 +8102,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -8398,22 +8320,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -8576,22 +8495,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -8853,22 +8769,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -9056,22 +8969,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -9237,22 +9147,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -9267,15 +9174,13 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "tracking_number",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": true,
@@ -9448,22 +9353,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -9634,22 +9536,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -9796,22 +9695,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -9991,22 +9887,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -10174,22 +10067,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -10398,22 +10288,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -10618,22 +10505,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -10785,22 +10669,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -10968,22 +10849,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -11138,22 +11016,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -11320,22 +11195,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -11495,22 +11367,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -11641,22 +11510,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -11822,22 +11688,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -11989,22 +11852,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -12190,22 +12050,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -12438,22 +12295,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -12614,22 +12468,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -12792,22 +12643,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -12985,22 +12833,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -13185,22 +13030,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,
@@ -13379,22 +13221,19 @@
               "expression": "tenant_id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "text_ops"
+              "nulls": "last"
             },
             {
               "expression": "created_at",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             },
             {
               "expression": "id",
               "isExpression": false,
               "asc": true,
-              "nulls": "last",
-              "opclass": "timestamptz_ops"
+              "nulls": "last"
             }
           ],
           "isUnique": false,

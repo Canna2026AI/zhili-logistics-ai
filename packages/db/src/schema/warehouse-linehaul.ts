@@ -73,9 +73,9 @@ export const warehouseScans = pgTable(
   (table) => [
     index('warehouse_scans_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -143,9 +143,9 @@ export const warehouseReceipts = pgTable(
     receiptActiveMeasurementForeignKey(table),
     index('warehouse_receipts_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -213,9 +213,9 @@ export const warehouseMeasurements = pgTable(
   (table) => [
     index('warehouse_measurements_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -283,9 +283,9 @@ export const warehouseMedia = pgTable(
   (table) => [
     index('warehouse_media_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -343,9 +343,9 @@ export const inventoryBalances = pgTable(
   (table) => [
     index('inventory_balances_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -415,9 +415,9 @@ export const inventoryLedgerEntries = pgTable(
   (table) => [
     index('inventory_ledger_entries_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId, table.receiptId],
@@ -474,9 +474,9 @@ export const routeDecisions = pgTable(
   (table) => [
     index('route_decisions_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -538,9 +538,9 @@ export const loadUnits = pgTable(
   (table) => [
     index('load_units_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -599,9 +599,9 @@ export const loadUnitItems = pgTable(
   (table) => [
     index('load_unit_items_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('text_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -666,9 +666,9 @@ export const linehaulBookings = pgTable(
   (table) => [
     index('linehaul_bookings_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -723,9 +723,9 @@ export const billsOfLading = pgTable(
   (table) => [
     index('bills_of_lading_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -782,9 +782,9 @@ export const fbaDeliveries = pgTable(
   (table) => [
     index('fba_deliveries_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('timestamptz_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -846,9 +846,9 @@ export const deliveryTasks = pgTable(
   (table) => [
     index('delivery_tasks_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId, table.waybillId],
@@ -927,9 +927,9 @@ export const deliveryTaskEvents = pgTable(
   (table) => [
     index('delivery_task_events_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -993,9 +993,9 @@ export const podRecords = pgTable(
     podCurrentVersionForeignKey(table),
     index('pod_records_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1050,9 +1050,9 @@ export const podVersions = pgTable(
   (table) => [
     index('pod_versions_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('timestamptz_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1137,9 +1137,9 @@ export const deviceSyncSessions = pgTable(
   (table) => [
     index('device_sync_sessions_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('timestamptz_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1219,9 +1219,9 @@ export const deviceEventReceipts = pgTable(
     deviceEventConflictForeignKey(table),
     index('device_event_receipts_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1296,9 +1296,9 @@ export const deviceEventMediaClaims = pgTable(
   (table) => [
     index('device_event_media_claims_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1362,9 +1362,9 @@ export const deviceSyncConflicts = pgTable(
   (table) => [
     index('device_sync_conflicts_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -1434,9 +1434,9 @@ export const printJobs = pgTable(
   (table) => [
     index('print_jobs_cursor_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.createdAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.createdAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],

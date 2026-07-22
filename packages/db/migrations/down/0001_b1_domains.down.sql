@@ -107,17 +107,5 @@ DROP FUNCTION IF EXISTS apply_inventory_ledger_entry();
 DROP FUNCTION IF EXISTS guard_pod_record_update();
 DROP FUNCTION IF EXISTS guard_device_event_session();
 
-DO $roles$
-BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_control_plane') THEN
-    DROP OWNED BY zhili_control_plane;
-    DROP ROLE zhili_control_plane;
-  END IF;
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_auth') THEN
-    DROP OWNED BY zhili_auth;
-    DROP ROLE zhili_auth;
-  END IF;
-END
-$roles$;
-
-DROP EXTENSION IF EXISTS btree_gist RESTRICT;
+-- zhili_auth, zhili_control_plane, and btree_gist are foundation/provisioning resources.
+-- B1 down never removes or alters cluster prerequisites or unrelated objects they own.

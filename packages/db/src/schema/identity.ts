@@ -107,8 +107,8 @@ export const organizations = pgTable(
   (table) => [
     index('organizations_parent_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.parentOrganizationId.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.parentOrganizationId.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -181,8 +181,8 @@ export const warehouses = pgTable(
   (table) => [
     index('warehouses_organization_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.organizationId.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.organizationId.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -390,9 +390,9 @@ export const customerAddresses = pgTable(
   (table) => [
     index('customer_addresses_customer_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.customerId.asc().nullsLast().op('text_ops'),
-      table.status.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.customerId.asc().nullsLast(),
+      table.status.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -533,9 +533,9 @@ export const roleGrants = pgTable(
   (table) => [
     index('role_grants_role_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.roleId.asc().nullsLast().op('text_ops'),
-      table.status.asc().nullsLast().op('text_ops')
+      table.tenantId.asc().nullsLast(),
+      table.roleId.asc().nullsLast(),
+      table.status.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],
@@ -581,7 +581,7 @@ export const roleGrants = pgTable(
     ),
     check(
       'role_grants_data_scope_check',
-      sql`data_scope_kind = ANY (ARRAY['TENANT'::text, 'ORGANIZATION'::text, 'CUSTOMER'::text, 'WAREHOUSE'::text, 'SELF'::text])`
+      sql`data_scope_kind = ANY (ARRAY['PLATFORM'::text, 'TENANT'::text, 'ORGANIZATION'::text, 'CUSTOMER'::text, 'WAREHOUSE'::text, 'SELF'::text])`
     ),
     check('role_grants_status_check', sql`status = ANY (ARRAY['ACTIVE'::text, 'INACTIVE'::text])`),
     check('role_grants_version_check', sql`version >= 1`),
@@ -865,9 +865,9 @@ export const userRoleAssignments = pgTable(
     index('user_role_assignments_active_idx')
       .using(
         'btree',
-        table.tenantId.asc().nullsLast().op('text_ops'),
-        table.userId.asc().nullsLast().op('text_ops'),
-        table.roleId.asc().nullsLast().op('text_ops')
+        table.tenantId.asc().nullsLast(),
+        table.userId.asc().nullsLast(),
+        table.roleId.asc().nullsLast()
       )
       .where(sql`(status = 'ACTIVE'::text)`),
     foreignKey({
@@ -959,9 +959,9 @@ export const sessions = pgTable(
     index('sessions_active_user_idx')
       .using(
         'btree',
-        table.tenantId.asc().nullsLast().op('timestamptz_ops'),
-        table.userId.asc().nullsLast().op('timestamptz_ops'),
-        table.expiresAt.asc().nullsLast().op('timestamptz_ops')
+        table.tenantId.asc().nullsLast(),
+        table.userId.asc().nullsLast(),
+        table.expiresAt.asc().nullsLast()
       )
       .where(sql`(status = 'ACTIVE'::text)`),
     foreignKey({
@@ -1099,16 +1099,12 @@ export const refreshTokens = pgTable(
   (table) => [
     index('refresh_tokens_family_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.familyId.asc().nullsLast().op('timestamptz_ops'),
-      table.issuedAt.asc().nullsLast().op('timestamptz_ops')
+      table.tenantId.asc().nullsLast(),
+      table.familyId.asc().nullsLast(),
+      table.issuedAt.asc().nullsLast()
     ),
     uniqueIndex('refresh_tokens_one_successor_idx')
-      .using(
-        'btree',
-        table.tenantId.asc().nullsLast().op('text_ops'),
-        table.parentTokenId.asc().nullsLast().op('text_ops')
-      )
+      .using('btree', table.tenantId.asc().nullsLast(), table.parentTokenId.asc().nullsLast())
       .where(sql`(parent_token_id IS NOT NULL)`),
     foreignKey({
       columns: [table.tenantId],
@@ -1198,9 +1194,9 @@ export const oauthStates = pgTable(
     index('oauth_states_pending_idx')
       .using(
         'btree',
-        table.tenantId.asc().nullsLast().op('text_ops'),
-        table.provider.asc().nullsLast().op('timestamptz_ops'),
-        table.expiresAt.asc().nullsLast().op('timestamptz_ops')
+        table.tenantId.asc().nullsLast(),
+        table.provider.asc().nullsLast(),
+        table.expiresAt.asc().nullsLast()
       )
       .where(sql`(status = 'PENDING'::text)`),
     foreignKey({
@@ -1333,11 +1329,7 @@ export const deviceBindings = pgTable(
   },
   (table) => [
     uniqueIndex('device_bindings_one_active_device_idx')
-      .using(
-        'btree',
-        table.tenantId.asc().nullsLast().op('text_ops'),
-        table.deviceId.asc().nullsLast().op('text_ops')
-      )
+      .using('btree', table.tenantId.asc().nullsLast(), table.deviceId.asc().nullsLast())
       .where(sql`(status = 'ACTIVE'::text)`),
     foreignKey({
       columns: [table.tenantId],
@@ -1446,12 +1438,12 @@ export const deviceTasks = pgTable(
   (table) => [
     index('device_tasks_queue_idx').using(
       'btree',
-      table.tenantId.asc().nullsLast().op('text_ops'),
-      table.assignedDeviceId.asc().nullsLast().op('text_ops'),
-      table.status.asc().nullsLast().op('text_ops'),
+      table.tenantId.asc().nullsLast(),
+      table.assignedDeviceId.asc().nullsLast(),
+      table.status.asc().nullsLast(),
       sql`(CASE priority WHEN 'URGENT' THEN 4 WHEN 'HIGH' THEN 3 WHEN 'NORMAL' THEN 2 ELSE 1 END) DESC`,
-      table.availableAt.asc().nullsLast().op('timestamptz_ops'),
-      table.id.asc().nullsLast().op('text_ops')
+      table.availableAt.asc().nullsLast(),
+      table.id.asc().nullsLast()
     ),
     foreignKey({
       columns: [table.tenantId],

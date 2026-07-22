@@ -230,7 +230,7 @@ CREATE TABLE role_grants (
   CONSTRAINT role_grants_tenant_id_ulid_check CHECK (tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
   CONSTRAINT role_grants_effect_check CHECK (effect IN ('ALLOW', 'DENY')),
   CONSTRAINT role_grants_data_scope_check CHECK (
-    data_scope_kind IN ('TENANT', 'ORGANIZATION', 'CUSTOMER', 'WAREHOUSE', 'SELF')
+    data_scope_kind IN ('PLATFORM', 'TENANT', 'ORGANIZATION', 'CUSTOMER', 'WAREHOUSE', 'SELF')
   ),
   CONSTRAINT role_grants_status_check CHECK (status IN ('ACTIVE', 'INACTIVE')),
   CONSTRAINT role_grants_version_check CHECK (version >= 0),
@@ -771,6 +771,11 @@ ALTER TABLE permission_actions
     action_code ~ '^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$'
   );
 
+INSERT INTO permission_actions (action_code, resource_type, description) VALUES
+  ('platform.tenant.manage', 'tenant', 'Create tenants and change tenant status'),
+  ('platform.entitlement.write', 'entitlement', 'Write tenant entitlements')
+ON CONFLICT (action_code) DO NOTHING;
+
 ALTER TABLE device_bindings
   ADD COLUMN bound_subject_user_id text NOT NULL,
   ADD CONSTRAINT device_bindings_bound_subject_fk
@@ -1232,30 +1237,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
   permission_simulations
 TO zhili_app;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_auth') THEN
-    CREATE ROLE zhili_auth
-      NOLOGIN
-      NOSUPERUSER
-      NOCREATEDB
-      NOCREATEROLE
-      NOINHERIT
-      NOREPLICATION
-      NOBYPASSRLS;
-  ELSE
-    ALTER ROLE zhili_auth
-      NOLOGIN
-      NOSUPERUSER
-      NOCREATEDB
-      NOCREATEROLE
-      NOINHERIT
-      NOREPLICATION
-      NOBYPASSRLS;
-  END IF;
-END
-$$;
-
 CREATE FUNCTION auth_lookup_password(p_account text, p_tenant_hint text)
 RETURNS TABLE (
   tenant_id text,
@@ -1304,8 +1285,6 @@ BEGIN
   END IF;
 END
 $$;
-
-CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE TABLE shipping_channels (
   id text PRIMARY KEY,
@@ -3790,20 +3769,8 @@ BEGIN
 END;
 $$;
 
--- Least-privilege platform control plane. The login role receives schema usage and EXECUTE only;
--- every command verifies the asserted actor against active users, assignments, roles, and grants.
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'zhili_control_plane') THEN
-    CREATE ROLE zhili_control_plane
-      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
-  ELSE
-    ALTER ROLE zhili_control_plane
-      NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;
-  END IF;
-END
-$$;
-
+-- Least-privilege platform control plane. Foundation owns the cluster role; B1 grants EXECUTE
+-- only, and every command verifies the asserted actor against database authorization rows.
 CREATE FUNCTION control_plane_create_tenant(
   p_actor_tenant_id text,
   p_actor_user_id text,
@@ -3843,9 +3810,10 @@ BEGIN
       AND assignment.valid_from <= now()
       AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
       AND actor_role.status = 'ACTIVE'
-      AND actor_grant.action_code = 'platform.tenant.create'
+      AND actor_grant.action_code = 'platform.tenant.manage'
       AND actor_grant.effect = 'ALLOW'
       AND actor_grant.status = 'ACTIVE'
+      AND actor_grant.data_scope_kind = 'PLATFORM'
       AND NOT EXISTS (
         SELECT 1
         FROM public.user_role_assignments denied_assignment
@@ -3861,9 +3829,10 @@ BEGIN
           AND denied_assignment.valid_from <= now()
           AND (denied_assignment.valid_until IS NULL OR denied_assignment.valid_until > now())
           AND denied_role.status = 'ACTIVE'
-          AND denied_grant.action_code = 'platform.tenant.create'
+          AND denied_grant.action_code = 'platform.tenant.manage'
           AND denied_grant.effect = 'DENY'
           AND denied_grant.status = 'ACTIVE'
+          AND denied_grant.data_scope_kind = 'PLATFORM'
       )
   ) THEN
     RAISE EXCEPTION 'control-plane actor is not authorized' USING ERRCODE = '42501';
@@ -3909,7 +3878,7 @@ BEGIN
     id, tenant_id, subject_id, request_id, action, entity_type, entity_id, payload
   ) VALUES (
     p_operation_id, p_actor_tenant_id, p_actor_user_id, p_operation_id,
-    'platform.tenant.create', 'tenant', p_target_tenant_id,
+    'platform.tenant.created', 'tenant', p_target_tenant_id,
     jsonb_build_object('target_tenant_id', p_target_tenant_id, 'response', response)
   );
   INSERT INTO public.outbox_events (
@@ -3969,9 +3938,10 @@ BEGIN
       AND assignment.valid_from <= now()
       AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
       AND actor_role.status = 'ACTIVE'
-      AND actor_grant.action_code = 'platform.tenant.status'
+      AND actor_grant.action_code = 'platform.tenant.manage'
       AND actor_grant.effect = 'ALLOW'
       AND actor_grant.status = 'ACTIVE'
+      AND actor_grant.data_scope_kind = 'PLATFORM'
       AND NOT EXISTS (
         SELECT 1
         FROM public.user_role_assignments denied_assignment
@@ -3987,9 +3957,10 @@ BEGIN
           AND denied_assignment.valid_from <= now()
           AND (denied_assignment.valid_until IS NULL OR denied_assignment.valid_until > now())
           AND denied_role.status = 'ACTIVE'
-          AND denied_grant.action_code = 'platform.tenant.status'
+          AND denied_grant.action_code = 'platform.tenant.manage'
           AND denied_grant.effect = 'DENY'
           AND denied_grant.status = 'ACTIVE'
+          AND denied_grant.data_scope_kind = 'PLATFORM'
       )
   ) THEN
     RAISE EXCEPTION 'control-plane actor is not authorized' USING ERRCODE = '42501';
@@ -4042,7 +4013,7 @@ BEGIN
     id, tenant_id, subject_id, request_id, action, entity_type, entity_id, payload
   ) VALUES (
     p_operation_id, p_actor_tenant_id, p_actor_user_id, p_operation_id,
-    'platform.tenant.status', 'tenant', p_target_tenant_id,
+    'platform.tenant.status-changed', 'tenant', p_target_tenant_id,
     jsonb_build_object('target_tenant_id', p_target_tenant_id, 'response', response)
   );
   INSERT INTO public.outbox_events (
@@ -4114,9 +4085,10 @@ BEGIN
       AND assignment.valid_from <= now()
       AND (assignment.valid_until IS NULL OR assignment.valid_until > now())
       AND actor_role.status = 'ACTIVE'
-      AND actor_grant.action_code = 'platform.entitlement.manage'
+      AND actor_grant.action_code = 'platform.entitlement.write'
       AND actor_grant.effect = 'ALLOW'
       AND actor_grant.status = 'ACTIVE'
+      AND actor_grant.data_scope_kind = 'PLATFORM'
       AND NOT EXISTS (
         SELECT 1
         FROM public.user_role_assignments denied_assignment
@@ -4132,9 +4104,10 @@ BEGIN
           AND denied_assignment.valid_from <= now()
           AND (denied_assignment.valid_until IS NULL OR denied_assignment.valid_until > now())
           AND denied_role.status = 'ACTIVE'
-          AND denied_grant.action_code = 'platform.entitlement.manage'
+          AND denied_grant.action_code = 'platform.entitlement.write'
           AND denied_grant.effect = 'DENY'
           AND denied_grant.status = 'ACTIVE'
+          AND denied_grant.data_scope_kind = 'PLATFORM'
       )
   ) THEN
     RAISE EXCEPTION 'control-plane actor is not authorized' USING ERRCODE = '42501';
@@ -4205,7 +4178,7 @@ BEGIN
     id, tenant_id, subject_id, request_id, action, entity_type, entity_id, payload
   ) VALUES (
     p_operation_id, p_actor_tenant_id, p_actor_user_id, p_operation_id,
-    'platform.entitlement.manage', 'tenant_entitlement', p_entitlement_id,
+    'platform.tenant-entitlements.updated', 'tenant_entitlement', p_entitlement_id,
     jsonb_build_object('target_tenant_id', p_target_tenant_id, 'response', response)
   );
   INSERT INTO public.outbox_events (
