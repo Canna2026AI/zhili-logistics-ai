@@ -8,7 +8,7 @@ import { MemoryQueueStore } from './offline/queue-store';
 import { MemoryPdaPort } from './ports/memory-pda-port';
 import { OfflineQueue } from './offline/offline-queue';
 import { MediaQueue } from './offline/media-queue';
-import { SessionGuard } from './session/session-guard';
+import { SessionGuard, type LocalDeviceSession } from './session/session-guard';
 import type { DeviceTask } from './domain/types';
 
 const bind = async () => {
@@ -196,6 +196,93 @@ describe('PDA application', () => {
     await screen.findByRole('heading', { name: '任务首页' });
     await userEvent.click(screen.getByRole('button', { name: /LM250722001/ }));
     expect(screen.getByTestId('selected-task')).toHaveTextContent('OUT_FOR_DELIVERY · v4');
+  });
+
+  it('adopts a persisted authoritative task snapshot after a partial delivery sync error', async () => {
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    await queue.restore();
+    const guard = new SessionGuard(queue);
+    const session: LocalDeviceSession = {
+      deviceId: '01JDEVICE00000000000000003',
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: '01JWAREHOUSE00000000000001',
+      subjectId: '01JSUBJECT0000000000000001',
+      timezone: 'Asia/Shanghai',
+      appVersion: '0.2.0',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+      permissions: ['pda.use', 'pda.sync', 'lastmile.delivery.execute'],
+    };
+    await guard.persistSession(session);
+    const initial = [
+      {
+        id: '01JPDATASK0000000000000011',
+        type: 'LAST_MILE_DELIVERY',
+        reference: 'LM-PARTIAL-A',
+        status: 'LOADED',
+        priority: 'HIGH',
+        version: 3,
+      },
+      {
+        id: '01JPDATASK0000000000000012',
+        type: 'LAST_MILE_DELIVERY',
+        reference: 'LM-PARTIAL-B',
+        status: 'LOADED',
+        priority: 'HIGH',
+        version: 3,
+      },
+    ] satisfies DeviceTask[];
+    const first = await queue.enqueue(session, {
+      action: 'LAST_MILE_DELIVER',
+      entityRef: initial[0].reference,
+      payload: { taskId: initial[0].id },
+      mediaRefs: [],
+      baseVersion: 3,
+    });
+    const second = await queue.enqueue(session, {
+      action: 'LAST_MILE_DELIVER',
+      entityRef: initial[1].reference,
+      payload: { taskId: initial[1].id },
+      mediaRefs: [],
+      baseVersion: 3,
+    });
+    const refreshed = [
+      { ...initial[0], status: 'OUT_FOR_DELIVERY', version: 4 },
+      initial[1],
+    ] satisfies DeviceTask[];
+    const port = new MemoryPdaPort();
+    vi.spyOn(port, 'getDeviceTasks')
+      .mockResolvedValueOnce(initial)
+      .mockResolvedValueOnce(refreshed);
+    vi.spyOn(port, 'syncDeviceEvents').mockResolvedValue([
+      {
+        eventId: first.envelope.eventId,
+        disposition: 'APPLIED',
+        claimedMediaRefs: [],
+        serverVersion: 4,
+      },
+      {
+        eventId: second.envelope.eventId,
+        disposition: 'APPLIED',
+        claimedMediaRefs: [],
+        serverVersion: 4,
+      },
+    ]);
+
+    render(<App store={store} port={port} />);
+    await screen.findByRole('heading', { name: '任务首页' });
+    await userEvent.click(screen.getByRole('button', { name: /离线/ }));
+    await userEvent.click(screen.getByRole('button', { name: '立即同步' }));
+    await screen.findByText(/未取得唯一且已推进的权威任务快照/);
+    expect(screen.getByTestId('pending-count')).toHaveTextContent('1');
+    await userEvent.click(screen.getByRole('button', { name: '任务' }));
+    expect(screen.getByRole('button', { name: /LM-PARTIAL-A/ })).toHaveTextContent(
+      'OUT_FOR_DELIVERY'
+    );
+    expect(
+      (await new OfflineQueue(store).restore()).events.map((item) => item.envelope.eventId)
+    ).toEqual([second.envelope.eventId]);
   });
 
   it('queues the complete second selected task snapshot instead of the first task of that type', async () => {

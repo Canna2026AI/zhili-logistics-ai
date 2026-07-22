@@ -227,6 +227,92 @@ describe('PdaSyncService', () => {
     expect(queue.snapshot().events).toHaveLength(1);
   });
 
+  it('commits an applied warehouse sibling when delivery authority refresh fails', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const warehouse = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'WH-MIXED-1',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const delivery = await queue.enqueue(context, {
+      action: 'LAST_MILE_DELIVER',
+      entityRef: 'LM-MIXED-1',
+      payload: { taskId: '01JPDATASK0000000000000002' },
+      mediaRefs: [],
+      baseVersion: 3,
+    });
+    const port = new MemoryPdaPort();
+    port.syncDeviceEvents = vi.fn().mockResolvedValue([
+      {
+        eventId: warehouse.envelope.eventId,
+        disposition: 'APPLIED',
+        claimedMediaRefs: [],
+        serverVersion: 2,
+      },
+      {
+        eventId: delivery.envelope.eventId,
+        disposition: 'APPLIED',
+        claimedMediaRefs: [],
+        serverVersion: 4,
+      },
+    ]);
+    port.getDeviceTasks = vi.fn().mockRejectedValue(new Error('task refresh unavailable'));
+
+    await expect(new PdaSyncService(queue, media, port).synchronize(syncContext)).rejects.toThrow(
+      'task refresh unavailable'
+    );
+    expect(queue.snapshot().events.map((item) => item.envelope.eventId)).toEqual([
+      delivery.envelope.eventId,
+    ]);
+  });
+
+  it('retains applied delivery work when the authoritative task cache cannot be persisted', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const taskId = '01JPDATASK0000000000000002';
+    const event = await queue.enqueue(context, {
+      action: 'LAST_MILE_DELIVER',
+      entityRef: 'LM-PERSIST-FAIL',
+      payload: { taskId },
+      mediaRefs: [],
+      baseVersion: 3,
+    });
+    const port = new MemoryPdaPort();
+    port.syncDeviceEvents = vi.fn().mockResolvedValue([
+      {
+        eventId: event.envelope.eventId,
+        disposition: 'APPLIED',
+        claimedMediaRefs: [],
+        serverVersion: 4,
+      },
+    ]);
+    port.getDeviceTasks = vi.fn().mockResolvedValue([
+      {
+        id: taskId,
+        type: 'LAST_MILE_DELIVERY',
+        reference: 'LM-PERSIST-FAIL',
+        status: 'OUT_FOR_DELIVERY',
+        priority: 'HIGH',
+        version: 4,
+      },
+    ]);
+    vi.spyOn(queue, 'setMeta').mockRejectedValue(new Error('task cache unavailable'));
+
+    await expect(new PdaSyncService(queue, media, port).synchronize(syncContext)).rejects.toThrow(
+      'task cache unavailable'
+    );
+    expect(queue.snapshot().events.map((item) => item.envelope.eventId)).toEqual([
+      event.envelope.eventId,
+    ]);
+  });
+
   it.each([
     ['reference', { reference: 'LM-WRONG', type: 'LAST_MILE_DELIVERY' as const }],
     ['type', { reference: 'LM-SCOPED', type: 'RECEIVE' as const }],

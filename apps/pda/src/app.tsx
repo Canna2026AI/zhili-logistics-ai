@@ -249,7 +249,19 @@ export function App({
         await guard.invalidate('API 401 during sync');
         setError(explain(caught));
         setPhase('login');
-      } else setSyncMessage(explain(caught));
+      } else {
+        const persistedTasks = await queue
+          .getMeta<DeviceTask[]>('device-tasks')
+          .catch(() => undefined);
+        if (persistedTasks) {
+          setTasks(persistedTasks);
+          setSelectedTask((current) =>
+            current ? persistedTasks.find((task) => task.id === current.id) : undefined
+          );
+        }
+        setSyncMessage(explain(caught));
+        changed();
+      }
     } finally {
       setBusy(false);
     }

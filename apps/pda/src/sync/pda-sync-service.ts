@@ -77,36 +77,67 @@ export class PdaSyncService {
       const deliveryEvents = events.filter(
         (event) => succeeded.has(event.eventId) && expectedDeliveryStatus(event.action)
       );
-      if (deliveryEvents.length > 0) {
-        const refreshed = await this.port.getDeviceTasks(context.deviceId);
-        for (const event of deliveryEvents) {
-          const taskId = event.payload.taskId;
-          const matches = refreshed.filter((task) => task.id === taskId);
-          const task = matches[0];
-          const expected = expectedDeliveryStatus(event.action);
-          if (
-            typeof taskId !== 'string' ||
-            matches.length !== 1 ||
-            !task ||
-            task.reference !== event.entityRef ||
-            task.type !== 'LAST_MILE_DELIVERY' ||
-            task.status !== expected ||
-            task.version <= event.baseVersion
-          ) {
-            throw new Error(
-              `离线尾程事件 ${event.eventId} 未取得唯一且已推进的权威任务快照，已保留本地作业。`
-            );
+      const gatedDeliveryIds = new Set(deliveryEvents.map((event) => event.eventId));
+      let deferredError: unknown;
+      const rememberError = (error: unknown) => {
+        deferredError ??= error;
+      };
+      const applyIndependently = async (candidates: SyncResult[]) => {
+        for (const result of candidates) {
+          try {
+            const applied = await this.queue.applySyncResults([result]);
+            total.applied += applied.applied;
+            total.duplicate += applied.duplicate;
+            total.conflict += applied.conflict;
+            total.rejected += applied.rejected;
+          } catch (error) {
+            rememberError(error);
           }
         }
-        await this.queue.setMeta('device-tasks', refreshed);
-        authoritativeTasks = refreshed;
+      };
+
+      await applyIndependently(results.filter((result) => !gatedDeliveryIds.has(result.eventId)));
+
+      if (deliveryEvents.length > 0) {
+        let refreshed: DeviceTask[] | undefined;
+        try {
+          refreshed = await this.port.getDeviceTasks(context.deviceId);
+          await this.queue.setMeta('device-tasks', refreshed);
+          authoritativeTasks = refreshed;
+        } catch (error) {
+          refreshed = undefined;
+          rememberError(error);
+        }
+
+        if (refreshed) {
+          for (const event of deliveryEvents) {
+            const taskId = event.payload.taskId;
+            const matches = refreshed.filter((task) => task.id === taskId);
+            const task = matches[0];
+            const expected = expectedDeliveryStatus(event.action);
+            if (
+              typeof taskId !== 'string' ||
+              matches.length !== 1 ||
+              !task ||
+              task.reference !== event.entityRef ||
+              task.type !== 'LAST_MILE_DELIVERY' ||
+              task.status !== expected ||
+              task.version <= event.baseVersion
+            ) {
+              rememberError(
+                new Error(
+                  `离线尾程事件 ${event.eventId} 未取得唯一且已推进的权威任务快照，已保留本地作业。`
+                )
+              );
+              continue;
+            }
+            const result = results.find((candidate) => candidate.eventId === event.eventId);
+            if (result) await applyIndependently([result]);
+          }
+        }
       }
-      const batch = await this.queue.applySyncResults(results);
       await this.media.restore();
-      total.applied += batch.applied;
-      total.duplicate += batch.duplicate;
-      total.conflict += batch.conflict;
-      total.rejected += batch.rejected;
+      if (deferredError !== undefined) throw deferredError;
     }
     return {
       ...total,
