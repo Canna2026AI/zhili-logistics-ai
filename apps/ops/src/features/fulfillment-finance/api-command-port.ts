@@ -224,6 +224,11 @@ export const fulfillmentFinanceApiRoutes = {
   },
   reconcilePayments: { method: 'POST', path: '/payments/reconciliations' },
   queryBusinessReport: { method: 'POST', path: '/reports/business:query' },
+  retryNotificationDelivery: {
+    method: 'POST',
+    path: '/notification-deliveries/{deliveryId}:retry',
+    pathParam: 'deliveryId',
+  },
 } as const satisfies Record<FulfillmentFinanceOperationId, ApiRoute>;
 
 interface ApiCallResult {

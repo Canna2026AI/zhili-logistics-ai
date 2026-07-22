@@ -1,10 +1,20 @@
 import { AppShell, Button, StatusTag, type NavigationGroup, type WorkspaceTab } from '@zhili/ui';
 import { useState } from 'react';
 import { MasterDataPanel } from '@zhili/feature-identity-masterdata';
-import { QuoteWorkbench, RateCatalogPanel } from '@zhili/feature-rates-routing';
+import {
+  QuoteWorkbench,
+  RateCatalogPanel,
+  quoteInputFixture,
+  type QuoteViewState,
+} from '@zhili/feature-rates-routing';
 import { ImportWorkbench, OrderDraftPanel, WaybillList } from '@zhili/feature-waybills';
 import { defaultOpsOrdersPorts, type OpsOrdersPorts } from './ports';
-import { FlowStatePanel } from '../interaction-states';
+import {
+  FlowStatePanel,
+  type FlowStateActionRequest,
+  type FlowStateActionResult,
+  type OpsFlowSelection,
+} from '../interaction-states';
 import './orders-workspace.css';
 
 type OrdersPage =
@@ -136,12 +146,103 @@ export function OpsOrdersWorkspace({
     initialPage === 'dashboard' ? ['dashboard'] : ['dashboard', initialPage]
   );
   const [simulation, setSimulation] = useState(false);
+  const [quoteFlow, setQuoteFlow] = useState<OpsFlowSelection>({
+    flowId: 'F02',
+    stateId: 'normal',
+  });
+  const [importFlow, setImportFlow] = useState<OpsFlowSelection>({
+    flowId: 'F10',
+    stateId: 'normal',
+  });
+  const [quoteRevision, setQuoteRevision] = useState(0);
+  const [manualMappingOpen, setManualMappingOpen] = useState(false);
   const activePorts = { ...defaultOpsOrdersPorts, ...ports };
 
   const open = (next: OrdersPage) => {
+    if (page !== next && next === 'quotes') {
+      setQuoteFlow({ flowId: 'F02', stateId: 'normal' });
+    }
+    if (page !== next && next === 'imports') {
+      setImportFlow({ flowId: 'F10', stateId: 'normal' });
+      setManualMappingOpen(false);
+    }
     setPage(next);
     setOpenPages((pages) => (pages.includes(next) ? pages : [...pages, next]));
   };
+
+  const runFlowAction = async (request: FlowStateActionRequest): Promise<FlowStateActionResult> => {
+    switch (request.actionId) {
+      case 'requote-current-rules': {
+        const quote = await activePorts.quotes.create({
+          quote: quoteInputFixture.request,
+          orderContext: { orderType: 'STANDARD' },
+        });
+        setQuoteRevision((revision) => revision + 1);
+        return {
+          message: `已生成新报价 ${quote.quoteNo}`,
+          auditId: `quote:${quote.id}:v${quote.version}`,
+          operationId: 'quote.create',
+          recoverToStateId: 'normal',
+          details: {
+            title: '新报价快照',
+            items: [`报价号 ${quote.quoteNo}`, `快照版本 v${quote.version}`, '旧快照仍保留审计'],
+          },
+        };
+      }
+      case 'open-manual-mapping':
+        setManualMappingOpen(true);
+        return {
+          message: 'clientAction 已进入人工字段映射，AI 建议保持可追溯',
+          auditId: 'CLIENT-F10-MAP',
+          operationId: 'clientAction',
+        };
+      case 'locate-quote-fields':
+        return {
+          message: '已定位缺失字段并保留当前报价输入',
+          auditId: 'CLIENT-F02-FIELDS',
+          operationId: 'clientAction',
+          details: {
+            title: '需要补充的字段',
+            items: ['目的地邮编末段', '包裹重量或替代渠道'],
+          },
+        };
+      case 'compare-rate-rules':
+        return {
+          message: '已生成价卡规则差异，未覆盖当前报价快照',
+          auditId: 'CLIENT-F02-RATE-DIFF',
+          operationId: 'clientAction',
+          details: {
+            title: 'v18 → v19 规则差异',
+            items: ['销售价预计变化 +2.4%', '燃油附加费版本已更新'],
+          },
+        };
+      case 'inspect-import-rollback':
+        return {
+          message: '已列出可回滚范围，当前批次尚未改变',
+          auditId: 'CLIENT-F10-ROLLBACK',
+          operationId: 'clientAction',
+          details: {
+            title: '导入回滚影响',
+            items: ['仅回滚本批次创建的可逆记录', '外部已消费记录将逐项拒绝'],
+          },
+        };
+      default:
+        throw new Error(`当前工作区不支持动作 ${request.actionId}`);
+    }
+  };
+
+  const quoteViewState: QuoteViewState =
+    quoteFlow.stateId === 'expired'
+      ? 'expired'
+      : quoteFlow.stateId === 'stale-rate'
+        ? 'stale'
+        : quoteFlow.stateId === 'failed-no-rate'
+          ? 'failed'
+          : quoteFlow.stateId === 'masked-cost' || simulation
+            ? 'forbidden-cost'
+            : 'normal';
+  const quoteReadOnly =
+    simulation || ['expired', 'stale-rate', 'failed-no-rate'].includes(quoteFlow.stateId);
 
   const tabs: WorkspaceTab[] = openPages.map((id) => ({
     id,
@@ -163,19 +264,60 @@ export function OpsOrdersWorkspace({
       <RateCatalogPanel port={activePorts.rates} readOnly={simulation} />
     ) : page === 'quotes' ? (
       <>
-        <FlowStatePanel key="F02" flows={['F02']} stateLabel="报价状态" />
-        <QuoteWorkbench
-          port={activePorts.quotes}
-          state={simulation ? 'forbidden-cost' : 'normal'}
-          readOnly={simulation}
+        <FlowStatePanel
+          flows={['F02']}
+          value={quoteFlow}
+          onChange={setQuoteFlow}
+          onAction={runFlowAction}
+          stateLabel="报价状态"
         />
+        {quoteFlow.stateId === 'expired' || quoteFlow.stateId === 'failed-no-rate' ? null : (
+          <QuoteWorkbench
+            key={`quote-${quoteRevision}`}
+            port={activePorts.quotes}
+            state={quoteViewState}
+            readOnly={quoteReadOnly}
+          />
+        )}
       </>
     ) : page === 'orders' ? (
       <OrderDraftPanel port={activePorts.orders} readOnly={simulation} />
     ) : page === 'imports' ? (
       <>
-        <FlowStatePanel key="F10" flows={['F10']} stateLabel="AI 导入状态" />
-        <ImportWorkbench port={activePorts.imports} readOnly={simulation} />
+        <FlowStatePanel
+          flows={['F10']}
+          value={importFlow}
+          onChange={(selection) => {
+            setImportFlow(selection);
+            if (selection.stateId !== 'low-confidence') setManualMappingOpen(false);
+          }}
+          onAction={runFlowAction}
+          stateLabel="AI 导入状态"
+        />
+        {manualMappingOpen ? (
+          <section className="orders-manual-mapping" role="region" aria-label="AI 人工字段映射">
+            <header>
+              <div>
+                <h2>AI 人工字段映射</h2>
+                <p>模型 Zhili-Map 2.1 的低置信度建议；人工选择会写入导入批次审计。</p>
+              </div>
+              <StatusTag tone="warning">待人工确认</StatusTag>
+            </header>
+            <label>
+              收件州候选字段
+              <select aria-label="收件州候选字段" defaultValue="receiver_state">
+                <option value="receiver_state">receiver_state（置信度 61%）</option>
+                <option value="province">province（置信度 32%）</option>
+                <option value="ignore">忽略此列</option>
+              </select>
+            </label>
+            <p>审计引用 CLIENT-F10-MAP · 原始列名与人工结论均保留</p>
+          </section>
+        ) : null}
+        <ImportWorkbench
+          port={activePorts.imports}
+          readOnly={simulation || importFlow.stateId === 'forbidden'}
+        />
       </>
     ) : (
       <WaybillList

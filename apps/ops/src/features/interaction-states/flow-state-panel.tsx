@@ -1,31 +1,87 @@
-import { useMemo, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button, StatusTag } from '@zhili/ui';
-import { opsFlowCatalog, type OpsFlowId } from './flow-state-catalog';
+import { opsFlowCatalog, type OpsFlowActionId, type OpsFlowId } from './flow-state-catalog';
 import './flow-state-panel.css';
 
+export interface OpsFlowSelection {
+  flowId: OpsFlowId;
+  stateId: string;
+}
+
+export interface FlowStateActionRequest {
+  selection: OpsFlowSelection;
+  actionId: OpsFlowActionId;
+  kind: 'command' | 'clientAction';
+}
+
+export interface FlowStateActionResult {
+  message: string;
+  auditId: string;
+  operationId?: string;
+  recoverToStateId?: string;
+  details?: { title: string; items: string[] };
+  download?: { filename: string; mimeType: string; content: string };
+}
+
+type NonEmptyFlows = readonly [OpsFlowId, ...OpsFlowId[]];
+
 export interface FlowStatePanelProps {
-  flows: OpsFlowId[];
-  initialFlow?: OpsFlowId;
+  flows: NonEmptyFlows;
+  value: OpsFlowSelection;
+  onChange: (value: OpsFlowSelection) => void;
+  onAction?: (request: FlowStateActionRequest) => Promise<FlowStateActionResult>;
   stateLabel?: string;
 }
 
-export function FlowStatePanel({ flows, initialFlow = flows[0], stateLabel }: FlowStatePanelProps) {
-  const [flowId, setFlowId] = useState<OpsFlowId>(initialFlow);
-  const [stateId, setStateId] = useState('normal');
-  const [feedback, setFeedback] = useState('');
-  const flow = opsFlowCatalog[flowId];
-  const state = useMemo(
-    () => flow.states.find((candidate) => candidate.id === stateId) ?? flow.states[0],
-    [flow, stateId]
-  );
+type Outcome =
+  { kind: 'success'; result: FlowStateActionResult } | { kind: 'error'; message: string };
 
+export function FlowStatePanel({
+  flows,
+  value,
+  onChange,
+  onAction,
+  stateLabel,
+}: FlowStatePanelProps) {
+  const [pending, setPending] = useState(false);
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const pendingRef = useRef(false);
+  const flow = opsFlowCatalog[value.flowId] ?? opsFlowCatalog[flows[0]];
+  const state = flow.states.find((candidate) => candidate.id === value.stateId) ?? flow.states[0];
+
+  const resetOutcome = () => setOutcome(null);
   const reset = () => {
-    setStateId('normal');
-    setFeedback('');
+    resetOutcome();
+    onChange({ flowId: value.flowId, stateId: 'normal' });
+  };
+  const executeAction = async () => {
+    if (!state.action || !onAction || pendingRef.current) return;
+    pendingRef.current = true;
+    setPending(true);
+    setOutcome(null);
+    try {
+      const result = await onAction({
+        selection: value,
+        actionId: state.action.id,
+        kind: state.action.kind,
+      });
+      setOutcome({ kind: 'success', result });
+      if (result.recoverToStateId) {
+        onChange({ flowId: value.flowId, stateId: result.recoverToStateId });
+      }
+    } catch (error) {
+      setOutcome({
+        kind: 'error',
+        message: error instanceof Error ? error.message : '操作失败，请重试',
+      });
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
   };
 
   return (
-    <section className="ops-flow-state" aria-label={`${flowId} 交互状态`}>
+    <section className="ops-flow-state" aria-label={`${flow.id} 交互状态`}>
       <header>
         <div>
           <strong>{flow.label}</strong>
@@ -36,10 +92,11 @@ export function FlowStatePanel({ flows, initialFlow = flows[0], stateLabel }: Fl
             业务流程
             <select
               aria-label="业务流程"
-              value={flowId}
+              value={value.flowId}
+              disabled={pending}
               onChange={(event) => {
-                setFlowId(event.target.value as OpsFlowId);
-                reset();
+                resetOutcome();
+                onChange({ flowId: event.target.value as OpsFlowId, stateId: 'normal' });
               }}
             >
               {flows.map((id) => (
@@ -54,9 +111,10 @@ export function FlowStatePanel({ flows, initialFlow = flows[0], stateLabel }: Fl
             <select
               aria-label={stateLabel ?? '流程状态'}
               value={state.id}
+              disabled={pending}
               onChange={(event) => {
-                setStateId(event.target.value);
-                setFeedback('');
+                resetOutcome();
+                onChange({ flowId: value.flowId, stateId: event.target.value });
               }}
             >
               {flow.states.map((candidate) => (
@@ -70,7 +128,11 @@ export function FlowStatePanel({ flows, initialFlow = flows[0], stateLabel }: Fl
       </header>
 
       {state.id !== 'normal' ? (
-        <div className="ops-flow-state__body" data-tone={state.tone} role={state.role}>
+        <div
+          className="ops-flow-state__body"
+          data-tone={state.tone}
+          role={pending || outcome ? undefined : state.role}
+        >
           <div className="ops-flow-state__copy">
             <StatusTag tone={state.tone === 'info' ? 'info' : state.tone}>{state.label}</StatusTag>
             <h3>{state.title}</h3>
@@ -82,25 +144,53 @@ export function FlowStatePanel({ flows, initialFlow = flows[0], stateLabel }: Fl
             </ul>
           </div>
           <div className="ops-flow-state__actions">
-            <Button variant="secondary" size="compact" onClick={reset}>
+            <Button variant="secondary" size="compact" disabled={pending} onClick={reset}>
               返回正常流程
             </Button>
-            {state.primaryAction ? (
+            {state.action ? (
               <Button
                 size="compact"
-                onClick={() => {
-                  setFeedback(state.actionFeedback ?? '操作已受理');
-                  if (state.recoverOnPrimary) setStateId('normal');
-                }}
+                disabled={pending || !onAction}
+                onClick={() => void executeAction()}
               >
-                {state.primaryAction}
+                {pending ? '处理中…' : state.action.label}
               </Button>
             ) : null}
           </div>
         </div>
       ) : null}
 
-      {feedback ? <p className="ops-flow-state__feedback">{feedback}</p> : null}
+      {outcome?.kind === 'success' ? (
+        <section className="ops-flow-state__result" aria-label="操作结果">
+          <p className="ops-flow-state__feedback" role="status" aria-live="polite">
+            {outcome.result.message} · 审计 {outcome.result.auditId} ·{' '}
+            {outcome.result.operationId ?? 'clientAction'}
+          </p>
+          {outcome.result.details ? (
+            <section aria-label={outcome.result.details.title}>
+              <h4>{outcome.result.details.title}</h4>
+              <ul>
+                {outcome.result.details.items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
+          {outcome.result.download ? (
+            <a
+              download={outcome.result.download.filename}
+              href={`data:${outcome.result.download.mimeType};charset=utf-8,${encodeURIComponent(outcome.result.download.content)}`}
+            >
+              下载 {outcome.result.download.filename}
+            </a>
+          ) : null}
+        </section>
+      ) : null}
+      {outcome?.kind === 'error' ? (
+        <p className="ops-flow-state__feedback ops-flow-state__feedback--error" role="alert">
+          操作失败：{outcome.message}。当前状态与输入已保留。
+        </p>
+      ) : null}
     </section>
   );
 }

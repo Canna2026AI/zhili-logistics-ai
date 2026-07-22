@@ -244,42 +244,205 @@ describe('fulfillment and finance workbench', () => {
     expect(screen.getByLabelText('财务流程状态')).toHaveTextContent('发票 INV-202607-018 已审批');
   });
 
-  it('renders flow-specific linehaul branches and recovers without losing the workbench', () => {
-    render(
-      <FulfillmentFinanceWorkbench commandPort={successfulPort()} initialSection="linehaul" />
+  it('requires a second confirmation before F04 dispatch and audits the exact command', async () => {
+    let resolveCommand: ((value: { auditId: string }) => void) | undefined;
+    const execute = vi.fn(
+      () =>
+        new Promise<{ auditId: string }>((resolve) => {
+          resolveCommand = resolve;
+        })
     );
+    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="linehaul" />);
 
     expect(screen.getByRole('combobox', { name: '业务流程' })).toHaveValue('F04');
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'danger-dispatch' },
+    });
+    expect(screen.getByRole('button', { name: '确认出库' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '进入二次确认' }));
+    const dialog = await screen.findByRole('dialog', { name: '出仓危险确认' });
+    expect(dialog).toHaveTextContent('42 票 / 5,187.20 kg');
+    expect(screen.getByRole('button', { name: '确认出库并记录审计' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: '已核对未关闭问题与打印清单' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认出库并记录审计' }));
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledWith({
+      domain: 'linehaul',
+      operationId: 'dispatchLoadUnit',
+      entityRef: 'CNT-SZX-260722-01',
+      idempotencyKey: 'dispatchLoadUnit:CNT-SZX-260722-01:v4',
+      expectedVersion: 4,
+      payload: { confirmedIssues: 2, printedDocuments: 40 },
+    });
+    resolveCommand?.({ auditId: 'AUD-F04-DISPATCH' });
+    await waitFor(() =>
+      expect(screen.getByRole('status')).toHaveTextContent('审计 AUD-F04-DISPATCH')
+    );
+    expect(screen.getByText('审计事件').parentElement).toHaveTextContent('1');
+  });
+
+  it('gates F04 release and produces a real downloadable failure report', async () => {
+    const execute = vi.fn(async () => ({ auditId: 'AUD-F04-APPROVAL' }));
+    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="linehaul" />);
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
       target: { value: 'failed-incompatible' },
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('装载兼容性失败');
-    expect(screen.getByText(/3 票运单不符合/)).toBeVisible();
-    expect(screen.getByRole('button', { name: '下载失败报告' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '下载失败报告' }));
+    const report = await screen.findByRole('link', { name: '下载 load-compatibility-errors.csv' });
+    expect(report).toHaveAttribute('download', 'load-compatibility-errors.csv');
+    expect(screen.getByRole('status')).toHaveTextContent(/clientAction.*CLIENT-F04-REPORT/);
 
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
       target: { value: 'forbidden-release' },
     });
     expect(screen.getByRole('alert')).toHaveTextContent('缺少放货权限');
-    expect(screen.getByText(/hold\.release/)).toBeVisible();
-    expect(screen.queryByRole('button', { name: '确认放货' })).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '返回正常流程' }));
-    expect(screen.getByRole('heading', { name: '干线与尾程履约' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '确认出库' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '发起放货审批' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        domain: 'tracking',
+        operationId: 'placeShipmentHold',
+        entityRef: 'HOLD-S2505120004',
+        idempotencyKey: 'placeShipmentHold:HOLD-S2505120004:v2',
+      })
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('AUD-F04-APPROVAL');
   });
 
-  it('switches finance flows and preserves partial payable import recovery', () => {
-    render(<FulfillmentFinanceWorkbench commandPort={successfulPort()} initialSection="finance" />);
+  it('executes F03 and F05 recovery through typed commands and preserves rejected state', async () => {
+    const execute = vi
+      .fn<(command: FulfillmentFinanceCommand) => Promise<{ auditId: string }>>()
+      .mockResolvedValueOnce({ auditId: 'AUD-F03-MEDIA' })
+      .mockRejectedValueOnce(new Error('409 承运商版本冲突'));
+    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'failed-missing-evidence' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '补拍并重试' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(execute).toHaveBeenLastCalledWith({
+      domain: 'warehouse',
+      operationId: 'attachReceiptMedia',
+      entityRef: 'RCV-S2505120004',
+      idempotencyKey: 'attachReceiptMedia:RCV-S2505120004:v7',
+      expectedVersion: 7,
+      payload: { evidenceTypes: ['CARTON_FRONT', 'WEIGHT_READING'], retry: true },
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('AUD-F03-MEDIA');
+
+    fireEvent.click(screen.getByRole('button', { name: /轨迹客服/ }));
+    expect(screen.getByRole('combobox', { name: '业务流程' })).toHaveValue('F05');
+    expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('normal');
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'failed-carrier' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '立即重试' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('409 承运商版本冲突');
+    expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('failed-carrier');
+    expect(screen.getByText('审计事件').parentElement).toHaveTextContent('1');
+  });
+
+  it('routes partial notification retries for F03 and F05 through the audited notification command', async () => {
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
+      auditId: `AUD-${command.entityRef}`,
+    }));
+    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} />);
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'partial-notify' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '重试通知' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operationId: 'retryNotificationDelivery',
+        entityRef: 'NTF-260723-92',
+        idempotencyKey: 'retryNotificationDelivery:NTF-260723-92:v1',
+      })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /轨迹客服/ }));
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'partial-notify' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '重试通知' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(execute).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        operationId: 'retryNotificationDelivery',
+        entityRef: 'NTF-260723-91',
+        idempotencyKey: 'retryNotificationDelivery:NTF-260723-91:v1',
+      })
+    );
+  });
+
+  it('gates F06/F07 finance commands and resets state when switching flows', async () => {
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
+      auditId: `AUD-${command.operationId}`,
+    }));
+    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="finance" />);
+
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'stale-allocate' },
+    });
+    expect(screen.getByRole('button', { name: '核销' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '撤销核销' })).toBeDisabled();
 
     fireEvent.change(screen.getByRole('combobox', { name: '业务流程' }), {
       target: { value: 'F07' },
     });
+    expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('normal');
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'forbidden-pay' },
+    });
+    expect(screen.getByRole('button', { name: '创建供应商付款' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '分配付款' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '校验应付导入' })).toBeEnabled();
+
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
       target: { value: 'partial' },
     });
-    expect(screen.getByRole('status')).toHaveTextContent('部分提交');
-    expect(screen.getByText(/成功 98 条，失败 2 条/)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '只重试失败项' }));
-    expect(screen.getByText('失败清单已保留，等待重新校验')).toBeVisible();
+    await waitFor(() =>
+      expect(execute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          operationId: 'validatePayableImport',
+          idempotencyKey: 'validatePayableImport:PIMP-20260722-08:v1',
+          payload: { failedOnly: true, rowIds: [99, 100] },
+        })
+      )
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('AUD-validatePayableImport');
+
+    fireEvent.change(screen.getByRole('combobox', { name: '业务流程' }), {
+      target: { value: 'F06' },
+    });
+    expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('normal');
+  });
+
+  it('routes F06 danger unreview through an impact dialog and exact audited command', async () => {
+    const execute = vi.fn(async () => ({ auditId: 'AUD-F06-UNREVIEW' }));
+    render(<FulfillmentFinanceWorkbench commandPort={{ execute }} initialSection="finance" />);
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'danger-unreview' },
+    });
+    expect(screen.getByRole('button', { name: '反审核' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '查看影响范围' }));
+    const dialog = await screen.findByRole('dialog', { name: '反审核影响范围' });
+    expect(dialog).toHaveTextContent('期间 2026-07 需要重算');
+    fireEvent.change(screen.getByRole('textbox', { name: '场景反审核原因' }), {
+      target: { value: '承运商补传费用后重算' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认反审核并记录审计' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operationId: 'unreviewCharge',
+        idempotencyKey: 'unreviewCharge:CHG-S2505120004:v11',
+        payload: expect.objectContaining({ reason: '承运商补传费用后重算' }),
+      })
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('AUD-F06-UNREVIEW');
   });
 });

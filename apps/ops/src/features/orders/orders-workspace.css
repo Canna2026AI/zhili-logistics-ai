@@ -99,3 +99,53 @@
 .orders-dashboard__lanes li > span {
   color: var(--zl-color-text-secondary);
 }
+
+.orders-manual-mapping {
+  display: grid;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 14px;
+  border: 1px solid #99d5cf;
+  border-radius: var(--zl-radius-panel, 6px);
+  background: #f0fdfa;
+}
+
+.orders-manual-mapping > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.orders-manual-mapping h2,
+.orders-manual-mapping p {
+  margin: 0;
+}
+
+.orders-manual-mapping h2 {
+  font-size: 16px;
+}
+
+.orders-manual-mapping p {
+  color: var(--zl-color-text-secondary);
+  font-size: 12px;
+}
+
+.orders-manual-mapping label {
+  display: grid;
+  grid-template-columns: 150px minmax(260px, 440px);
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.orders-manual-mapping select {
+  height: 32px;
+  padding: 0 30px 0 9px;
+  border: 1px solid var(--zl-color-border);
+  border-radius: 4px;
+  background: #fff;
+  color: var(--zl-color-text-primary);
+  font: inherit;
+}
