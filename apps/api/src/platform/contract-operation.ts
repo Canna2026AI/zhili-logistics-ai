@@ -12,8 +12,19 @@ export interface ImplementedOperation {
   readonly idempotency: boolean | undefined;
 }
 
+export interface ContractOperationMapping {
+  readonly operationId: string;
+  readonly contractPath: string;
+}
+
 export function ContractOperation(operationId: string): CustomDecorator<string> {
   return SetMetadata(CONTRACT_OPERATION_METADATA_KEY, operationId);
+}
+
+export function ContractOperations(
+  mappings: readonly ContractOperationMapping[]
+): CustomDecorator<string> {
+  return SetMetadata(CONTRACT_OPERATION_METADATA_KEY, mappings);
 }
 
 export function collectControllerOperations(
@@ -36,19 +47,25 @@ export function collectControllerOperations(
       const method = REQUEST_METHOD_NAMES[requestMethod];
       if (!method) throw new Error(`Unsupported Nest request method metadata: ${requestMethod}`);
       const methodPath = singlePathMetadata(handler, `route ${controller.name}.${methodName}`);
-      const operationId = Reflect.getMetadata(CONTRACT_OPERATION_METADATA_KEY, handler) as
-        string | undefined;
+      const contractMetadata = Reflect.getMetadata(CONTRACT_OPERATION_METADATA_KEY, handler) as
+        string | readonly ContractOperationMapping[] | undefined;
       const methodPolicy = Reflect.getMetadata(IDEMPOTENT_COMMAND_METADATA_KEY, handler) as
         boolean | undefined;
       const classPolicy = Reflect.getMetadata(IDEMPOTENT_COMMAND_METADATA_KEY, controller) as
         boolean | undefined;
 
-      operations.push({
-        method,
-        path: implementedPath(globalPrefix, controllerPath, methodPath),
-        operationId,
-        idempotency: methodPolicy ?? classPolicy,
-      });
+      for (const mapping of operationMappings(
+        contractMetadata,
+        methodPath,
+        `route ${controller.name}.${methodName}`
+      )) {
+        operations.push({
+          method,
+          path: implementedPath(globalPrefix, controllerPath, mapping.contractPath),
+          operationId: mapping.operationId,
+          idempotency: methodPolicy ?? classPolicy,
+        });
+      }
     }
   }
 
@@ -119,6 +136,29 @@ const REQUEST_METHOD_NAMES: Partial<Record<RequestMethod, string>> = {
   [RequestMethod.HEAD]: 'HEAD',
 };
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+function operationMappings(
+  metadata: string | readonly ContractOperationMapping[] | undefined,
+  runtimePath: string,
+  label: string
+): readonly { readonly operationId: string | undefined; readonly contractPath: string }[] {
+  if (typeof metadata === 'string') return [{ operationId: metadata, contractPath: runtimePath }];
+  if (metadata === undefined) return [{ operationId: undefined, contractPath: runtimePath }];
+  if (metadata.length === 0) throw new Error(`${label} must map at least one contract operation`);
+
+  return metadata.map((mapping) => {
+    if (
+      !isRecord(mapping) ||
+      typeof mapping.operationId !== 'string' ||
+      mapping.operationId.trim() === '' ||
+      typeof mapping.contractPath !== 'string' ||
+      mapping.contractPath.trim() === ''
+    ) {
+      throw new Error(`${label} contains an invalid contract operation mapping`);
+    }
+    return { operationId: mapping.operationId, contractPath: mapping.contractPath };
+  });
+}
 
 function singlePathMetadata(target: object, label: string): string {
   const value = Reflect.getMetadata(PATH_METADATA, target) as
