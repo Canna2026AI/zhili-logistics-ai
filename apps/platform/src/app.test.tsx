@@ -93,7 +93,7 @@ describe('平台控制台', () => {
     await user.clear(screen.getByLabelText('租户到期日'));
     await user.type(screen.getByLabelText('租户到期日'), '2027-08-31');
     await user.click(screen.getByRole('button', { name: '保存租户配置' }));
-    expect(await screen.findByRole('status')).toHaveTextContent('ENT-0002');
+    expect(await screen.findByRole('status')).toHaveTextContent('ENT-0004');
     expect(screen.getAllByText(/320,000 \/ 600,000/)[0]).toBeVisible();
     await user.click(screen.getByRole('button', { name: '租户管理' }));
     await user.click(screen.getByRole('button', { name: '查看租户 上海智立科技有限公司' }));
@@ -107,7 +107,7 @@ describe('平台控制台', () => {
     const user = userEvent.setup();
     render(<App />);
     await user.click(screen.getByRole('button', { name: '配额与用量' }));
-    await user.selectOptions(screen.getByLabelText('配置租户'), '2');
+    await user.selectOptions(screen.getByLabelText('配置租户'), '01JTENANT0000000000000002');
     expect(screen.getByRole('heading', { name: '深圳海运通物流有限公司' })).toBeVisible();
     await user.selectOptions(screen.getByLabelText('租户套餐'), '企业版');
     await user.clear(screen.getByLabelText('运单配额上限'));
@@ -124,11 +124,18 @@ describe('平台控制台', () => {
   });
 
   it('可管理套餐模块、公告和运行中心', async () => {
+    const setModuleEntitlement = vi.spyOn(platformPort, 'setModuleEntitlement');
     const user = userEvent.setup();
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: '套餐与模块' }));
     await user.click(screen.getByRole('switch', { name: '客户门户' }));
+    expect(setModuleEntitlement).toHaveBeenCalledWith(
+      '01JTENANT0000000000000001',
+      1,
+      '客户门户',
+      false
+    );
     expect(screen.getByRole('status')).toHaveTextContent('模块授权已保存');
     await user.click(screen.getByRole('button', { name: '平台公告' }));
     await user.type(screen.getByLabelText('公告标题'), '系统维护窗口');

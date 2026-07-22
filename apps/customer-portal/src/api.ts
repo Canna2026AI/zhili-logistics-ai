@@ -1,11 +1,58 @@
 import { createZhiliClient } from '@zhili/api-client';
+import type { components } from '@zhili/contracts';
+
+export type CustomerAddressInput = Omit<
+  components['schemas']['CreateCustomerAddressRequest'],
+  'mode'
+>;
 
 const meta = { requestId: 'req-f1c-customer', asOf: '2026-07-22T00:00:00.000Z' };
-const json = (body: unknown, status = 200) =>
+const json = (body: unknown, status = 200, authoritativeVersion?: number) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json', ETag: '"1"' },
+    headers: {
+      'content-type': 'application/json',
+      ...(authoritativeVersion === undefined ? {} : { ETag: `"${authoritativeVersion}"` }),
+    },
   });
+
+const preconditionProblem = (
+  code: 'PRECONDITION_REQUIRED' | 'PRECONDITION_INVALID' | 'STALE_VERSION'
+) =>
+  new Response(
+    JSON.stringify({
+      code,
+      message:
+        code === 'PRECONDITION_REQUIRED'
+          ? 'Missing required strong If-Match precondition.'
+          : code === 'PRECONDITION_INVALID'
+            ? 'If-Match must be a positive strong numeric ETag.'
+            : 'If-Match no longer matches the current aggregate version.',
+      details: [{ field: 'If-Match', reason: code }],
+      remediation: 'Refresh the resource and retry with its latest strong ETag.',
+      requestId: meta.requestId,
+    }),
+    { status: 412, headers: { 'content-type': 'application/problem+json' } }
+  );
+
+type StrongPrecondition = { ok: true; version: number } | { ok: false; response: Response };
+
+function readStrongIfMatch(request: Request): StrongPrecondition {
+  const ifMatch = request.headers.get('If-Match');
+  if (ifMatch === null) {
+    return { ok: false, response: preconditionProblem('PRECONDITION_REQUIRED') };
+  }
+  const match = ifMatch.match(/^"([1-9][0-9]*)"$/);
+  const version = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isSafeInteger(version) || version < 1 || version >= Number.MAX_SAFE_INTEGER) {
+    return { ok: false, response: preconditionProblem('PRECONDITION_INVALID') };
+  }
+  const mockCurrentVersion = request.headers.get('X-Zhili-Mock-Current-Version');
+  if (mockCurrentVersion !== null && mockCurrentVersion !== ifMatch) {
+    return { ok: false, response: preconditionProblem('STALE_VERSION') };
+  }
+  return { ok: true, version };
+}
 
 export type QuoteRequest = {
   origin: string;
@@ -57,9 +104,9 @@ export type VersionDifference = {
   server: string;
 };
 
-const mockFetch: typeof fetch = async (input) => {
+export const customerMockFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
-  const path = new URL(request.url, window.location.origin).pathname;
+  const path = new URL(request.url).pathname;
   if (path.endsWith('/quotes')) {
     const body = (await request.clone().json()) as {
       destination: { postalCode?: string };
@@ -108,28 +155,36 @@ const mockFetch: typeof fetch = async (input) => {
         },
         meta,
       },
-      201
+      201,
+      1
     );
   }
   const acceptedQuote = path.match(/\/quotes\/([^/]+):accept$/);
   if (acceptedQuote) {
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
     if (acceptedQuote[1]?.includes('GONE'))
       return json({ type: 'QUOTE_EXPIRED', title: 'Quote expired', status: 410 }, 410);
     const body = (await request.clone().json()) as { optionId: string };
-    return json({
-      data: {
-        id: acceptedQuote[1],
-        quoteNo: 'Q2505120042',
-        status: 'ACCEPTED',
-        options: [],
-        acceptedOptionId: body.optionId,
-        validUntil:
-          request.headers.get('X-Zhili-Mock-Valid-Until') ??
-          new Date(Date.now() + 8 * 60 * 60 * 1_000).toISOString(),
-        version: 2,
+    const quoteVersion = precondition.version + 1;
+    return json(
+      {
+        data: {
+          id: acceptedQuote[1],
+          quoteNo: 'Q2505120042',
+          status: 'ACCEPTED',
+          options: [],
+          acceptedOptionId: body.optionId,
+          validUntil:
+            request.headers.get('X-Zhili-Mock-Valid-Until') ??
+            new Date(Date.now() + 8 * 60 * 60 * 1_000).toISOString(),
+          version: quoteVersion,
+        },
+        meta,
       },
-      meta,
-    });
+      200,
+      quoteVersion
+    );
   }
   if (path.endsWith('/orders'))
     return json(
@@ -142,8 +197,38 @@ const mockFetch: typeof fetch = async (input) => {
         },
         meta,
       },
-      201
+      201,
+      1
     );
+  const acceptedQuoteLink = path.match(/\/orders\/([^/]+):link-accepted-quote$/);
+  if (acceptedQuoteLink) {
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
+    const body = (await request.clone().json()) as {
+      quoteId: string;
+      quoteOptionId: string;
+      acceptedQuoteVersion: number;
+    };
+    const orderVersion = precondition.version + 1;
+    return json(
+      {
+        data: {
+          quoteId: body.quoteId,
+          quoteOptionId: body.quoteOptionId,
+          quoteVersion: body.acceptedQuoteVersion,
+          linkId: '01JQUOTELINK00000000000001',
+          linkVersion: 1,
+          orderId: acceptedQuoteLink[1],
+          waybillId: '01JWAYBILL000000000000001',
+          orderVersion,
+          waybillVersion: 1,
+        },
+        meta,
+      },
+      201,
+      orderVersion
+    );
+  }
   if (path.endsWith('/payments/statement-orders'))
     return json(
       {
@@ -188,17 +273,56 @@ const mockFetch: typeof fetch = async (input) => {
         },
         meta,
       },
-      201
+      201,
+      1
     );
-  if (
-    path.includes('/customers/') ||
-    path.endsWith('/portal/api-access-requests') ||
-    path.endsWith('/documents/exports')
-  )
-    return json({
-      data: { resourceId: '01JCOMMAND000000000000001', status: 'SUCCEEDED', version: 1 },
-      meta,
-    });
+  const customerAddress = path.match(/\/customers\/[^/]+\/addresses:upsert$/);
+  if (customerAddress) {
+    const body = (await request.clone().json()) as { mode?: 'CREATE' | 'UPDATE' };
+    if (body.mode === 'CREATE') {
+      if (request.headers.has('If-Match')) {
+        return json(
+          {
+            code: 'VALIDATION_FAILED',
+            message: 'CREATE forbids If-Match.',
+            requestId: meta.requestId,
+          },
+          422
+        );
+      }
+      return json(
+        {
+          data: { resourceId: '01JCOMMAND000000000000001', status: 'SUCCEEDED', version: 1 },
+          meta,
+        },
+        200,
+        1
+      );
+    }
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
+    const version = precondition.version + 1;
+    return json(
+      {
+        data: { resourceId: '01JCOMMAND000000000000001', status: 'SUCCEEDED', version },
+        meta,
+      },
+      200,
+      version
+    );
+  }
+  if (path.endsWith('/portal/api-access-requests') || path.endsWith('/documents/exports')) {
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
+    return json(
+      {
+        data: { resourceId: '01JCOMMAND000000000000001', status: 'SUCCEEDED', version: 1 },
+        meta,
+      },
+      200,
+      1
+    );
+  }
   return json({ message: `No typed mock route for ${path}` }, 404);
 };
 
@@ -225,8 +349,6 @@ const mockCustomerCommandFetch = async (
     const itemIds = body.itemIds as string[];
     return { items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) };
   }
-  if (path === '/api/v1/portal/order-quote-links')
-    return { resourceId: '01JORDERQUOTELINK000000001', status: 'SUCCEEDED', version: 1 };
   throw new Error(`未实现的客户门户命令：${path}`);
 };
 
@@ -237,7 +359,7 @@ async function localCommand<TRequest extends Record<string, unknown>, TResponse>
   return (await mockCustomerCommandFetch(path, body)) as TResponse;
 }
 
-const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: mockFetch });
+const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: customerMockFetch });
 const key = () => `f1c-${crypto.randomUUID?.() ?? Date.now()}`;
 
 function ensure<T>(data: T | undefined, error: unknown): T {
@@ -337,9 +459,20 @@ export const customerPort = {
     orderVersion: number;
     quoteId: string;
     optionId: string;
-    quoteVersion: number;
+    acceptedQuoteVersion: number;
   }) {
-    await localCommand('/api/v1/portal/order-quote-links', input);
+    const response = await client.POST('/orders/{orderId}:link-accepted-quote', {
+      params: {
+        path: { orderId: input.orderId },
+        header: { 'Idempotency-Key': key(), 'If-Match': `"${input.orderVersion}"` },
+      },
+      body: {
+        quoteId: input.quoteId,
+        quoteOptionId: input.optionId,
+        acceptedQuoteVersion: input.acceptedQuoteVersion,
+      },
+    });
+    return ensure(response.data, response.error).data;
   },
   async createOrder(input: OrderInput) {
     const originCountry = input.origin.split('-')[0] || 'CN';
@@ -379,7 +512,7 @@ export const customerPort = {
         orderVersion: order.version,
         quoteId: input.acceptedQuote.quoteId,
         optionId: input.acceptedQuote.optionId,
-        quoteVersion: input.acceptedQuote.version,
+        acceptedQuoteVersion: input.acceptedQuote.version,
       });
     return order;
   },
@@ -403,19 +536,16 @@ export const customerPort = {
     });
     return ensure(response.data, response.error).data;
   },
-  async saveAddress(name: string) {
+  async saveAddress(input: string | CustomerAddressInput) {
+    if (typeof input === 'string') {
+      throw new Error('请先补全国家、城市、详细地址和邮编后再保存。');
+    }
     const response = await client.POST('/customers/{customerId}/addresses:upsert', {
       params: {
         path: { customerId: '01JCUSTOMER000000000000001' },
-        header: { 'Idempotency-Key': key(), 'If-Match': '"1"' },
+        header: { 'Idempotency-Key': key() },
       },
-      body: {
-        id: '01JCUSTOMER000000000000001',
-        name,
-        customerCode: 'XINYUAN',
-        status: 'ACTIVE',
-        version: 1,
-      },
+      body: { mode: 'CREATE', ...input },
     });
     ensure(response.data, response.error);
   },

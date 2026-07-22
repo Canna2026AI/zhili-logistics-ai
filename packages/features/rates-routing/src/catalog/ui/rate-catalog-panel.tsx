@@ -2,6 +2,7 @@ import { Button, DataTable, Dialog, Input, StatusTag, type DataTableColumn } fro
 import { useState } from 'react';
 import {
   memoryRateCatalogPort,
+  preparedRateCardPublication,
   rateCatalogFixture,
   type RateCatalogPort,
   type RateCatalogRecord,
@@ -28,7 +29,10 @@ export function RateCatalogPanel({
     setError('');
     setMessage('');
     try {
-      const result = await port.publish('rate-dhl', 3, reason.trim());
+      const result = await port.publish('rate-dhl', 3, {
+        ...preparedRateCardPublication,
+        reason: reason.trim(),
+      });
       setRows((current) =>
         current.map((row) =>
           row.id === 'rate-dhl' ? { ...row, version: result.version, status: result.status } : row

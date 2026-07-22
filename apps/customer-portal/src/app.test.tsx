@@ -6,6 +6,7 @@ import type { ComponentType } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from './app';
 import { customerPort } from './api';
+import * as customerApiModule from './api';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -15,6 +16,28 @@ afterEach(() => {
 });
 
 describe('客户门户', () => {
+  it('报价关联 mock 的强 ETag 与权威订单版本一致', async () => {
+    const customerMockFetch = (customerApiModule as unknown as { customerMockFetch?: typeof fetch })
+      .customerMockFetch;
+    expect(customerMockFetch).toBeTypeOf('function');
+    if (!customerMockFetch) return;
+
+    const response = await customerMockFetch(
+      new Request('http://localhost/api/v1/orders/01JORDER000000000000000006:link-accepted-quote', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'If-Match': '"7"' },
+        body: JSON.stringify({
+          quoteId: '01JQUOTE000000000000000042',
+          quoteOptionId: '01JQUOTEOPTION0000000000001',
+          acceptedQuoteVersion: 2,
+        }),
+      })
+    );
+    const body = (await response.json()) as { data: { orderVersion: number } };
+    expect(body.data.orderVersion).toBe(8);
+    expect(response.headers.get('ETag')).toBe('"8"');
+  });
+
   it('折叠菜单提供十个页面、隔离背景并在 Escape 后恢复触发点焦点', async () => {
     const user = userEvent.setup();
     const { container } = render(<App />);
@@ -329,9 +352,17 @@ describe('客户门户', () => {
   });
 
   it('创建订单后通过审计 port 关联已接受报价且不丢弃版本', async () => {
-    const linkAcceptedQuote = vi
-      .spyOn(customerPort, 'linkAcceptedQuote')
-      .mockResolvedValue(undefined);
+    const linkAcceptedQuote = vi.spyOn(customerPort, 'linkAcceptedQuote').mockResolvedValue({
+      quoteId: '01JQUOTE000000000000000042',
+      quoteOptionId: '01JQUOTEOPTION0000000000001',
+      quoteVersion: 2,
+      linkId: '01JQUOTELINK00000000000001',
+      linkVersion: 1,
+      orderId: '01JORDER000000000000000006',
+      waybillId: '01JWAYBILL000000000000001',
+      orderVersion: 2,
+      waybillVersion: 1,
+    });
 
     await customerPort.createOrder({
       origin: 'CN-SZX 518000',
@@ -353,7 +384,7 @@ describe('客户门户', () => {
       orderVersion: 1,
       quoteId: '01JQUOTE000000000000000042',
       optionId: '01JQUOTEOPTION0000000000001',
-      quoteVersion: 2,
+      acceptedQuoteVersion: 2,
     });
   });
 
@@ -512,7 +543,10 @@ describe('客户门户', () => {
     await user.click(screen.getByRole('button', { name: '地址簿' }));
     await user.type(screen.getByLabelText('地址名称'), '洛杉矶仓');
     await user.click(screen.getByRole('button', { name: '保存地址' }));
-    expect(screen.getByRole('table', { name: '地址列表' })).toHaveTextContent('洛杉矶仓');
+    expect(await screen.findByRole('status')).toHaveTextContent(
+      '请先补全国家、城市、详细地址和邮编'
+    );
+    expect(screen.getByRole('table', { name: '地址列表' })).not.toHaveTextContent('洛杉矶仓');
 
     await user.click(screen.getByRole('button', { name: '账单与付款' }));
     await user.upload(
@@ -619,9 +653,9 @@ describe('客户门户', () => {
     render(<ScopedApp tenantId="tenant-a" customerId="customer-b" companyName="B 客户" />);
     await user.click(screen.getByRole('button', { name: '地址簿' }));
     expect(screen.getByRole('table', { name: '地址列表' })).not.toHaveTextContent('A 客户专属仓');
-    expect(localStorage.getItem('zhili.customer.tenant-a.customer-a.addresses')).toContain(
-      'A 客户专属仓'
-    );
+    expect(
+      localStorage.getItem('zhili.customer.tenant-a.customer-a.addresses') ?? ''
+    ).not.toContain('A 客户专属仓');
     expect(
       localStorage.getItem('zhili.customer.tenant-a.customer-b.addresses') ?? ''
     ).not.toContain('A 客户专属仓');

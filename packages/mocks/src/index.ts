@@ -13,7 +13,52 @@ type WaybillResponse = components['schemas']['WaybillResponse'];
 const canonicalWaybill = {
   id: '01J00000000000000000000000',
   waybillNo: 'S2505120004',
+  masterNo: 'MAWB-20260722-01',
+  customerName: {
+    access: 'READ',
+    rawValue: '智立华南客户',
+    displayValue: '智立华南客户',
+    copyAllowed: true,
+    exportAllowed: true,
+  },
+  customerCode: {
+    access: 'READ',
+    rawValue: 'CUST-SOUTH-001',
+    displayValue: 'CUST-SOUTH-001',
+    copyAllowed: true,
+    exportAllowed: true,
+  },
+  contactName: {
+    access: 'READ',
+    rawValue: '张伟',
+    displayValue: '张伟',
+    copyAllowed: true,
+    exportAllowed: true,
+  },
+  senderPhone: {
+    access: 'MASK',
+    displayValue: '0755****6600',
+    copyAllowed: false,
+    exportAllowed: false,
+  },
+  recipientPhone: {
+    access: 'MASK',
+    displayValue: '138****2468',
+    copyAllowed: false,
+    exportAllowed: false,
+  },
+  consigneeAddress: { access: 'DENY', copyAllowed: false, exportAllowed: false },
+  route: 'SZX-LAX',
+  service: '智立空运专线',
+  transport: 'AIR',
+  forecastWeightKg: '18.50',
+  actualWeightKg: '18.80',
+  volumeM3: '0.126',
+  pieces: 3,
+  createdAt: '2026-07-22T02:10:00.000Z',
   state: 'RECEIVED',
+  branch: '深圳分公司',
+  timeline: ['10:10 创建运单', '11:20 完成收货'],
   allowedActions: [
     { action: 'warehouse.route', enabled: true },
     { action: 'waybill.cancel', enabled: false, disabledReason: '已完成收货' },
@@ -59,7 +104,7 @@ export function createScenarioHandlers(scenario: MockScenario = 'normal'): HttpH
             { field: 'permission', reason: 'waybill.read' },
           ]);
         case 'stale':
-          return error('STALE_VERSION', '数据已被其他终端更新', 409, [
+          return error('STALE_VERSION', '数据已被其他终端更新', 412, [
             { field: 'version', reason: '本地版本 6，服务端版本 7', rejectedValue: 6 },
           ]);
         case 'partial':

@@ -189,6 +189,9 @@ export interface WaybillDetail {
   customerCode: string;
   contactName: string;
   contactPhone: string;
+  senderPhone: string;
+  recipientPhone: string;
+  consigneeAddress: string;
   route: string;
   service: string;
   transport: string;
@@ -201,10 +204,40 @@ export interface WaybillDetail {
   version: number;
   branch: string;
   timeline: string[];
+  fieldDecisions: Record<WaybillSensitiveField, WaybillServerFieldDecision>;
+  securedFieldDecisions: Record<WaybillSecuredField, WaybillServerFieldDecision>;
 }
 
 export type WaybillSensitiveField = 'customer' | 'customerCode' | 'contactName' | 'contactPhone';
+export type WaybillSecuredField =
+  | 'customerName'
+  | 'customerCode'
+  | 'contactName'
+  | 'senderPhone'
+  | 'recipientPhone'
+  | 'consigneeAddress';
 export type WaybillFieldPolicy = Partial<Record<WaybillSensitiveField, 'ALLOW' | 'MASK' | 'HIDE'>>;
+export interface WaybillServerFieldDecision {
+  access: 'READ' | 'MASK' | 'DENY';
+  copyAllowed: boolean;
+  exportAllowed: boolean;
+  maskPattern?: string;
+}
+
+const readFieldDecisions: Record<WaybillSensitiveField, WaybillServerFieldDecision> = {
+  customer: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  customerCode: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  contactName: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  contactPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
+};
+const readSecuredFieldDecisions: Record<WaybillSecuredField, WaybillServerFieldDecision> = {
+  customerName: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  customerCode: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  contactName: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  senderPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  recipientPhone: { access: 'READ', copyAllowed: true, exportAllowed: true },
+  consigneeAddress: { access: 'READ', copyAllowed: true, exportAllowed: true },
+};
 
 function maskPhone(value: string) {
   const digits = value.replace(/\D/g, '');
@@ -223,9 +256,14 @@ export function applyWaybillFieldPolicy(
   policy: WaybillFieldPolicy
 ): WaybillDetail {
   const value = (field: WaybillSensitiveField, original: string) => {
-    const decision = policy[field] ?? 'ALLOW';
-    if (decision === 'HIDE') return '无权查看';
-    if (decision === 'MASK')
+    const serverAccess = detail.fieldDecisions?.[field]?.access ?? 'READ';
+    if (serverAccess === 'DENY') return '无权查看';
+    // MASK projections are already transformed by the server. Re-masking them would
+    // both corrupt the value and tempt clients to infer the original PII.
+    if (serverAccess === 'MASK') return original;
+    const localDecision = policy[field] ?? 'ALLOW';
+    if (localDecision === 'HIDE') return '无权查看';
+    if (localDecision === 'MASK')
       return field === 'contactPhone' ? maskPhone(original) : maskText(original);
     return original;
   };
@@ -284,6 +322,9 @@ export const waybillDetailFixtures: Record<string, WaybillDetail> = Object.fromE
       customerCode: contact.code,
       contactName: contact.name,
       contactPhone: contact.phone,
+      senderPhone: contact.phone,
+      recipientPhone: contact.phone,
+      consigneeAddress: '已授权地址投影',
       route: destinationRoutes[item.destination] ?? `CN-SZX → ${item.destination}`,
       service: contact.service,
       transport: item.transport,
@@ -296,6 +337,8 @@ export const waybillDetailFixtures: Record<string, WaybillDetail> = Object.fromE
       version: item.version,
       branch: item.branch,
       timeline: [`${item.state} · ${item.branch === '深圳分公司' ? '深圳仓库' : '广州仓库'}`],
+      fieldDecisions: readFieldDecisions,
+      securedFieldDecisions: readSecuredFieldDecisions,
     };
     return [item.id, detail];
   })

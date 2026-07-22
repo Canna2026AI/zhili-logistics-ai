@@ -249,10 +249,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List order projections using a stable cursor */
+    get: operations['listOrders'];
     put?: never;
     /** Create an order draft */
     post: operations['createOrderDraft'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/{orderId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one order projection */
+    get: operations['getOrder'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -276,7 +294,7 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
-  '/quotes': {
+  '/orders/{orderId}:submit': {
     parameters: {
       query?: never;
       header?: never;
@@ -285,8 +303,43 @@ export interface paths {
     };
     get?: never;
     put?: never;
+    /** Submit a validated order forecast */
+    post: operations['submitOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/quotes': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List quote projections using a stable cursor */
+    get: operations['listQuotes'];
+    put?: never;
     /** Calculate a versioned multi-channel quote */
     post: operations['createQuote'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/quotes/{quoteId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one quote projection */
+    get: operations['getQuote'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -321,6 +374,43 @@ export interface paths {
     put?: never;
     /** Accept one quote option */
     post: operations['acceptQuote'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/orders/{orderId}:link-accepted-quote': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Link an accepted quote option to an order and create its draft waybill
+     * @description Atomically proves the exact acceptedQuoteVersion and option are accepted and unexpired, links the immutable quote snapshot to the order, and creates or idempotently replays exactly one link and draft waybill identity. The response ETag always represents the order aggregate.
+     */
+    post: operations['linkAcceptedQuoteToOrder'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/waybills': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List operational waybill projections using a stable cursor */
+    get: operations['listWaybills'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -372,6 +462,40 @@ export interface paths {
     put?: never;
     /** Record an idempotent receiving scan */
     post: operations['receiveScan'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/warehouse/receipts': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** List warehouse receipts using a stable cursor */
+    get: operations['listWarehouseReceipts'];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/warehouse/receipts/{receiptId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one warehouse receipt */
+    get: operations['getWarehouseReceipt'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -564,10 +688,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List linehaul bookings using a stable cursor */
+    get: operations['listBookings'];
     put?: never;
     /** Create a linehaul booking */
     post: operations['createBooking'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/linehaul/bookings/{bookingId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one linehaul booking */
+    get: operations['getBooking'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -581,10 +723,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List load units using a stable cursor */
+    get: operations['listLoadUnits'];
     put?: never;
     /** Create a bag pallet or container */
     post: operations['createLoadUnit'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/linehaul/load-units/{loadUnitId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one load unit */
+    get: operations['getLoadUnit'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -666,10 +826,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List last-mile intake batches using a stable cursor */
+    get: operations['listLastMileIntakes'];
     put?: never;
     /** Create a last-mile intake batch */
     post: operations['createLastMileIntake'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/last-mile/intakes/{intakeId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one last-mile intake batch */
+    get: operations['getLastMileIntake'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -683,10 +861,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List delivery tasks using a stable cursor */
+    get: operations['listDeliveryTasks'];
     put?: never;
     /** Create a driver or partner delivery task */
     post: operations['createDeliveryTask'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/last-mile/delivery-tasks/{deliveryTaskId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one delivery task */
+    get: operations['getDeliveryTask'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1162,10 +1358,28 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** List import jobs using a stable cursor */
+    get: operations['listImports'];
     put?: never;
     /** Create a durable import job */
     post: operations['createImportJob'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/imports/{importId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Get one import job projection */
+    get: operations['getImportJob'];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -1423,7 +1637,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a versioned organization node */
+    /**
+     * Create or update a versioned organization node
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertOrganizationNode'];
     delete?: never;
     options?: never;
@@ -1440,7 +1657,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update an employee and assignments */
+    /**
+     * Create or update an employee and assignments
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertUser'];
     delete?: never;
     options?: never;
@@ -1459,7 +1679,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a customer address in data scope */
+    /**
+     * Create or update a customer address in data scope
+     * @description The path customerId is authoritative. CREATE forbids If-Match; UPDATE requires a strong If-Match and an address id already owned by that path customer.
+     */
     post: operations['upsertCustomerAddress'];
     delete?: never;
     options?: never;
@@ -1476,7 +1699,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update an agent supplier or last-mile partner */
+    /**
+     * Create or update an agent supplier or last-mile partner
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertPartner'];
     delete?: never;
     options?: never;
@@ -1565,7 +1791,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a versioned channel product */
+    /**
+     * Create or update a versioned channel product
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertChannelProduct'];
     delete?: never;
     options?: never;
@@ -1601,7 +1830,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a versioned cost or sell price */
+    /**
+     * Create or update a versioned cost or sell price
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertRatePriceVersion'];
     delete?: never;
     options?: never;
@@ -1618,7 +1850,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Create or update a surcharge calculation rule */
+    /**
+     * Create or update a surcharge calculation rule
+     * @description CREATE forbids If-Match; UPDATE requires a strong If-Match and matching body id.
+     */
     post: operations['upsertSurchargeRule'];
     delete?: never;
     options?: never;
@@ -1785,7 +2020,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Split packages into linked waybills atomically */
+    /**
+     * Split packages into linked waybills atomically
+     * @description expectedVersion protects the source waybill. The response body carries every resulting aggregate version; no single response ETag is emitted because the command creates lineage.
+     */
     post: operations['splitWaybill'];
     delete?: never;
     options?: never;
@@ -1802,7 +2040,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Merge compatible waybills with lineage */
+    /**
+     * Merge compatible waybills with lineage
+     * @description Each source carries its own expectedVersion. The command is atomic and returns source and merged aggregate versions; no ambiguous single response ETag is emitted.
+     */
     post: operations['mergeWaybills'];
     delete?: never;
     options?: never;
@@ -1819,7 +2060,10 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** Execute a resumable batch command with item outcomes */
+    /**
+     * Execute a resumable batch command with item outcomes
+     * @description Each input carries its own expectedVersion. The response preserves input order exactly and returns one authoritative outcome for every input; stale items are represented as failures.
+     */
     post: operations['batchWaybillCommand'];
     delete?: never;
     options?: never;
@@ -2929,6 +3173,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
+    /** @enum {string} */
+    PreconditionProblemCode: 'PRECONDITION_REQUIRED' | 'PRECONDITION_INVALID' | 'STALE_VERSION';
     /** @example 01JY8Z8F6ME4F0Y9QH2X6D4R7A */
     Ulid: string;
     /** @example 123.50 */
@@ -2946,6 +3192,7 @@ export interface components {
       | 'APPROVAL_REQUIRED'
       | 'CARRIER_UNAVAILABLE'
       | 'CHANNEL_RESTRICTION'
+      | 'CURSOR_FILTER_MISMATCH'
       | 'DEVICE_EVENT_DUPLICATE'
       | 'DEVICE_QUEUE_FULL'
       | 'DEVICE_SYNC_CONFLICT'
@@ -2965,6 +3212,8 @@ export interface components {
       | 'PAYMENT_CALLBACK_DUPLICATE'
       | 'PAYMENT_FAILED'
       | 'PERMISSION_DENIED'
+      | 'PRECONDITION_INVALID'
+      | 'PRECONDITION_REQUIRED'
       | 'QUOTE_EXPIRED'
       | 'RATE_VERSION_CHANGED'
       | 'REVIEWED_CHARGE_IMMUTABLE'
@@ -2997,6 +3246,16 @@ export interface components {
       nextCursor?: string | null;
       /** Format: date-time */
       asOf?: string;
+    };
+    /** @description Signed base64url token containing the snapshot, filter hash and order tuple. */
+    OpaqueCursor: string;
+    CursorPageMeta: {
+      requestId: string;
+      nextCursor: components['schemas']['OpaqueCursor'] | null;
+      /** Format: date-time */
+      asOf: string;
+      filterHash: string;
+      order: string[];
     };
     HealthDependencyResult: {
       /** @enum {string} */
@@ -3282,10 +3541,64 @@ export interface components {
       optionId: components['schemas']['Ulid'];
       reason: string;
     };
+    SecuredTextProjection:
+      | components['schemas']['ReadSecuredTextProjection']
+      | components['schemas']['MaskedSecuredTextProjection']
+      | components['schemas']['DeniedSecuredTextProjection'];
+    ReadSecuredTextProjection: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      access: 'READ';
+      rawValue: string;
+      displayValue: string;
+      copyAllowed: boolean;
+      exportAllowed: boolean;
+    };
+    MaskedSecuredTextProjection: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      access: 'MASK';
+      /** @description Server-generated masked value containing at least one masking glyph. */
+      displayValue: string;
+      copyAllowed: boolean;
+      exportAllowed: boolean;
+    };
+    DeniedSecuredTextProjection: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      access: 'DENY';
+      /** @constant */
+      copyAllowed: false;
+      /** @constant */
+      exportAllowed: false;
+    };
     Waybill: {
       id: components['schemas']['Ulid'];
       /** @example S2505120004 */
       waybillNo: string;
+      masterNo: string | null;
+      customerName: components['schemas']['SecuredTextProjection'];
+      customerCode: components['schemas']['SecuredTextProjection'];
+      contactName: components['schemas']['SecuredTextProjection'];
+      senderPhone: components['schemas']['SecuredTextProjection'];
+      recipientPhone: components['schemas']['SecuredTextProjection'];
+      consigneeAddress: components['schemas']['SecuredTextProjection'];
+      route: string;
+      service: string;
+      /** @enum {string} */
+      transport: 'AIR' | 'SEA' | 'RAIL' | 'ROAD' | 'EXPRESS';
+      forecastWeightKg: components['schemas']['Decimal'];
+      actualWeightKg: components['schemas']['Decimal'] | null;
+      volumeM3: components['schemas']['Decimal'] | null;
+      pieces: number;
+      /** Format: date-time */
+      createdAt: string;
       /** @enum {string} */
       state:
         | 'DRAFT'
@@ -3300,6 +3613,8 @@ export interface components {
         | 'AWAITING_RETURN'
         | 'RETURNED'
         | 'CANCELLED';
+      branch: string;
+      timeline: string[];
       allowedActions: components['schemas']['AllowedAction'][];
       version: number;
     };
@@ -3720,16 +4035,6 @@ export interface components {
       vehicleId?: string;
       exceptionCode?: string;
       note?: string;
-    };
-    /** @description Client-authored device event intent for a canonical delivery task transition. deviceEventId is persisted and audited by the server; targetStatus is validated against DeliveryTaskStatus and the current authoritative aggregate version. */
-    DeliveryEvent: {
-      deviceEventId: components['schemas']['Ulid'];
-      targetStatus: components['schemas']['DeliveryTaskStatus'];
-      /** Format: date-time */
-      occurredAt: string;
-      /** @description Scoped reservations whose eventId must equal deviceEventId. */
-      mediaRefs: string[];
-      scanEvidence: components['schemas']['DeliveryScanEvidence'];
     };
     /** @enum {string} */
     LastMileDeviceCommandDisposition: 'APPLIED' | 'DUPLICATE';
@@ -4186,6 +4491,789 @@ export interface components {
       data: components['schemas']['AiAction'];
       meta: components['schemas']['Meta'];
     };
+    UpdateTenantEntitlementsRequest: {
+      modules: components['schemas']['TenantModuleEntitlementInput'][];
+    };
+    ChangeTenantStatusRequest: {
+      /** @enum {string} */
+      status: 'ACTIVE' | 'SUSPENDED';
+    };
+    TenantEntitlementsState: {
+      tenantId: components['schemas']['Ulid'];
+      modules: components['schemas']['TenantModuleEntitlementInput'][];
+      version: number;
+    };
+    TenantEntitlementsResponse: {
+      data: components['schemas']['TenantEntitlementsState'];
+      meta: components['schemas']['Meta'];
+    };
+    TenantModuleEntitlementInput: {
+      moduleCode: string;
+      enabled: boolean;
+      /** Format: date-time */
+      expiresAt?: string | null;
+      quotas: {
+        [key: string]: number;
+      };
+    };
+    StartWechatLoginRequest: {
+      /** Format: uri */
+      redirectUri: string;
+      clientNonce: string;
+      tenantHint?: string;
+    };
+    CompleteWechatLoginRequest: {
+      code: string;
+      state: string;
+      /** Format: uri */
+      redirectUri: string;
+    };
+    WechatAuthorization: {
+      /** Format: uri */
+      authorizationUrl: string;
+      /** Format: date-time */
+      stateExpiresAt: string;
+    };
+    WechatAuthorizationResponse: {
+      data: components['schemas']['WechatAuthorization'];
+      meta: components['schemas']['Meta'];
+    };
+    ReauthenticateWithPasswordRequest: {
+      /** @constant */
+      method: 'PASSWORD';
+      password: string;
+    };
+    ReauthenticateWithChallengeRequest: {
+      /** @constant */
+      method: 'CHALLENGE';
+      challengeToken: string;
+    };
+    ReauthenticateCurrentSessionRequest: {
+      /** @enum {string} */
+      method: 'PASSWORD' | 'CHALLENGE';
+      password?: string;
+      challengeToken?: string;
+    } & (
+      | components['schemas']['ReauthenticateWithPasswordRequest']
+      | components['schemas']['ReauthenticateWithChallengeRequest']
+    );
+    ReauthenticationGrant: {
+      grantId: components['schemas']['Ulid'];
+      /** Format: date-time */
+      expiresAt: string;
+      actionClasses: string[];
+    };
+    ReauthenticationResponse: {
+      data: components['schemas']['ReauthenticationGrant'];
+      meta: components['schemas']['Meta'];
+    };
+    FieldPolicyInput: {
+      resource: string;
+      field: string;
+      /** @enum {string} */
+      decision: 'READ' | 'MASK' | 'DENY';
+      contexts: ('VIEW' | 'EDIT' | 'COPY' | 'EXPORT' | 'AUDIT')[];
+    };
+    PreviewFieldPolicyRequest: {
+      subjectId: components['schemas']['Ulid'];
+      proposedPolicies: components['schemas']['FieldPolicyInput'][];
+      sampleResourceId?: string;
+    };
+    FieldPolicyPreview: {
+      subjectId: components['schemas']['Ulid'];
+      effectivePolicies: components['schemas']['FieldPolicyInput'][];
+      differences: string[];
+    };
+    FieldPolicyPreviewResponse: {
+      data: components['schemas']['FieldPolicyPreview'];
+      meta: components['schemas']['Meta'];
+    };
+    UpsertOrganizationNodeRequest:
+      | components['schemas']['CreateOrganizationNodeRequest']
+      | components['schemas']['UpdateOrganizationNodeRequest'];
+    CreateOrganizationNodeRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      code: string;
+      name: string;
+      /** @enum {string} */
+      nodeType: 'COMPANY' | 'DEPARTMENT' | 'SITE' | 'WAREHOUSE' | 'LOCATION';
+      parentId?: components['schemas']['Ulid'] | null;
+      /** @enum {string} */
+      status: 'ACTIVE' | 'INACTIVE';
+    };
+    UpdateOrganizationNodeRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      code: string;
+      name: string;
+      /** @enum {string} */
+      nodeType: 'COMPANY' | 'DEPARTMENT' | 'SITE' | 'WAREHOUSE' | 'LOCATION';
+      parentId?: components['schemas']['Ulid'] | null;
+      /** @enum {string} */
+      status: 'ACTIVE' | 'INACTIVE';
+    };
+    UpsertUserRequest:
+      components['schemas']['CreateUserRequest'] | components['schemas']['UpdateUserRequest'];
+    CreateUserRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      loginName: string;
+      displayName: string;
+      /** Format: email */
+      email?: string;
+      mobile?: string;
+      /** @enum {string} */
+      status: 'ACTIVE' | 'DISABLED' | 'LOCKED';
+      roleIds: components['schemas']['Ulid'][];
+      organizationNodeIds: components['schemas']['Ulid'][];
+    };
+    UpdateUserRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      loginName: string;
+      displayName: string;
+      /** Format: email */
+      email?: string;
+      mobile?: string;
+      /** @enum {string} */
+      status: 'ACTIVE' | 'DISABLED' | 'LOCKED';
+      roleIds: components['schemas']['Ulid'][];
+      organizationNodeIds: components['schemas']['Ulid'][];
+    };
+    UpsertCustomerAddressRequest:
+      | components['schemas']['CreateCustomerAddressRequest']
+      | components['schemas']['UpdateCustomerAddressRequest'];
+    CreateCustomerAddressRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      label: string;
+      address: components['schemas']['Address'];
+      isDefault: boolean;
+    };
+    UpdateCustomerAddressRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      label: string;
+      address: components['schemas']['Address'];
+      isDefault: boolean;
+    };
+    UpsertPartnerRequest:
+      components['schemas']['CreatePartnerRequest'] | components['schemas']['UpdatePartnerRequest'];
+    CreatePartnerRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      partnerCode: string;
+      name: string;
+      /** @enum {string} */
+      partnerType: 'AGENT' | 'SUPPLIER' | 'CARRIER' | 'LAST_MILE';
+      /** @enum {string} */
+      status: 'ACTIVE' | 'INACTIVE';
+      contactName?: string;
+      contactPhone?: string;
+    };
+    UpdatePartnerRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      partnerCode: string;
+      name: string;
+      /** @enum {string} */
+      partnerType: 'AGENT' | 'SUPPLIER' | 'CARRIER' | 'LAST_MILE';
+      /** @enum {string} */
+      status: 'ACTIVE' | 'INACTIVE';
+      contactName?: string;
+      contactPhone?: string;
+    };
+    ReferenceDataItemInput: {
+      code: string;
+      label: string;
+      value: string;
+    };
+    PublishReferenceDataVersionRequest: {
+      /** @enum {string} */
+      dataSetCode: 'COUNTRY' | 'PORT' | 'CURRENCY' | 'FEE' | 'COMMODITY';
+      versionLabel: string;
+      items: components['schemas']['ReferenceDataItemInput'][];
+      reason: string;
+    };
+    UpdateCustomerCreditPolicyRequest: {
+      /** @enum {string} */
+      tier: 'STANDARD' | 'SILVER' | 'GOLD' | 'STRATEGIC';
+      creditLimit: components['schemas']['Money'];
+      paymentCycleDays: number;
+      holdOnExceed: boolean;
+      reason: string;
+    };
+    UpsertChannelProductRequest:
+      | components['schemas']['CreateChannelProductRequest']
+      | components['schemas']['UpdateChannelProductRequest'];
+    CreateChannelProductRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      productCode: string;
+      name: string;
+      /** @enum {string} */
+      transportMode: 'AIR' | 'SEA' | 'RAIL' | 'ROAD' | 'EXPRESS';
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    UpdateChannelProductRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      productCode: string;
+      name: string;
+      /** @enum {string} */
+      transportMode: 'AIR' | 'SEA' | 'RAIL' | 'ROAD' | 'EXPRESS';
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    PublishRateCardRequest: {
+      versionLabel: string;
+      /** Format: date-time */
+      effectiveFrom: string;
+      /** Format: date-time */
+      effectiveUntil?: string | null;
+      currency: components['schemas']['CurrencyCode'];
+      reason: string;
+    };
+    RateCardPublication: {
+      rateCardId: components['schemas']['Ulid'];
+      version: number;
+      versionLabel: string;
+      /** @constant */
+      status: 'PUBLISHED';
+      /** Format: date-time */
+      effectiveFrom: string;
+      /** Format: date-time */
+      effectiveUntil: string | null;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    RateCardPublicationResponse: {
+      data: components['schemas']['RateCardPublication'];
+      meta: components['schemas']['Meta'];
+    };
+    RateRuleScopeInput: {
+      channelProductId?: components['schemas']['Ulid'];
+      zoneCode?: string;
+      serviceCode: string;
+      originCountryCode: string;
+      destinationCountryCode: string;
+      packageType: string;
+    };
+    RateWeightRangeInput: {
+      minWeightGrams: number;
+      maxWeightGrams: number;
+    };
+    RateMeasurementInput: {
+      dimensionalDivisor?: number;
+      roundingStepGrams?: number;
+      /** @enum {string} */
+      roundingMode: 'UP' | 'NEAREST' | 'DOWN';
+      minimumCharge?: components['schemas']['MoneyMinorInput'];
+    };
+    MoneyMinorInput: {
+      amountMinor: number;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    RateCalculationInput:
+      | components['schemas']['FlatRateCalculationInput']
+      | components['schemas']['PerKgRateCalculationInput']
+      | components['schemas']['PercentageRateCalculationInput'];
+    FlatRateCalculationInput: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      method: 'FLAT';
+      amountMinor: number;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    PerKgRateCalculationInput: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      method: 'PER_KG';
+      amountMinor: number;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    PercentageRateCalculationInput: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      method: 'PERCENTAGE';
+      percentageBps: number;
+    };
+    UpsertRatePriceVersionRequest:
+      | components['schemas']['CreateRatePriceVersionRequest']
+      | components['schemas']['UpdateRatePriceVersionRequest'];
+    CreateRatePriceVersionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      /** @enum {string} */
+      priceType: 'COST' | 'AGENT' | 'CUSTOMER' | 'SPECIAL';
+      scope: components['schemas']['RateRuleScopeInput'];
+      weightRange: components['schemas']['RateWeightRangeInput'];
+      calculation: components['schemas']['RateCalculationInput'];
+      measurement: components['schemas']['RateMeasurementInput'];
+      /** Format: date-time */
+      effectiveFrom: string;
+      /** Format: date-time */
+      effectiveUntil?: string | null;
+      priority: number;
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    UpdateRatePriceVersionRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      /** @enum {string} */
+      priceType: 'COST' | 'AGENT' | 'CUSTOMER' | 'SPECIAL';
+      scope: components['schemas']['RateRuleScopeInput'];
+      weightRange: components['schemas']['RateWeightRangeInput'];
+      calculation: components['schemas']['RateCalculationInput'];
+      measurement: components['schemas']['RateMeasurementInput'];
+      /** Format: date-time */
+      effectiveFrom: string;
+      /** Format: date-time */
+      effectiveUntil?: string | null;
+      priority: number;
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    UpsertSurchargeRuleRequest:
+      | components['schemas']['CreateSurchargeRuleRequest']
+      | components['schemas']['UpdateSurchargeRuleRequest'];
+    CreateSurchargeRuleRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'CREATE';
+      ruleCode: string;
+      chargeCode: string;
+      scope: components['schemas']['RateRuleScopeInput'];
+      weightRange: components['schemas']['RateWeightRangeInput'];
+      calculation: components['schemas']['RateCalculationInput'];
+      measurement: components['schemas']['RateMeasurementInput'];
+      priority: number;
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    UpdateSurchargeRuleRequest: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      mode: 'UPDATE';
+      id: components['schemas']['Ulid'];
+      ruleCode: string;
+      chargeCode: string;
+      scope: components['schemas']['RateRuleScopeInput'];
+      weightRange: components['schemas']['RateWeightRangeInput'];
+      calculation: components['schemas']['RateCalculationInput'];
+      measurement: components['schemas']['RateMeasurementInput'];
+      priority: number;
+      /** @enum {string} */
+      status: 'DRAFT' | 'ACTIVE' | 'INACTIVE';
+    };
+    ValidateShipmentRestrictionsRequest: {
+      channelProductId?: components['schemas']['Ulid'];
+      origin: components['schemas']['Address'];
+      destination: components['schemas']['Address'];
+      packages: components['schemas']['PackageInput'][];
+      commodityCodes?: string[];
+    };
+    RestrictionRuleFailure: {
+      ruleCode: string;
+      reason: string;
+      field: string;
+    };
+    ShipmentRestrictionAlternative: {
+      channelProductId: components['schemas']['Ulid'];
+      serviceCode: string;
+      reason: string;
+    };
+    ShipmentRestrictionValidationResult: {
+      available: boolean;
+      failedRules: components['schemas']['RestrictionRuleFailure'][];
+      warnings: string[];
+      alternatives: components['schemas']['ShipmentRestrictionAlternative'][];
+    };
+    ShipmentRestrictionValidationResponse: {
+      data: components['schemas']['ShipmentRestrictionValidationResult'];
+      meta: components['schemas']['Meta'];
+    };
+    CopyOrderRequest: {
+      copyAddresses: boolean;
+      copyPackages: boolean;
+      customerId?: components['schemas']['Ulid'];
+    };
+    RollbackImportBatchRequest: {
+      reason: string;
+    };
+    UpsertWaybillPackagesRequest: {
+      packages: components['schemas']['PackageInput'][];
+    };
+    DeclarationItemInput: {
+      description: string;
+      quantity: number;
+      unitValue: components['schemas']['Decimal'];
+      currency: components['schemas']['CurrencyCode'];
+      countryOfOrigin: string;
+      hsCode?: string;
+    };
+    UpdateWaybillDeclarationRequest: {
+      items: components['schemas']['DeclarationItemInput'][];
+      insured: boolean;
+      insuredValue?: components['schemas']['Money'];
+      attachments: string[];
+    };
+    CreateLabelJobRequest: {
+      /** @enum {string} */
+      format: 'A4' | '100X150';
+      copies: number;
+    };
+    LabelJobCreated: {
+      labelJobId: components['schemas']['Ulid'];
+      waybillId: components['schemas']['Ulid'];
+      latestWaybillVersion: number;
+      /** @enum {string} */
+      status: 'QUEUED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED';
+      /** @enum {string} */
+      format: 'A4' | '100X150';
+      /** Format: date-time */
+      createdAt: string;
+    };
+    LabelJobCreatedResponse: {
+      data: components['schemas']['LabelJobCreated'];
+      meta: components['schemas']['Meta'];
+    };
+    CancelWaybillRequest: {
+      reason: string;
+    };
+    RenumberWaybillRequest: {
+      newWaybillNo: string;
+      reason: string;
+    };
+    WaybillRenumberResult: {
+      waybillId: components['schemas']['Ulid'];
+      previousWaybillNo: string;
+      newWaybillNo: string;
+      latestVersion: number;
+    };
+    WaybillRenumberResponse: {
+      data: components['schemas']['WaybillRenumberResult'];
+      meta: components['schemas']['Meta'];
+    };
+    WaybillVersionPrecondition: {
+      waybillId: components['schemas']['Ulid'];
+      expectedVersion: number;
+    };
+    WaybillLineageNode: {
+      waybillId: components['schemas']['Ulid'];
+      waybillNo: string;
+      version: number;
+      packageRefs: string[];
+    };
+    SplitWaybillRequest: {
+      waybillId: components['schemas']['Ulid'];
+      expectedVersion: number;
+      packageRefs: string[];
+      reason: string;
+    };
+    WaybillSplitResult: {
+      source: components['schemas']['WaybillLineageNode'];
+      children: components['schemas']['WaybillLineageNode'][];
+    };
+    WaybillSplitResponse: {
+      data: components['schemas']['WaybillSplitResult'];
+      meta: components['schemas']['Meta'];
+    };
+    MergeWaybillsRequest: {
+      items: components['schemas']['WaybillVersionPrecondition'][];
+      reason: string;
+    };
+    WaybillMergeResult: {
+      sources: components['schemas']['WaybillLineageNode'][];
+      merged: components['schemas']['WaybillLineageNode'];
+    };
+    WaybillMergeResponse: {
+      data: components['schemas']['WaybillMergeResult'];
+      meta: components['schemas']['Meta'];
+    };
+    BatchWaybillCommandRequest: {
+      items: components['schemas']['WaybillVersionPrecondition'][];
+      /** @enum {string} */
+      command: 'SUBMIT' | 'CANCEL' | 'HOLD' | 'RELEASE';
+      reason: string;
+    };
+    WaybillBatchOutcome:
+      | components['schemas']['WaybillBatchSucceededOutcome']
+      | components['schemas']['WaybillBatchFailedOutcome'];
+    WaybillBatchSucceededOutcome: {
+      waybillId: components['schemas']['Ulid'];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      disposition: 'SUCCEEDED';
+      latestVersion: number;
+    };
+    WaybillBatchItemError: {
+      code: components['schemas']['ErrorCode'];
+      message: string;
+      remediation: string;
+    };
+    WaybillBatchFailedOutcome: {
+      waybillId: components['schemas']['Ulid'];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      disposition: 'FAILED';
+      latestVersion: number;
+      error: components['schemas']['WaybillBatchItemError'];
+    };
+    WaybillBatchCommandResult: {
+      /** @enum {string} */
+      command: 'SUBMIT' | 'CANCEL' | 'HOLD' | 'RELEASE';
+      /** @constant */
+      orderPreserved: true;
+      outcomes: components['schemas']['WaybillBatchOutcome'][];
+    };
+    WaybillBatchCommandResponse: {
+      data: components['schemas']['WaybillBatchCommandResult'];
+      meta: components['schemas']['Meta'];
+    };
+    RecordMeasurementRequest: {
+      deviceEventId: components['schemas']['Ulid'];
+      actualWeightKg: components['schemas']['Decimal'];
+      lengthCm: components['schemas']['Decimal'];
+      widthCm: components['schemas']['Decimal'];
+      heightCm: components['schemas']['Decimal'];
+      /** Format: date-time */
+      measuredAt: string;
+    };
+    ReceiptMediaReference: {
+      mediaId: components['schemas']['Ulid'];
+      objectRef: string;
+      sha256: string;
+      /** @enum {string} */
+      kind: 'PHOTO' | 'VIDEO' | 'DOCUMENT';
+      /** Format: date-time */
+      capturedAt: string;
+    };
+    AttachReceiptMediaRequest: {
+      media: components['schemas']['ReceiptMediaReference'][];
+    };
+    UndoReceiptRequest: {
+      reason: string;
+    };
+    MoveInventoryRequest: {
+      warehouseId: components['schemas']['Ulid'];
+      sku: string;
+      fromLocationId?: components['schemas']['Ulid'] | null;
+      toLocationId: components['schemas']['Ulid'];
+      quantity: number;
+      reason: string;
+    };
+    StocktakeItemInput: {
+      sku: string;
+      countedQuantity: number;
+    };
+    CommitStocktakeRequest: {
+      warehouseId: components['schemas']['Ulid'];
+      locationId: components['schemas']['Ulid'];
+      /** Format: date-time */
+      countedAt: string;
+      items: components['schemas']['StocktakeItemInput'][];
+    };
+    CreatePrintJobRequest: {
+      /** @enum {string} */
+      resourceType: 'WAYBILL' | 'RECEIPT' | 'LOAD_UNIT' | 'BILL_OF_LADING';
+      resourceId: components['schemas']['Ulid'];
+      templateId: components['schemas']['Ulid'];
+      copies: number;
+    };
+    ReprintDocumentRequest: {
+      sourcePrintJobId: components['schemas']['Ulid'];
+      reason: string;
+      copies: number;
+    };
+    ValidateLoadCompatibilityRequest: {
+      loadUnitId?: components['schemas']['Ulid'];
+      waybillIds: components['schemas']['Ulid'][];
+    };
+    LoadCompatibilityFailure: {
+      ruleCode: string;
+      reason: string;
+      waybillIds: components['schemas']['Ulid'][];
+    };
+    LoadCompatibilityAlternative: {
+      /** @enum {string} */
+      action: 'SPLIT_LOAD' | 'CHANGE_LOAD_UNIT' | 'REMOVE_WAYBILLS';
+      reason: string;
+      waybillIds?: components['schemas']['Ulid'][];
+    };
+    LoadCompatibilityValidationResult: {
+      compatible: boolean;
+      failedRules: components['schemas']['LoadCompatibilityFailure'][];
+      warnings: string[];
+      alternatives: components['schemas']['LoadCompatibilityAlternative'][];
+    };
+    LoadCompatibilityValidationResponse: {
+      data: components['schemas']['LoadCompatibilityValidationResult'];
+      meta: components['schemas']['Meta'];
+    };
+    LinkFbaShipmentRequest: {
+      loadUnitId: components['schemas']['Ulid'];
+      amazonShipmentId: string;
+      cartonRefs: string[];
+    };
+    ScanLastMileIntakeRequest: {
+      deviceEventId: components['schemas']['Ulid'];
+      waybillId: components['schemas']['Ulid'];
+      /** Format: date-time */
+      scannedAt: string;
+      /** @enum {string} */
+      condition: 'ACCEPTED' | 'DAMAGED' | 'MISSING';
+      note?: string;
+    };
+    UpdateDeliveryTaskStatusRequest: {
+      deviceEventId: components['schemas']['Ulid'];
+      targetStatus: components['schemas']['DeliveryTaskStatus'];
+      /** Format: date-time */
+      occurredAt: string;
+      mediaRefs: string[];
+      scanEvidence: components['schemas']['DeliveryScanEvidence'];
+      exceptionReason?: string;
+    };
+    AmendProofOfDeliveryRequest: {
+      proofOfDeliveryId: components['schemas']['Ulid'];
+      reason: string;
+      recipientName: string;
+      /** Format: date-time */
+      signedAt: string;
+      evidenceRefs: string[];
+    };
+    SyncLastMilePartnerRequest: {
+      partnerId: components['schemas']['Ulid'];
+      externalEventId: string;
+      eventType: string;
+      /** Format: date-time */
+      occurredAt: string;
+      payloadRef: string;
+    };
+    ReplayPartnerEventRequest: {
+      partnerEventId: components['schemas']['Ulid'];
+      reason: string;
+    };
+    GenerateLastMileChargesRequest: {
+      deliveryTaskIds: components['schemas']['Ulid'][];
+      /** Format: date */
+      billingDate: string;
+      currency: components['schemas']['CurrencyCode'];
+    };
+    LinkAcceptedQuoteToOrderRequest: {
+      quoteId: components['schemas']['Ulid'];
+      quoteOptionId: components['schemas']['Ulid'];
+      acceptedQuoteVersion: number;
+    };
+    AcceptedQuoteOrderLink: {
+      quoteId: components['schemas']['Ulid'];
+      quoteOptionId: components['schemas']['Ulid'];
+      quoteVersion: number;
+      linkId: components['schemas']['Ulid'];
+      linkVersion: number;
+      orderId: components['schemas']['Ulid'];
+      orderVersion: number;
+      waybillId: components['schemas']['Ulid'];
+      waybillVersion: number;
+    };
+    AcceptedQuoteOrderLinkResponse: {
+      data: components['schemas']['AcceptedQuoteOrderLink'];
+      meta: components['schemas']['Meta'];
+    };
+    QuoteListResponse: {
+      data: components['schemas']['Quote'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
+    OrderListResponse: {
+      data: components['schemas']['Order'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
+    WaybillListResponse: {
+      data: components['schemas']['Waybill'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
+    ImportJobListResponse: {
+      data: components['schemas']['ImportJob'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
+    WarehouseReceiptListResponse: {
+      data: components['schemas']['WarehouseReceipt'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
+    LoadUnitListResponse: {
+      data: components['schemas']['LoadUnit'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
+    BookingListResponse: {
+      data: components['schemas']['Booking'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
+    LastMileIntakeListResponse: {
+      data: components['schemas']['LastMileIntake'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
+    DeliveryTaskListResponse: {
+      data: components['schemas']['DeliveryTask'][];
+      meta: components['schemas']['CursorPageMeta'];
+    };
     /** @description Extensible contract shape refined by the owning domain module. */
     DomainRecord: {
       id?: components['schemas']['Ulid'];
@@ -4208,66 +5296,16 @@ export interface components {
       | components['schemas']['PaymentRefund']
       | components['schemas']['PaymentReconciliation']
       | components['schemas']['Approval'];
-    /** @description Tenant module, expiry, quota and usage entitlement. */
-    TenantEntitlement: components['schemas']['DomainRecord'];
-    /** @description Official WeChat OAuth identity binding or callback payload. */
-    OAuthBinding: components['schemas']['DomainRecord'];
-    /** @description Field read, write, masking, copy and export decision. */
-    FieldPolicy: components['schemas']['DomainRecord'];
-    /** @description Versioned company, department, site, warehouse or location node. */
-    OrganizationNode: components['schemas']['DomainRecord'];
-    /** @description Employee identity, roles, data scopes and assignments. */
-    User: components['schemas']['DomainRecord'];
     /** @description Managed PDA device and warehouse binding. */
     Device: components['schemas']['DomainRecord'];
-    /** @description Agent, supplier or last-mile partner master record. */
-    Partner: components['schemas']['DomainRecord'];
-    /** @description Published country, port, currency, fee or commodity reference set. */
-    ReferenceDataVersion: components['schemas']['DomainRecord'];
-    /** @description Customer tier, credit limit, payment cycle and hold policy. */
-    CreditPolicy: components['schemas']['DomainRecord'];
     /** @description Audited shipment hold or authorized release command. */
     ShipmentHold: components['schemas']['DomainRecord'];
-    /** @description Versioned carrier channel product and service coverage. */
-    ChannelProduct: components['schemas']['DomainRecord'];
-    /** @description Published zone, weight break, volumetric and minimum-charge rules. */
-    RateCardVersion: components['schemas']['DomainRecord'];
-    /** @description Versioned cost, agent, customer or special selling price. */
-    RatePriceVersion: components['schemas']['DomainRecord'];
-    /** @description Versioned fuel, remote, oversize or handling surcharge rule. */
-    SurchargeRule: components['schemas']['DomainRecord'];
-    /** @description Restriction validation result with unavailable reasons and alternatives. */
-    RestrictionResult: components['schemas']['DomainRecord'];
-    /** @description Editable standard or FBA order draft snapshot. */
-    OrderDraft: components['schemas']['DomainRecord'];
-    /** @description Import validation and atomic or partial commit decision. */
-    ImportCommit: components['schemas']['DomainRecord'];
-    /** @description Waybill package dimensions, weight and commodity lines. */
-    Package: components['schemas']['DomainRecord'];
-    /** @description Customs declaration, insurance and attachment version. */
-    Declaration: components['schemas']['DomainRecord'];
-    /** @description Immutable carrier label generation job. */
-    LabelJob: components['schemas']['DomainRecord'];
-    /** @description Batch command input and per-item outcome. */
-    BatchCommand: components['schemas']['DomainRecord'];
     /** @description Idempotent warehouse scan event and matched forecast. */
     WarehouseScan: components['schemas']['DomainRecord'];
-    /** @description Scale, dimensions, volumetric and chargeable-weight evidence. */
-    Measurement: components['schemas']['DomainRecord'];
-    /** @description Putaway, movement or stocktake variance record. */
-    InventoryMovement: components['schemas']['DomainRecord'];
     /** @description Chosen channel, alternatives and unavailable explanation. */
     RoutingDecision: components['schemas']['DomainRecord'];
     /** @description Dispatch preflight result and handover snapshot. */
     DispatchResult: components['schemas']['DomainRecord'];
-    /** @description Browser or local-agent print job and source lineage. */
-    PrintJob: components['schemas']['DomainRecord'];
-    /** @description Customs, packaging and load compatibility decision. */
-    CompatibilityResult: components['schemas']['DomainRecord'];
-    /** @description Amazon shipment and FBA carton linkage. */
-    FbaShipmentLink: components['schemas']['DomainRecord'];
-    /** @description Checkpointed partner command, callback or reconciliation event. */
-    PartnerSyncEvent: components['schemas']['DomainRecord'];
     /** @description Tracking stall detection evidence and automation outcome. */
     TrackingStall: components['schemas']['DomainRecord'];
     /** @description Customer-visible material request and submitted evidence. */
@@ -4440,6 +5478,52 @@ export interface components {
         'application/problem+json': components['schemas']['ErrorEnvelope'];
       };
     };
+    /** @description The order, accepted quote version or quote option is absent or outside caller scope. */
+    AcceptedQuoteLinkNotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        /**
+         * @example {
+         *       "code": "NOT_FOUND",
+         *       "message": "Accepted quote linkage input was not found in the caller data scope.",
+         *       "details": [
+         *         {
+         *           "field": "acceptedQuoteVersion",
+         *           "reason": "quote snapshot is absent or inaccessible"
+         *         }
+         *       ],
+         *       "remediation": "Reload the order and accepted quote snapshot before retrying.",
+         *       "requestId": "req_01JY8Z8F"
+         *     }
+         */
+        'application/problem+json': components['schemas']['ErrorEnvelope'];
+      };
+    };
+    /** @description Cursor is invalid or does not match the normalized filters and immutable snapshot. */
+    CursorFilterMismatch: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        /**
+         * @example {
+         *       "code": "CURSOR_FILTER_MISMATCH",
+         *       "message": "Cursor cannot be reused with a different filter set.",
+         *       "details": [
+         *         {
+         *           "field": "cursor",
+         *           "reason": "filter hash or snapshot does not match"
+         *         }
+         *       ],
+         *       "remediation": "Restart pagination without a cursor using the desired filters.",
+         *       "requestId": "req_01JY8Z8F"
+         *     }
+         */
+        'application/problem+json': components['schemas']['ErrorEnvelope'];
+      };
+    };
     /** @description Unexpected server failure that can be retried with the same safe request intent. */
     InternalError: {
       headers: {
@@ -4492,6 +5576,31 @@ export interface components {
          *     }
          */
         'application/problem+json': components['schemas']['ErrorEnvelope'];
+      };
+    };
+    /** @description Missing, malformed or stale strong If-Match precondition. The error code is PRECONDITION_REQUIRED for a missing required header, PRECONDITION_INVALID for a weak or malformed header, and STALE_VERSION for a valid strong ETag that no longer matches. */
+    PreconditionFailed: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        /**
+         * @example {
+         *       "code": "STALE_VERSION",
+         *       "message": "Data changed after this screen was loaded.",
+         *       "details": [
+         *         {
+         *           "field": "If-Match",
+         *           "reason": "expected \"7\", current \"8\""
+         *         }
+         *       ],
+         *       "remediation": "Refresh the resource, compare changes, then retry with its latest ETag.",
+         *       "requestId": "req_01JY8Z8F"
+         *     }
+         */
+        'application/problem+json': components['schemas']['ErrorEnvelope'] & {
+          code?: components['schemas']['PreconditionProblemCode'];
+        };
       };
     };
     /** @description Field, restriction or compatibility validation failed. */
@@ -4573,6 +5682,17 @@ export interface components {
         'application/json': components['schemas']['JobResponse'];
       };
     };
+    /** @description Durable asynchronous job accepted for a versioned aggregate. */
+    JobAcceptedWithEtag: {
+      headers: {
+        Location?: string;
+        ETag: components['headers']['ETag'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/json': components['schemas']['JobResponse'];
+      };
+    };
     /** @description Command committed with its resulting aggregate version. */
     CommandSucceeded: {
       headers: {
@@ -4589,8 +5709,56 @@ export interface components {
     IdempotencyKey: string;
     /** @description ETag returned by the latest resource representation. */
     IfMatch: string;
-    Cursor: string;
+    /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+    OptionalIfMatch: string;
+    /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+    Cursor: components['schemas']['OpaqueCursor'];
     Limit: number;
+    QuoteStatusFilter: 'DRAFT' | 'CALCULATED' | 'ACCEPTED' | 'EXPIRED';
+    OrderStatusFilter: 'DRAFT' | 'VALIDATED' | 'SUBMITTED' | 'CANCELLED';
+    WaybillStateFilter:
+      | 'DRAFT'
+      | 'FORECASTED'
+      | 'AWAITING_RECEIPT'
+      | 'RECEIVED'
+      | 'AWAITING_ROUTING'
+      | 'AWAITING_TRANSIT'
+      | 'IN_TRANSIT'
+      | 'OUT_FOR_DELIVERY'
+      | 'DELIVERED'
+      | 'AWAITING_RETURN'
+      | 'RETURNED'
+      | 'CANCELLED';
+    ImportStatusFilter:
+      | 'UPLOADED'
+      | 'MAPPING'
+      | 'VALIDATING'
+      | 'READY'
+      | 'COMMITTING'
+      | 'COMPLETED'
+      | 'FAILED'
+      | 'ROLLED_BACK';
+    WarehouseReceiptStatusFilter: 'SCANNED' | 'CONFIRMED' | 'UNDONE';
+    LoadUnitStatusFilter: 'OPEN' | 'SEALED' | 'DISPATCHED';
+    BookingStatusFilter: 'DRAFT' | 'CONFIRMED' | 'DEPARTED' | 'CLOSED' | 'CANCELLED';
+    LastMileIntakeStatusFilter: 'OPEN' | 'RECONCILING' | 'CLOSED';
+    DeliveryTaskStatusFilter: components['schemas']['DeliveryTaskStatus'];
+    CustomerIdFilter: components['schemas']['Ulid'];
+    WarehouseIdFilter: components['schemas']['Ulid'];
+    StationCodeFilter: string;
+    Search: string;
+    CreatedFrom: string;
+    CreatedTo: string;
+    ReceivedFrom: string;
+    ReceivedTo: string;
+    DispatchFrom: string;
+    DispatchTo: string;
+    DepartureFrom: string;
+    DepartureTo: string;
+    IntakeFrom: string;
+    IntakeTo: string;
+    ScheduledFrom: string;
+    ScheduledTo: string;
     OrderId: components['schemas']['Ulid'];
     RoleId: components['schemas']['Ulid'];
     UserId: components['schemas']['Ulid'];
@@ -4985,6 +6153,37 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  listOrders: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        status?: components['parameters']['OrderStatusFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        createdFrom?: components['parameters']['CreatedFrom'];
+        createdTo?: components['parameters']['CreatedTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable order page ordered by updatedAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
+    };
+  };
   createOrderDraft: {
     parameters: {
       query?: never;
@@ -5015,6 +6214,30 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  getOrder: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        orderId: components['parameters']['OrderId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current order projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
   validateOrder: {
     parameters: {
       query?: never;
@@ -5034,14 +6257,77 @@ export interface operations {
       /** @description Address, commodity and restriction validation. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['OrderValidationResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  submitOrder: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable key for the same intended command, retained for at least 24 hours. */
+        'Idempotency-Key': components['parameters']['IdempotencyKey'];
+        /** @description ETag returned by the latest resource representation. */
+        'If-Match': components['parameters']['IfMatch'];
+      };
+      path: {
+        orderId: components['parameters']['OrderId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authoritative submitted order projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+      412: components['responses']['PreconditionFailed'];
+      422: components['responses']['StateTransitionFailed'];
+    };
+  };
+  listQuotes: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        status?: components['parameters']['QuoteStatusFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        createdFrom?: components['parameters']['CreatedFrom'];
+        createdTo?: components['parameters']['CreatedTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable quote page ordered by createdAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QuoteListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
     };
   };
   createQuote: {
@@ -5072,6 +6358,30 @@ export interface operations {
       };
       403: components['responses']['Forbidden'];
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  getQuote: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        quoteId: components['parameters']['QuoteId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current quote projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['QuoteResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
     };
   };
   getQuoteExplanation: {
@@ -5127,8 +6437,90 @@ export interface operations {
           'application/json': components['schemas']['QuoteResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
       410: components['responses']['Expired'];
+      412: components['responses']['PreconditionFailed'];
+    };
+  };
+  linkAcceptedQuoteToOrder: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Stable key for the same intended command, retained for at least 24 hours. */
+        'Idempotency-Key': components['parameters']['IdempotencyKey'];
+        /** @description ETag returned by the latest resource representation. */
+        'If-Match': components['parameters']['IfMatch'];
+      };
+      path: {
+        orderId: components['parameters']['OrderId'];
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LinkAcceptedQuoteToOrderRequest'];
+      };
+    };
+    responses: {
+      /** @description Existing idempotent link replayed. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the order aggregate, derived from data.orderVersion. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AcceptedQuoteOrderLinkResponse'];
+        };
+      };
+      /** @description Quote linked and draft waybill created. */
+      201: {
+        headers: {
+          /** @description Strong ETag for the order aggregate, derived from data.orderVersion. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['AcceptedQuoteOrderLinkResponse'];
+        };
+      };
+      403: components['responses']['Forbidden'];
+      404: components['responses']['AcceptedQuoteLinkNotFound'];
+      410: components['responses']['Expired'];
+      412: components['responses']['PreconditionFailed'];
+      422: components['responses']['StateTransitionFailed'];
+    };
+  };
+  listWaybills: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        state?: components['parameters']['WaybillStateFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        warehouseId?: components['parameters']['WarehouseIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        createdFrom?: components['parameters']['CreatedFrom'];
+        createdTo?: components['parameters']['CreatedTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable waybill page ordered by updatedAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
     };
   };
   getWaybill: {
@@ -5154,7 +6546,6 @@ export interface operations {
       };
       403: components['responses']['Forbidden'];
       404: components['responses']['NotFound'];
-      409: components['responses']['StaleVersion'];
       500: components['responses']['InternalError'];
     };
   };
@@ -5184,7 +6575,7 @@ export interface operations {
           'application/json': components['schemas']['WaybillResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -5219,6 +6610,63 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  listWarehouseReceipts: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        status?: components['parameters']['WarehouseReceiptStatusFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        warehouseId?: components['parameters']['WarehouseIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        receivedFrom?: components['parameters']['ReceivedFrom'];
+        receivedTo?: components['parameters']['ReceivedTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable receipt page ordered by scannedAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WarehouseReceiptListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
+    };
+  };
+  getWarehouseReceipt: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        receiptId: components['parameters']['ReceiptId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current warehouse receipt projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WarehouseReceiptResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
   confirmReceipt: {
     parameters: {
       query?: never;
@@ -5249,7 +6697,7 @@ export interface operations {
           'application/json': components['schemas']['WarehouseReceiptResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -5276,13 +6724,14 @@ export interface operations {
       /** @description Routing decision with rule explanation. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['RoutingDecisionResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -5348,7 +6797,11 @@ export interface operations {
   };
   getDeviceTasks: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+      };
       header?: never;
       path: {
         deviceId: components['parameters']['DeviceId'];
@@ -5521,13 +6974,45 @@ export interface operations {
       /** @description Conflict resolution result. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['DeviceConflictResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
+    };
+  };
+  listBookings: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        status?: components['parameters']['BookingStatusFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        departureFrom?: components['parameters']['DepartureFrom'];
+        departureTo?: components['parameters']['DepartureTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable booking page ordered by plannedDepartureAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BookingListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
     };
   };
   createBooking: {
@@ -5559,6 +7044,62 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  getBooking: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        bookingId: components['schemas']['Ulid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current booking projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['BookingResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
+  listLoadUnits: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        status?: components['parameters']['LoadUnitStatusFilter'];
+        warehouseId?: components['parameters']['WarehouseIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        dispatchFrom?: components['parameters']['DispatchFrom'];
+        dispatchTo?: components['parameters']['DispatchTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable load-unit page ordered by updatedAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoadUnitListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
+    };
+  };
   createLoadUnit: {
     parameters: {
       query?: never;
@@ -5586,6 +7127,30 @@ export interface operations {
         };
       };
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  getLoadUnit: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        loadUnitId: components['parameters']['LoadUnitId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current load-unit projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoadUnitResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
     };
   };
   createBillOfLading: {
@@ -5640,13 +7205,14 @@ export interface operations {
       /** @description Attach results; individual failures are explicit. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['BatchLoadResultResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -5673,13 +7239,14 @@ export interface operations {
       /** @description Dispatched after credit, issue and print preflight. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['LoadUnitResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -5706,14 +7273,47 @@ export interface operations {
       /** @description Sealed load unit. */
       200: {
         headers: {
+          ETag: components['headers']['ETag'];
           [name: string]: unknown;
         };
         content: {
           'application/json': components['schemas']['LoadUnitResponse'];
         };
       };
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
+    };
+  };
+  listLastMileIntakes: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        status?: components['parameters']['LastMileIntakeStatusFilter'];
+        warehouseId?: components['parameters']['WarehouseIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        intakeFrom?: components['parameters']['IntakeFrom'];
+        intakeTo?: components['parameters']['IntakeTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable intake page ordered by createdAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LastMileIntakeListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
     };
   };
   createLastMileIntake: {
@@ -5745,6 +7345,62 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  getLastMileIntake: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        intakeId: components['schemas']['Ulid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current intake projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LastMileIntakeResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
+  listDeliveryTasks: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        status?: components['parameters']['DeliveryTaskStatusFilter'];
+        customerId?: components['parameters']['CustomerIdFilter'];
+        stationCode?: components['parameters']['StationCodeFilter'];
+        scheduledFrom?: components['parameters']['ScheduledFrom'];
+        scheduledTo?: components['parameters']['ScheduledTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable task page ordered by planned window and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeliveryTaskListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
+    };
+  };
   createDeliveryTask: {
     parameters: {
       query?: never;
@@ -5772,6 +7428,30 @@ export interface operations {
         };
       };
       422: components['responses']['ValidationFailed'];
+    };
+  };
+  getDeliveryTask: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        deliveryTaskId: components['schemas']['Ulid'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current delivery-task projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DeliveryTaskResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
     };
   };
   captureProofOfDelivery: {
@@ -5806,7 +7486,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6477,6 +8157,7 @@ export interface operations {
   listPaymentReconciliationExceptions: {
     parameters: {
       query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
         cursor?: components['parameters']['Cursor'];
         limit?: components['parameters']['Limit'];
       };
@@ -6531,6 +8212,36 @@ export interface operations {
       422: components['responses']['InvariantFailed'];
     };
   };
+  listImports: {
+    parameters: {
+      query?: {
+        /** @description Opaque signed continuation token bound to the original normalized filters, immutable order tuple and asOf snapshot. Reusing it with different filters is rejected. */
+        cursor?: components['parameters']['Cursor'];
+        limit?: components['parameters']['Limit'];
+        status?: components['parameters']['ImportStatusFilter'];
+        createdFrom?: components['parameters']['CreatedFrom'];
+        createdTo?: components['parameters']['CreatedTo'];
+        search?: components['parameters']['Search'];
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Stable import-job page ordered by createdAt and id. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportJobListResponse'];
+        };
+      };
+      400: components['responses']['CursorFilterMismatch'];
+      403: components['responses']['Forbidden'];
+    };
+  };
   createImportJob: {
     parameters: {
       query?: never;
@@ -6559,6 +8270,30 @@ export interface operations {
       422: components['responses']['ValidationFailed'];
     };
   };
+  getImportJob: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        importId: components['parameters']['ImportId'];
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Current import job projection. */
+      200: {
+        headers: {
+          ETag: components['headers']['ETag'];
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ImportJobResponse'];
+        };
+      };
+      404: components['responses']['NotFound'];
+    };
+  };
   validateImportRows: {
     parameters: {
       query?: never;
@@ -6575,8 +8310,8 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      202: components['responses']['JobAccepted'];
-      409: components['responses']['StaleVersion'];
+      202: components['responses']['JobAcceptedWithEtag'];
+      412: components['responses']['PreconditionFailed'];
     };
   };
   commitImport: {
@@ -6599,8 +8334,8 @@ export interface operations {
       };
     };
     responses: {
-      202: components['responses']['JobAccepted'];
-      409: components['responses']['StaleVersion'];
+      202: components['responses']['JobAcceptedWithEtag'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -6797,13 +8532,23 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Tenant'];
+        'application/json': components['schemas']['ChangeTenantStatusRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative tenant after the lifecycle transition. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the returned tenant aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TenantResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6823,13 +8568,23 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['TenantEntitlement'];
+        'application/json': components['schemas']['UpdateTenantEntitlementsRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative tenant entitlement aggregate. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the tenant entitlement aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['TenantEntitlementsResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6842,11 +8597,19 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['OAuthBinding'];
+        'application/json': components['schemas']['StartWechatLoginRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authorization URL and expiry; the PKCE verifier remains server-side. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WechatAuthorizationResponse'];
+        };
+      };
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -6859,11 +8622,19 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['OAuthBinding'];
+        'application/json': components['schemas']['CompleteWechatLoginRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description OAuth callback completed and a cookie-backed session created. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['SessionResponse'];
+        };
+      };
       422: components['responses']['ValidationFailed'];
     };
   };
@@ -6876,34 +8647,46 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Session'];
+        'application/json': components['schemas']['ReauthenticateCurrentSessionRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description A short-lived reauthentication grant bound to the current session. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ReauthenticationResponse'];
+        };
+      };
       401: components['responses']['Unauthorized'];
     };
   };
   previewFieldPolicy: {
     parameters: {
       query?: never;
-      header: {
-        /** @description Stable key for the same intended command, retained for at least 24 hours. */
-        'Idempotency-Key': components['parameters']['IdempotencyKey'];
-      };
+      header?: never;
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['FieldPolicy'];
+        'application/json': components['schemas']['PreviewFieldPolicyRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Non-mutating field-policy projection. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['FieldPolicyPreviewResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
-      422: components['responses']['StateTransitionFailed'];
+      422: components['responses']['ValidationFailed'];
     };
   };
   upsertOrganizationNode: {
@@ -6912,21 +8695,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['OrganizationNode'];
+        'application/json': components['schemas']['UpsertOrganizationNodeRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6936,21 +8719,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['User'];
+        'application/json': components['schemas']['UpsertUserRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6960,8 +8743,8 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path: {
         customerId: components['schemas']['Ulid'];
@@ -6970,13 +8753,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Customer'];
+        'application/json': components['schemas']['UpsertCustomerAddressRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -6986,21 +8769,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Partner'];
+        'application/json': components['schemas']['UpsertPartnerRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7018,13 +8801,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ReferenceDataVersion'];
+        'application/json': components['schemas']['PublishReferenceDataVersionRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7044,13 +8827,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CreditPolicy'];
+        'application/json': components['schemas']['UpdateCustomerCreditPolicyRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7110,21 +8893,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ChannelProduct'];
+        'application/json': components['schemas']['UpsertChannelProductRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7144,13 +8927,23 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['RateCardVersion'];
+        'application/json': components['schemas']['PublishRateCardRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative immutable publication projection. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the published rate-card aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['RateCardPublicationResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7160,21 +8953,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['RatePriceVersion'];
+        'application/json': components['schemas']['UpsertRatePriceVersionRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7184,21 +8977,21 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
+        /** @description Must be absent for CREATE mode and must contain the latest strong ETag for UPDATE mode. */
+        'If-Match'?: components['parameters']['OptionalIfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['SurchargeRule'];
+        'application/json': components['schemas']['UpsertSurchargeRuleRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7214,13 +9007,20 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['RestrictionResult'];
+        'application/json': components['schemas']['ValidateShipmentRestrictionsRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Availability, failed rules, warnings and alternatives. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['ShipmentRestrictionValidationResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7240,13 +9040,23 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['OrderDraft'];
+        'application/json': components['schemas']['CopyOrderRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative independent draft order created by the copy. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the returned copied order. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['OrderResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7266,13 +9076,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ImportCommit'];
+        'application/json': components['schemas']['RollbackImportBatchRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7292,13 +9102,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Package'];
+        'application/json': components['schemas']['UpsertWaybillPackagesRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7318,13 +9128,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Declaration'];
+        'application/json': components['schemas']['UpdateWaybillDeclarationRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7344,13 +9154,23 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['LabelJob'];
+        'application/json': components['schemas']['CreateLabelJobRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Created label job and authoritative latest waybill version. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the mutated waybill aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LabelJobCreatedResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7370,13 +9190,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Waybill'];
+        'application/json': components['schemas']['CancelWaybillRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7396,13 +9216,23 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Waybill'];
+        'application/json': components['schemas']['RenumberWaybillRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Authoritative replacement number and lineage. */
+      200: {
+        headers: {
+          /** @description Strong ETag for the renumbered waybill aggregate. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillRenumberResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7412,21 +9242,27 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchCommand'];
+        'application/json': components['schemas']['SplitWaybillRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Source and child waybill lineage with authoritative versions. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillSplitResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7436,21 +9272,27 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchCommand'];
+        'application/json': components['schemas']['MergeWaybillsRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Source and merged waybill lineage with authoritative versions. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillMergeResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7460,21 +9302,26 @@ export interface operations {
       header: {
         /** @description Stable key for the same intended command, retained for at least 24 hours. */
         'Idempotency-Key': components['parameters']['IdempotencyKey'];
-        /** @description ETag returned by the latest resource representation. */
-        'If-Match': components['parameters']['IfMatch'];
       };
       path?: never;
       cookie?: never;
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchCommand'];
+        'application/json': components['schemas']['BatchWaybillCommandRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description One ordered outcome for each requested waybill. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['WaybillBatchCommandResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7494,13 +9341,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Measurement'];
+        'application/json': components['schemas']['RecordMeasurementRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7520,13 +9367,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Measurement'];
+        'application/json': components['schemas']['AttachReceiptMediaRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7546,13 +9393,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Receipt'];
+        'application/json': components['schemas']['UndoReceiptRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7570,13 +9417,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['InventoryMovement'];
+        'application/json': components['schemas']['MoveInventoryRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7594,13 +9441,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['InventoryMovement'];
+        'application/json': components['schemas']['CommitStocktakeRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7618,13 +9465,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['PrintJob'];
+        'application/json': components['schemas']['CreatePrintJobRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7642,13 +9489,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['PrintJob'];
+        'application/json': components['schemas']['ReprintDocumentRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7664,13 +9511,20 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['CompatibilityResult'];
+        'application/json': components['schemas']['ValidateLoadCompatibilityRequest'];
       };
     };
     responses: {
-      200: components['responses']['CommandSucceeded'];
+      /** @description Compatibility, failed rules, warnings and alternatives. */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['LoadCompatibilityValidationResponse'];
+        };
+      };
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7688,13 +9542,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['FbaShipmentLink'];
+        'application/json': components['schemas']['LinkFbaShipmentRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7714,13 +9568,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['LastMileIntake'];
+        'application/json': components['schemas']['ScanLastMileIntakeRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7740,7 +9594,7 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['DeliveryEvent'];
+        'application/json': components['schemas']['UpdateDeliveryTaskStatusRequest'];
       };
     };
     responses: {
@@ -7756,7 +9610,7 @@ export interface operations {
       };
       401: components['responses']['Unauthorized'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7776,13 +9630,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['ProofOfDelivery'];
+        'application/json': components['schemas']['AmendProofOfDeliveryRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7800,13 +9654,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['PartnerSyncEvent'];
+        'application/json': components['schemas']['SyncLastMilePartnerRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7824,13 +9678,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['PartnerSyncEvent'];
+        'application/json': components['schemas']['ReplayPartnerEventRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -7848,13 +9702,13 @@ export interface operations {
     };
     requestBody: {
       content: {
-        'application/json': components['schemas']['Charge'];
+        'application/json': components['schemas']['GenerateLastMileChargesRequest'];
       };
     };
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -8363,7 +10217,7 @@ export interface operations {
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };
@@ -8825,7 +10679,7 @@ export interface operations {
     responses: {
       200: components['responses']['CommandSucceeded'];
       403: components['responses']['Forbidden'];
-      409: components['responses']['StaleVersion'];
+      412: components['responses']['PreconditionFailed'];
       422: components['responses']['StateTransitionFailed'];
     };
   };

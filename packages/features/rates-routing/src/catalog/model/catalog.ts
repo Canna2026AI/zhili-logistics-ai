@@ -1,3 +1,5 @@
+import type { components } from '@zhili/contracts';
+
 export type RateCatalogKind = '渠道产品' | '分区' | '价卡' | '附加费' | '限制' | '特殊价';
 
 export interface RateCatalogRecord {
@@ -15,15 +17,28 @@ export interface RateCatalogPublishResult {
   status: RateCatalogRecord['status'];
 }
 
+export type RateCatalogPublishInput = components['schemas']['PublishRateCardRequest'];
+
 export interface RateCatalogPort {
-  publish(rateCardId: string, version: number, reason: string): Promise<RateCatalogPublishResult>;
+  publish(
+    rateCardId: string,
+    version: number,
+    input: RateCatalogPublishInput
+  ): Promise<RateCatalogPublishResult>;
 }
 
 export const memoryRateCatalogPort: RateCatalogPort = {
-  async publish() {
-    return { version: 'v4', status: '生效' };
+  async publish(_rateCardId, _version, input) {
+    return { version: input.versionLabel, status: '生效' };
   },
 };
+
+export const preparedRateCardPublication = {
+  versionLabel: 'v4',
+  effectiveFrom: '2026-08-01T00:00:00.000Z',
+  effectiveUntil: null,
+  currency: 'CNY',
+} satisfies Omit<RateCatalogPublishInput, 'reason'>;
 
 export const rateCatalogFixture: RateCatalogRecord[] = [
   {

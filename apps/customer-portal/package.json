@@ -13,6 +13,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.90.0",
     "@zhili/api-client": "workspace:*",
+    "@zhili/contracts": "workspace:*",
     "@zhili/mocks": "workspace:*",
     "@zhili/ui": "workspace:*",
     "react": "^19.2.8",

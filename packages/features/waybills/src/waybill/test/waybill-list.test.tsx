@@ -97,9 +97,12 @@ describe('waybill list', () => {
       get: vi.fn(),
       submit: vi.fn(async () => ({ version: 8 })),
       createLabel: vi.fn(async () => ({ id: 'label-1', status: 'QUEUED', version: 1 })),
-      batch: vi.fn(async (ids: string[]) => ({
-        succeeded: ids.filter((id) => id === 'wb-004'),
-        failed: ids.filter((id) => id === 'wb-007').map((id) => ({ id, reason: '状态不允许' })),
+      batch: vi.fn(async (items: { waybillId: string }[]) => ({
+        succeeded: items.map((item) => item.waybillId).filter((id) => id === 'wb-004'),
+        failed: items
+          .map((item) => item.waybillId)
+          .filter((id) => id === 'wb-007')
+          .map((id) => ({ id, reason: '状态不允许' })),
       })),
     };
     render(<WaybillList port={port as never} />);
@@ -116,7 +119,7 @@ describe('waybill list', () => {
       target: { value: '客户书面通知取消运输' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认取消' }));
-    await waitFor(() => expect(port.batch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(port.batch).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('批量执行：成功 1，失败 1')).toBeInTheDocument();
   });
 
@@ -148,7 +151,10 @@ describe('waybill list', () => {
   );
 
   it('cancels each selected resource with its own displayed version', async () => {
-    const batch = vi.fn(async (ids: string[]) => ({ succeeded: ids, failed: [] }));
+    const batch = vi.fn(async (items: { waybillId: string }[]) => ({
+      succeeded: items.map((item) => item.waybillId),
+      failed: [],
+    }));
     render(<WaybillList port={{ batch } as never} />);
     for (const number of ['S2505120004', 'S2505120007']) {
       const row = screen.getByRole('button', { name: number }).closest('tr')!;
@@ -162,9 +168,15 @@ describe('waybill list', () => {
       target: { value: '客户书面通知取消运输' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认取消' }));
-    await waitFor(() => expect(batch).toHaveBeenCalledTimes(2));
-    expect(batch).toHaveBeenNthCalledWith(1, ['wb-004'], 'CANCEL', 7, '客户书面通知取消运输');
-    expect(batch).toHaveBeenNthCalledWith(2, ['wb-007'], 'CANCEL', 6, '客户书面通知取消运输');
+    await waitFor(() => expect(batch).toHaveBeenCalledTimes(1));
+    expect(batch).toHaveBeenCalledWith(
+      [
+        { waybillId: 'wb-004', expectedVersion: 7 },
+        { waybillId: 'wb-007', expectedVersion: 6 },
+      ],
+      'CANCEL',
+      '客户书面通知取消运输'
+    );
   });
 
   it('keeps read access while disabling every write action', () => {

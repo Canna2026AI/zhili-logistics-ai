@@ -168,9 +168,8 @@ describe('createApiPdaPort', () => {
       note: '本人签收',
     });
     await port.amendProofOfDelivery('01JDELIVERY000000000000001', '"9"', 'amend-pod-00000001', {
-      id: '01JPOD0000000000000000001',
-      deliveryTaskId: '01JDELIVERY000000000000001',
-      versionNo: 2,
+      proofOfDeliveryId: '01JPOD0000000000000000001',
+      reason: '更正签收人姓名和凭证',
       recipientName: '陈女士',
       signedAt: '2026-07-22T10:00:00.000Z',
       evidenceRefs: ['media-pod'],
@@ -204,9 +203,12 @@ describe('createApiPdaPort', () => {
       recipientName: '陈女士',
       evidenceRefs: ['media-pod'],
     });
-    await expect(requests[3]!.json()).resolves.toMatchObject({
-      id: '01JPOD0000000000000000001',
-      versionNo: 2,
+    await expect(requests[3]!.json()).resolves.toEqual({
+      proofOfDeliveryId: '01JPOD0000000000000000001',
+      reason: '更正签收人姓名和凭证',
+      recipientName: '陈女士',
+      signedAt: '2026-07-22T10:00:00.000Z',
+      evidenceRefs: ['media-pod'],
     });
   });
 

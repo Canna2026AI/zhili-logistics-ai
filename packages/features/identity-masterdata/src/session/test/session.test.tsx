@@ -70,22 +70,13 @@ describe('identity session', () => {
     const DELETE = vi.fn().mockResolvedValue({});
     const adapter = createSessionApi({ POST, DELETE } as never);
     await adapter.refresh();
-    await adapter.reauthenticate({
-      id: '01JY8Z8F6ME4F0Y9QH2X6D4R7A',
-      subjectId: 'usr-zhang',
-      tenantId: 'tenant-zhili',
-      expiresAt: '2026-07-22T20:00:00+08:00',
-      permissionsVersion: 8,
-    });
+    await adapter.reauthenticate({ method: 'PASSWORD', password: 'correct-password' });
     await adapter.logout();
     expect(POST).toHaveBeenCalledWith('/auth/sessions:refresh');
     expect(POST).toHaveBeenCalledWith('/auth/sessions/current:reauthenticate', {
       body: {
-        id: '01JY8Z8F6ME4F0Y9QH2X6D4R7A',
-        subjectId: 'usr-zhang',
-        tenantId: 'tenant-zhili',
-        expiresAt: '2026-07-22T20:00:00+08:00',
-        permissionsVersion: 8,
+        method: 'PASSWORD',
+        password: 'correct-password',
       },
     });
     expect(DELETE).toHaveBeenCalledWith('/auth/sessions/current');
