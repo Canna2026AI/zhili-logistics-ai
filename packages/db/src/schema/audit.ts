@@ -24,8 +24,11 @@ export const auditEvents = pgTable(
       table.entityId,
       table.occurredAt
     ),
-    check('audit_events_id_ulid_check', sql`${table.id} ~ '^[0-9A-HJKMNP-TV-Z]{26}$'`),
-    check('audit_events_tenant_ulid_check', sql`${table.tenantId} ~ '^[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check('audit_events_id_ulid_check', sql`${table.id} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
+    check(
+      'audit_events_tenant_ulid_check',
+      sql`${table.tenantId} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`
+    ),
     tenantIsolationPolicy('audit_events_tenant_isolation', table.tenantId),
   ]
 ).enableRLS();

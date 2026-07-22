@@ -39,8 +39,11 @@ export const outboxEvents = pgTable(
       table.aggregateId,
       table.aggregateVersion
     ),
-    check('outbox_events_id_ulid_check', sql`${table.id} ~ '^[0-9A-HJKMNP-TV-Z]{26}$'`),
-    check('outbox_events_tenant_ulid_check', sql`${table.tenantId} ~ '^[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check('outbox_events_id_ulid_check', sql`${table.id} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
+    check(
+      'outbox_events_tenant_ulid_check',
+      sql`${table.tenantId} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`
+    ),
     check('outbox_events_aggregate_version_check', sql`${table.aggregateVersion} >= 0`),
     check('outbox_events_attempts_check', sql`${table.attempts} >= 0`),
     tenantIsolationPolicy('outbox_events_tenant_isolation', table.tenantId),

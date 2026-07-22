@@ -213,6 +213,51 @@ describe('foundation schema guarantees', () => {
     ]);
   });
 
+  it.each([
+    [
+      'idempotency record id',
+      () =>
+        admin`
+          INSERT INTO idempotency_records (
+            id, tenant_id, idempotency_key, request_hash, expires_at
+          ) VALUES (
+            '81J0000000000000000000050A', ${tenantA}, 'overflow-idempotency-id',
+            ${'e'.repeat(64)}, now() + interval '1 hour'
+          )
+        `,
+    ],
+    [
+      'outbox event id',
+      () =>
+        admin`
+          INSERT INTO outbox_events (
+            id, tenant_id, aggregate_type, aggregate_id, aggregate_version,
+            event_type, payload, dedupe_key
+          ) VALUES (
+            '81J0000000000000000000060A', ${tenantA}, 'idempotency_record',
+            '01J0000000000000000000010A', 2, 'OverflowUlidAttempted',
+            '{}'::jsonb, 'overflow-outbox-id'
+          )
+        `,
+    ],
+    [
+      'audit event tenant id',
+      () =>
+        admin`
+          INSERT INTO audit_events (
+            id, tenant_id, subject_id, request_id, action, entity_type, entity_id, payload
+          ) VALUES (
+            '01J0000000000000000000070A', '81J0000000000000000000000A',
+            '01J0000000000000000000020A', '01J0000000000000000000030A',
+            'overflow-attempted', 'idempotency_record',
+            '01J0000000000000000000010A', '{}'::jsonb
+          )
+        `,
+    ],
+  ])('rejects a non-canonical overflow ULID in %s', async (_caseName, insertOverflowUlid) => {
+    await expect(insertOverflowUlid()).rejects.toMatchObject({ code: '23514' });
+  });
+
   it('prevents audit updates and deletes in the database', async () => {
     const context = {
       tenantId: tenantA,

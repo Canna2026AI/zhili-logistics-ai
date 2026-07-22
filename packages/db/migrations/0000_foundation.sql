@@ -32,9 +32,9 @@ CREATE TABLE idempotency_records (
   created_at timestamptz NOT NULL DEFAULT now(),
   expires_at timestamptz NOT NULL,
   CONSTRAINT idempotency_records_id_ulid_check
-    CHECK (id ~ '^[0-9A-HJKMNP-TV-Z]{26}$'),
+    CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
   CONSTRAINT idempotency_records_tenant_ulid_check
-    CHECK (tenant_id ~ '^[0-9A-HJKMNP-TV-Z]{26}$'),
+    CHECK (tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
   CONSTRAINT idempotency_records_request_hash_check
     CHECK (length(request_hash) = 64),
   CONSTRAINT idempotency_records_expiry_check
@@ -59,9 +59,9 @@ CREATE TABLE outbox_events (
   attempts integer NOT NULL DEFAULT 0,
   last_error text,
   CONSTRAINT outbox_events_id_ulid_check
-    CHECK (id ~ '^[0-9A-HJKMNP-TV-Z]{26}$'),
+    CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
   CONSTRAINT outbox_events_tenant_ulid_check
-    CHECK (tenant_id ~ '^[0-9A-HJKMNP-TV-Z]{26}$'),
+    CHECK (tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
   CONSTRAINT outbox_events_aggregate_version_check
     CHECK (aggregate_version >= 0),
   CONSTRAINT outbox_events_attempts_check
@@ -85,9 +85,9 @@ CREATE TABLE audit_events (
   payload jsonb NOT NULL,
   occurred_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT audit_events_id_ulid_check
-    CHECK (id ~ '^[0-9A-HJKMNP-TV-Z]{26}$'),
+    CHECK (id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'),
   CONSTRAINT audit_events_tenant_ulid_check
-    CHECK (tenant_id ~ '^[0-9A-HJKMNP-TV-Z]{26}$')
+    CHECK (tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$')
 );
 
 CREATE INDEX audit_events_entity_idx

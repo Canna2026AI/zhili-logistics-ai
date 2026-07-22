@@ -31,10 +31,10 @@ export const idempotencyRecords = pgTable(
   (table) => [
     unique('idempotency_records_tenant_key_unique').on(table.tenantId, table.idempotencyKey),
     index('idempotency_records_expiry_idx').on(table.expiresAt),
-    check('idempotency_records_id_ulid_check', sql`${table.id} ~ '^[0-9A-HJKMNP-TV-Z]{26}$'`),
+    check('idempotency_records_id_ulid_check', sql`${table.id} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
     check(
       'idempotency_records_tenant_ulid_check',
-      sql`${table.tenantId} ~ '^[0-9A-HJKMNP-TV-Z]{26}$'`
+      sql`${table.tenantId} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`
     ),
     check('idempotency_records_request_hash_check', sql`length(${table.requestHash}) = 64`),
     check('idempotency_records_expiry_check', sql`${table.expiresAt} > ${table.createdAt}`),
