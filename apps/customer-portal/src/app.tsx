@@ -1,6 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
+import { Button, Drawer, StatusTag } from '@zhili/ui';
 import { customerPort, type OrderInput, type QuoteResult, type VersionDifference } from './api';
+import { customerBillingRecords, customerExceptionRecords } from './customer-records';
+import { AccountFlow } from './features/account/account-flow';
+import { BillingFlow } from './features/billing/billing-flow';
+import { ExceptionFlow } from './features/exceptions/exception-flow';
+import { ShipmentFlow } from './features/shipments/shipment-flow';
+import { TrackingFlow } from './features/tracking/tracking-flow';
 
 type Page =
   | '工作台'
@@ -244,6 +250,7 @@ function Dashboard({
             ].map(([label, value, delta]) => (
               <button
                 key={label}
+                aria-label={`${label} ${value} 较昨日 ${delta}`}
                 onClick={() => navigate(label === '问题件' ? '问题工单' : '我的运单')}
               >
                 <span>{label}</span>
@@ -502,119 +509,6 @@ function QuotePage({ choose, now }: { choose: (quote: QuoteResult) => void; now:
   );
 }
 
-function OrderPage({
-  selectedQuote,
-  onSubmitted,
-  onDraft,
-  draftKey,
-}: {
-  selectedQuote: QuoteResult | null;
-  onSubmitted: (input: OrderInput) => Promise<void>;
-  onDraft: (input: Partial<OrderInput>) => Promise<void>;
-  draftKey: string;
-}) {
-  const [draftSaved, setDraftSaved] = useState(() => localStorage.getItem(draftKey) === 'saved');
-  const readInput = (form: HTMLFormElement): OrderInput => {
-    const data = new FormData(form);
-    return {
-      origin: String(data.get('origin')),
-      recipient: String(data.get('recipient')),
-      destination: String(data.get('destination')),
-      phone: String(data.get('phone')),
-      commodity: String(data.get('commodity')),
-      pieces: Number(data.get('pieces')),
-      weightKg: Number(data.get('weightKg')),
-      acceptedQuote: selectedQuote
-        ? {
-            quoteId: selectedQuote.id,
-            optionId: selectedQuote.optionId,
-            version: selectedQuote.version,
-          }
-        : undefined,
-    };
-  };
-  return (
-    <>
-      <SectionHeader
-        title="新建运单"
-        description="填写收发件、货物与渠道信息，校验通过后提交预报。"
-      />
-      <form
-        className="portal-form portal-order-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void onSubmitted(readInput(event.currentTarget));
-        }}
-      >
-        {selectedQuote ? (
-          <p className="portal-selected-quote">
-            已选择：{selectedQuote.channel} · CNY {selectedQuote.charges.total}
-          </p>
-        ) : null}
-        {draftSaved ? (
-          <p className="portal-selected-quote">草稿已保存，可继续编辑后提交。</p>
-        ) : null}
-        <fieldset>
-          <legend>收件信息</legend>
-          <label>
-            发货地
-            <input
-              name="origin"
-              defaultValue={selectedQuote?.request.origin ?? 'CN-SZX 518000'}
-              required
-            />
-          </label>
-          <label>
-            收件人
-            <input name="recipient" aria-label="收件人" required />
-          </label>
-          <label>
-            目的地
-            <input name="destination" aria-label="目的地" required />
-          </label>
-          <label>
-            联系电话
-            <input name="phone" defaultValue="+1 213 555 0108" />
-          </label>
-        </fieldset>
-        <fieldset>
-          <legend>货物信息</legend>
-          <label>
-            品名
-            <input name="commodity" defaultValue="服装样品" />
-          </label>
-          <label>
-            件数
-            <input name="pieces" defaultValue="18" inputMode="numeric" />
-          </label>
-          <label>
-            预报重（kg）
-            <input name="weightKg" defaultValue="122.00" inputMode="decimal" />
-          </label>
-        </fieldset>
-        <div className="portal-form-actions">
-          <Button
-            variant="secondary"
-            type="button"
-            onClick={(event) =>
-              event.currentTarget.form &&
-              void onDraft(readInput(event.currentTarget.form))
-                .then(() => {
-                  localStorage.setItem(draftKey, 'saved');
-                  setDraftSaved(true);
-                })
-                .catch(() => undefined)
-            }
-          >
-            保存草稿
-          </Button>
-          <Button type="submit">提交预报</Button>
-        </div>
-      </form>
-    </>
-  );
-}
-
 function WaybillTable({
   rows,
   onTrack,
@@ -725,270 +619,6 @@ function WaybillsPage({
   );
 }
 
-function TrackingPage({ waybillNo }: { waybillNo: string }) {
-  return (
-    <>
-      <SectionHeader
-        title="运单轨迹"
-        description="事件时间与接收时间分别保留，客户不可见内部责任、成本和私密备注。"
-      />
-      <section className="portal-panel portal-tracking">
-        <div className="portal-waybill-summary">
-          <div>
-            <small>运单号</small>
-            <strong>{waybillNo}</strong>
-          </div>
-          <StatusTag tone="success">已收货，待分货</StatusTag>
-        </div>
-        <ol>
-          {waybillNo === 'S2505120006' ? (
-            <li>
-              <time>刚刚</time>
-              <strong>预报已提交 · 等待仓库收货</strong>
-              <span>来源：客户门户 API</span>
-            </li>
-          ) : (
-            <li>
-              <time>2026-05-12 08:16</time>
-              <strong>已收货 · 悉尼仓库</strong>
-              <span>来源：仓库扫描</span>
-            </li>
-          )}
-          <li>
-            <time>2026-05-11 19:20</time>
-            <strong>到达目的港</strong>
-            <span>来源：承运商同步</span>
-          </li>
-          <li>
-            <time>2026-05-08 09:40</time>
-            <strong>干线运输中</strong>
-            <span>来源：智立干线</span>
-          </li>
-        </ol>
-      </section>
-    </>
-  );
-}
-
-function FinancePage({
-  requestPayment,
-  paymentCreated,
-  notify,
-  receiptKey,
-}: {
-  requestPayment: () => void;
-  paymentCreated: boolean;
-  notify: (message: string) => void;
-  receiptKey: string;
-}) {
-  const [receipt, setReceipt] = useState<File | null>(null);
-  const [receiptName, setReceiptName] = useState(() => localStorage.getItem(receiptKey) ?? '');
-  return (
-    <>
-      <SectionHeader
-        title="账单与付款"
-        description="预存款、未分配收款、账单快照与支付记录同屏可追溯。"
-      />
-      <section className="portal-balance">
-        <div>
-          <span>预存款 CNY 128,560.00</span>
-          <small>可用余额</small>
-        </div>
-        <div>
-          <span>未分配收款 CNY 1,200.00</span>
-          <small>待确认归属</small>
-        </div>
-        <div>
-          <span>本期待付款 CNY 2,320.00</span>
-          <small>ST202605-0008</small>
-        </div>
-      </section>
-      <section className="portal-panel">
-        <h2>提交付款凭证</h2>
-        <div className="portal-filter">
-          <input
-            type="file"
-            aria-label="付款凭证"
-            accept="image/*,.pdf"
-            onChange={(event) => setReceipt(event.target.files?.[0] ?? null)}
-          />
-          <Button
-            disabled={!receipt}
-            onClick={() =>
-              receipt &&
-              void customerPort
-                .uploadReceipt(receipt.name)
-                .then(() => {
-                  localStorage.setItem(receiptKey, receipt.name);
-                  setReceiptName(receipt.name);
-                  notify('付款凭证已关联至 ST202605-0008。');
-                })
-                .catch((error: Error) => notify(error.message))
-            }
-          >
-            上传并关联凭证
-          </Button>
-        </div>
-        {receiptName ? <p>已关联凭证：{receiptName}</p> : null}
-      </section>
-      <section className="portal-panel">
-        <h2>最近账单</h2>
-        <div className="portal-table-wrap">
-          <table aria-label="最近账单" className="portal-table">
-            <thead>
-              <tr>
-                <th>账单号</th>
-                <th>期间</th>
-                <th>总额</th>
-                <th>已分配</th>
-                <th>余额</th>
-                <th>状态</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>ST202605-0008</td>
-                <td>2026-05</td>
-                <td>CNY 5,320.00</td>
-                <td>CNY 3,000.00</td>
-                <td>CNY 2,320.00</td>
-                <td>
-                  <StatusTag tone="warning">待付款</StatusTag>
-                </td>
-                <td>
-                  <button aria-label="支付 ST202605-0008" onClick={requestPayment}>
-                    支付
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-      <section className="portal-panel">
-        <h2>付款记录</h2>
-        <div className="portal-table-wrap">
-          <table aria-label="付款记录" className="portal-table">
-            <thead>
-              <tr>
-                <th>支付单号</th>
-                <th>账单号</th>
-                <th>金额</th>
-                <th>渠道</th>
-                <th>状态</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paymentCreated ? (
-                <tr>
-                  <td>PAY-20260512-01</td>
-                  <td>ST202605-0008</td>
-                  <td>CNY 2,320.00</td>
-                  <td>微信支付</td>
-                  <td>
-                    <StatusTag tone="info">待支付</StatusTag>
-                  </td>
-                </tr>
-              ) : (
-                <tr>
-                  <td colSpan={5}>确认付款后将在这里生成支付记录</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </>
-  );
-}
-
-function TicketsPage({ notify }: { notify: (message: string) => void }) {
-  return (
-    <>
-      <SectionHeader
-        title="问题工单"
-        description="补充资料、评论和查看结果；内部责任与私密备注始终隔离。"
-      />
-      <section className="portal-ticket-layout">
-        <form
-          className="portal-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const form = new FormData(event.currentTarget);
-            void customerPort
-              .createTicket(String(form.get('description') ?? '轨迹问题'))
-              .then(() => notify('工单已创建，通知发送失败；工单不回滚，可仅重试通知。'))
-              .catch((error: Error) => notify(error.message));
-          }}
-        >
-          <label>
-            关联运单
-            <input defaultValue="S2505120004" />
-          </label>
-          <label>
-            问题类型
-            <select defaultValue="tracking">
-              <option value="tracking">轨迹停滞</option>
-              <option value="damage">货损</option>
-            </select>
-          </label>
-          <label>
-            问题描述
-            <textarea name="description" aria-label="问题描述" required />
-          </label>
-          <Button type="submit">提交工单</Button>
-        </form>
-        <div className="portal-panel">
-          <h2>最近工单</h2>
-          <p>
-            #T250512001 · 运单延误咨询 <StatusTag tone="info">处理中</StatusTag>
-          </p>
-          <p>
-            #T250511008 · 发票未收到 <StatusTag tone="info">处理中</StatusTag>
-          </p>
-        </div>
-      </section>
-    </>
-  );
-}
-
-function ApiPage({ notify }: { notify: (message: string) => void }) {
-  return (
-    <>
-      <SectionHeader
-        title="API 申请"
-        description="按最小权限申请接口范围，密钥仅在审批通过后生成。"
-      />
-      <form
-        className="portal-form portal-api-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void customerPort
-            .requestApi()
-            .then(() => notify('API 申请已提交，预计 1 个工作日内审核。'))
-            .catch((error: Error) => notify(error.message));
-        }}
-      >
-        <label>
-          <input aria-label="运单查询" type="checkbox" /> 运单查询
-        </label>
-        <label>
-          <input type="checkbox" /> 轨迹订阅
-        </label>
-        <label>
-          <input type="checkbox" /> 创建预报
-        </label>
-        <label>
-          用途说明
-          <textarea defaultValue="企业 ERP 对接" />
-        </label>
-        <Button type="submit">提交 API 申请</Button>
-      </form>
-    </>
-  );
-}
-
 function ImportPage({ notify }: { notify: (message: string) => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [result, setResult] = useState('');
@@ -1026,69 +656,6 @@ function ImportPage({ notify }: { notify: (message: string) => void }) {
   );
 }
 
-function AddressPage({
-  notify,
-  addressesKey,
-  companyName,
-}: {
-  notify: (message: string) => void;
-  addressesKey: string;
-  companyName: string;
-}) {
-  const [name, setName] = useState('');
-  const [addresses, setAddresses] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(addressesKey) ?? '["深圳南山发货仓"]') as string[];
-    } catch {
-      return ['深圳南山发货仓'];
-    }
-  });
-  return (
-    <>
-      <SectionHeader title="地址簿" description="地址仅在当前企业数据边界内复用。" />
-      <form
-        className="portal-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void customerPort
-            .saveAddress(name)
-            .then(() => {
-              setAddresses((items) => {
-                const next = [...items, name];
-                localStorage.setItem(addressesKey, JSON.stringify(next));
-                return next;
-              });
-              setName('');
-              notify('地址已保存。');
-            })
-            .catch((error: Error) => notify(error.message));
-        }}
-      >
-        <label>
-          地址名称
-          <input
-            aria-label="地址名称"
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            required
-          />
-        </label>
-        <Button type="submit">保存地址</Button>
-      </form>
-      <table className="portal-table" aria-label="地址列表">
-        <tbody>
-          {addresses.map((address) => (
-            <tr key={address}>
-              <td>{address}</td>
-              <td>{companyName}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </>
-  );
-}
-
 function PlaceholderPage({ page }: { page: Page }) {
   return (
     <>
@@ -1106,6 +673,7 @@ type CustomerPortalProps = {
   customerId?: string;
   companyName?: string;
   now?: () => number;
+  mockMode?: boolean;
 };
 
 function CustomerPortalApp({
@@ -1113,13 +681,15 @@ function CustomerPortalApp({
   customerId = 'customer-xinyuan',
   companyName = '深圳鑫源贸易有限公司',
   now = Date.now,
+  mockMode = import.meta.env.MODE === 'test' ||
+    (typeof window !== 'undefined' &&
+      new URLSearchParams(window.location.search).get('mock') === '1'),
 }: CustomerPortalProps) {
   const waybillsKey = storageKey(tenantId, customerId, 'waybills');
   const shortcutsKey = storageKey(tenantId, customerId, 'shortcuts');
   const draftKey = storageKey(tenantId, customerId, 'draft');
   const receiptKey = storageKey(tenantId, customerId, 'receipt');
   const addressesKey = storageKey(tenantId, customerId, 'addresses');
-  const paymentKey = storageKey(tenantId, customerId, 'payment');
   const ordersKey = storageKey(tenantId, customerId, 'orders');
   const [page, setPage] = useState<Page>('工作台');
   const [scenario, setScenario] = useState<Scenario>('normal');
@@ -1128,7 +698,6 @@ function CustomerPortalApp({
   const [recoveryMessage, setRecoveryMessage] = useState('');
   const [differences, setDifferences] = useState<VersionDifference[]>([]);
   const [recovering, setRecovering] = useState(false);
-  const [paymentOpen, setPaymentOpen] = useState(false);
   const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1137,14 +706,9 @@ function CustomerPortalApp({
   const searchResultsRef = useRef<HTMLDivElement>(null);
   const activeSearchOptionRef = useRef<HTMLButtonElement>(null);
   const [rows, setRows] = useState<WaybillRow[]>(() => readRows(waybillsKey));
-  const [paymentCreated, setPaymentCreated] = useState(
-    () => localStorage.getItem(paymentKey) === 'created'
-  );
   const [trackingNo, setTrackingNo] = useState('S2505120004');
+  const [draftSaved, setDraftSaved] = useState(() => localStorage.getItem(draftKey) === 'saved');
   useEffect(() => localStorage.setItem(waybillsKey, JSON.stringify(rows)), [rows, waybillsKey]);
-  useEffect(() => {
-    if (paymentCreated) localStorage.setItem(paymentKey, 'created');
-  }, [paymentCreated, paymentKey]);
   useEffect(() => {
     if (!searchOpen) return;
     const closeOnOutsidePointer = (event: PointerEvent) => {
@@ -1199,17 +763,6 @@ function CustomerPortalApp({
       context: '2026-05 · CNY 5,320.00 · 待付款 CNY 2,320.00',
       page: '账单与付款',
     },
-    ...(paymentCreated
-      ? [
-          {
-            id: 'payment-PAY-20260512-01',
-            type: '付款' as const,
-            label: 'PAY-20260512-01',
-            context: 'ST202605-0008 · 微信支付 · CNY 2,320.00 · 待支付',
-            page: '账单与付款' as const,
-          },
-        ]
-      : []),
     ...readStringList(addressesKey, ['深圳南山发货仓']).map((address, index): SearchResult => ({
       id: `address-${index}-${address}`,
       type: '地址',
@@ -1301,9 +854,15 @@ function CustomerPortalApp({
     );
   else if (page === '新建运单')
     content = (
-      <OrderPage
+      <ShipmentFlow
+        mockMode={mockMode}
         selectedQuote={selectedQuote}
-        draftKey={draftKey}
+        draftSaved={draftSaved}
+        now={now}
+        onDraftSaved={() => {
+          localStorage.setItem(draftKey, 'saved');
+          setDraftSaved(true);
+        }}
         onDraft={async (input) => {
           try {
             await customerPort.saveDraft(input);
@@ -1342,6 +901,7 @@ function CustomerPortalApp({
             setToast(`预报已提交：${order.orderNo}，仓库将等待收货。`);
           } catch (error) {
             setToast(error instanceof Error ? error.message : '预报提交失败。');
+            throw error;
           }
         }}
       />
@@ -1358,22 +918,46 @@ function CustomerPortalApp({
         }}
       />
     );
-  else if (page === '轨迹查询') content = <TrackingPage waybillNo={trackingNo} />;
+  else if (page === '轨迹查询')
+    content = <TrackingFlow waybillNo={trackingNo} notify={setToast} mockMode={mockMode} />;
   else if (page === '账单与付款')
     content = (
-      <FinancePage
-        requestPayment={() => setPaymentOpen(true)}
-        paymentCreated={paymentCreated}
+      <BillingFlow
         notify={setToast}
         receiptKey={receiptKey}
+        records={customerBillingRecords}
+        mockMode={mockMode}
       />
     );
-  else if (page === '问题工单') content = <TicketsPage notify={setToast} />;
-  else if (page === 'API') content = <ApiPage notify={setToast} />;
+  else if (page === '问题工单')
+    content = (
+      <ExceptionFlow
+        notify={setToast}
+        records={customerExceptionRecords}
+        storageKey={`${receiptKey}:exceptions`}
+        mockMode={mockMode}
+      />
+    );
+  else if (page === 'API')
+    content = (
+      <AccountFlow
+        key="api"
+        initialStep="api"
+        notify={setToast}
+        addressesKey={addressesKey}
+        companyName={companyName}
+      />
+    );
   else if (page === '批量导入') content = <ImportPage notify={setToast} />;
   else if (page === '地址簿')
     content = (
-      <AddressPage notify={setToast} addressesKey={addressesKey} companyName={companyName} />
+      <AccountFlow
+        key="address"
+        initialStep="address"
+        notify={setToast}
+        addressesKey={addressesKey}
+        companyName={companyName}
+      />
     );
   else content = <PlaceholderPage page={page} />;
 
@@ -1516,26 +1100,28 @@ function CustomerPortalApp({
               </div>
             ) : null}
           </form>
-          <label className="portal-scenario">
-            演示状态
-            <select
-              aria-label="演示状态"
-              value={scenario}
-              onChange={(event) => {
-                setScenario(event.target.value as Scenario);
-                setMobileNavigationOpen(false);
-                setSearchOpen(false);
-              }}
-            >
-              <option value="normal">正常</option>
-              <option value="loading">加载</option>
-              <option value="empty">空数据</option>
-              <option value="failed">失败</option>
-              <option value="forbidden">无权限</option>
-              <option value="stale">数据过期</option>
-              <option value="partial">部分成功</option>
-            </select>
-          </label>
+          {mockMode ? (
+            <label className="portal-scenario">
+              演示状态
+              <select
+                aria-label="演示状态"
+                value={scenario}
+                onChange={(event) => {
+                  setScenario(event.target.value as Scenario);
+                  setMobileNavigationOpen(false);
+                  setSearchOpen(false);
+                }}
+              >
+                <option value="normal">正常</option>
+                <option value="loading">加载</option>
+                <option value="empty">空数据</option>
+                <option value="failed">失败</option>
+                <option value="forbidden">无权限</option>
+                <option value="stale">数据过期</option>
+                <option value="partial">部分成功</option>
+              </select>
+            </label>
+          ) : null}
           <strong>{companyName}</strong>
         </header>
         <main>
@@ -1558,38 +1144,6 @@ function CustomerPortalApp({
           </button>
         </div>
       ) : null}
-      <Dialog
-        open={paymentOpen}
-        title="确认支付"
-        description="将创建微信支付订单。支付失败不会改变账单快照，可重新创建支付订单。"
-        footer={
-          <>
-            <Button variant="secondary" onClick={() => setPaymentOpen(false)}>
-              取消
-            </Button>
-            <Button
-              onClick={() =>
-                void customerPort
-                  .createPayment()
-                  .then((payment) => {
-                    setPaymentCreated(true);
-                    setPaymentOpen(false);
-                    setToast(`支付订单已创建：${payment.paymentOrderNo}，请在 15 分钟内完成。`);
-                  })
-                  .catch((error: Error) => setToast(error.message))
-              }
-            >
-              确认支付
-            </Button>
-          </>
-        }
-        onOpenChange={setPaymentOpen}
-      >
-        <div className="portal-danger">
-          <strong>CNY 2,320.00</strong>
-          <span>账单 ST202605-0008 · 仅核销本企业物流账单</span>
-        </div>
-      </Dialog>
       <Drawer
         open={mobileNavigationOpen}
         title="客户门户菜单"
@@ -1619,7 +1173,12 @@ function CustomerPortalApp({
       </Drawer>
       <nav className="portal-mobile-nav" aria-label="移动端导航" inert={mobileNavigationOpen}>
         {(['工作台', '新建运单', '我的运单', '账单与付款', '问题工单'] as Page[]).map((item) => (
-          <button key={item} disabled={scenario !== 'normal'} onClick={() => navigate(item)}>
+          <button
+            key={item}
+            aria-current={page === item ? 'page' : undefined}
+            disabled={scenario !== 'normal'}
+            onClick={() => navigate(item)}
+          >
             {item === '工作台'
               ? '首页'
               : item === '新建运单'

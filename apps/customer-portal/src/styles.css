@@ -866,3 +866,308 @@ textarea {
     left: 12px;
   }
 }
+
+.customer-workflow {
+  --workflow-accent: var(--zl-color-primary, #0f766e);
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.customer-workflow[data-tone='success'] {
+  --workflow-accent: #16803d;
+}
+.customer-workflow[data-tone='warning'] {
+  --workflow-accent: #d97706;
+}
+.customer-workflow[data-tone='danger'] {
+  --workflow-accent: #dc2626;
+}
+.customer-workflow[data-tone='info'] {
+  --workflow-accent: #2563eb;
+}
+.customer-workflow__heading {
+  display: grid;
+  gap: 4px;
+}
+.customer-workflow__heading small {
+  color: #0f766e;
+  font-size: 11px;
+  font-weight: 700;
+}
+.customer-workflow__heading h1,
+.customer-workflow__heading p,
+.customer-workflow__panel h2,
+.customer-workflow__summary h2 {
+  margin: 0;
+}
+.customer-workflow__heading h1 {
+  font-size: 24px;
+  line-height: 1.25;
+}
+.customer-workflow__heading p {
+  color: var(--zl-color-text-secondary);
+  font-size: 13px;
+}
+.customer-workflow__steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--zl-color-border);
+  border-radius: 10px;
+  background: #fff;
+  list-style: none;
+}
+.customer-workflow__steps li {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 30px;
+  padding: 5px 9px;
+  border-radius: 7px;
+  color: var(--zl-color-text-secondary);
+  background: var(--zl-color-page);
+  font-size: 12px;
+  font-weight: 600;
+}
+.customer-workflow__steps li[data-active='true'] {
+  color: #fff;
+  background: var(--workflow-accent);
+}
+.customer-workflow__steps li[data-done='true'] {
+  color: #0f766e;
+  background: var(--zl-color-teal-50);
+}
+.customer-workflow__workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 16px;
+  min-height: 380px;
+}
+.customer-workflow__panel,
+.customer-workflow__summary,
+.customer-workflow__actions {
+  min-width: 0;
+  border: 1px solid var(--zl-color-border);
+  border-radius: 12px;
+  background: #fff;
+}
+.customer-workflow__panel {
+  padding: 18px 20px;
+}
+.customer-workflow__panel > h2,
+.customer-workflow__summary h2 {
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+.customer-workflow__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+}
+.customer-workflow__summary > small {
+  margin-top: auto;
+  color: var(--zl-color-text-muted);
+}
+.customer-workflow__status {
+  display: block;
+  padding: 11px 12px;
+  border-radius: 8px;
+  color: #fff;
+  background: var(--workflow-accent);
+  font-size: 12px;
+}
+.customer-workflow__summary-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+.customer-workflow__summary-list div {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 10px;
+}
+.customer-workflow__summary-list dt {
+  color: var(--zl-color-text-muted);
+}
+.customer-workflow__summary-list dd {
+  margin: 0;
+  font-weight: 600;
+}
+.customer-workflow__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  min-height: 60px;
+  padding: 10px 12px;
+}
+.customer-workflow__form,
+.customer-workflow__quick-ticket {
+  display: grid;
+  gap: 12px;
+}
+.customer-workflow__form h3,
+.customer-workflow__quick-ticket h3 {
+  margin: 0;
+}
+.customer-workflow__field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.customer-workflow__form label,
+.customer-workflow__quick-ticket label,
+.customer-workflow__receipt label {
+  display: grid;
+  gap: 5px;
+  color: var(--zl-color-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+.customer-workflow__form input,
+.customer-workflow__form select,
+.customer-workflow__form textarea,
+.customer-workflow__quick-ticket textarea,
+.customer-workflow__receipt input {
+  width: 100%;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 1px solid var(--zl-color-border);
+  border-radius: 8px;
+  color: var(--zl-color-text);
+  background: var(--zl-color-page);
+}
+.customer-workflow__form textarea,
+.customer-workflow__quick-ticket textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+.customer-workflow__legacy-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+.customer-workflow__choice-list,
+.customer-workflow__timeline,
+.customer-workflow__result,
+.customer-account-addresses,
+.customer-billing-overview {
+  display: grid;
+  gap: 10px;
+}
+.customer-workflow__choice-list > button,
+.customer-workflow__choice-list > div,
+.customer-workflow__timeline > p,
+.customer-workflow__result,
+.customer-workflow__receipt {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 54px;
+  padding: 12px 14px;
+  border: 1px solid var(--zl-color-border);
+  border-radius: 8px;
+  color: var(--zl-color-text);
+  background: var(--zl-color-page);
+  text-align: left;
+}
+.customer-workflow__choice-list > button {
+  cursor: pointer;
+}
+.customer-workflow__choice-list > button[data-selected='true'] {
+  border-color: #0f766e;
+  box-shadow: 0 0 0 1px #0f766e;
+}
+.customer-workflow__choice-list span,
+.customer-workflow__timeline time {
+  color: var(--zl-color-text-muted);
+  font-size: 12px;
+}
+.customer-workflow__choice-list [data-danger='true'] {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.customer-workflow__success-message {
+  margin: 0;
+  color: #16803d;
+  font-weight: 700;
+}
+.customer-workflow__quick-ticket {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--zl-color-border);
+}
+.customer-workflow__receipt {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+.customer-workflow__receipt p {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.customer-billing-overview .portal-balance {
+  margin-bottom: 0;
+}
+
+@media (max-width: 900px) {
+  .customer-workflow {
+    gap: 12px;
+  }
+  .customer-workflow__heading h1 {
+    font-size: 22px;
+  }
+  .customer-workflow__steps {
+    display: block;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .customer-workflow__steps li {
+    display: none;
+  }
+  .customer-workflow__steps li[data-active='true'] {
+    display: flex;
+    justify-content: flex-start;
+    min-height: 32px;
+    padding-inline: 12px;
+  }
+  .customer-workflow__workspace {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .customer-workflow__panel {
+    min-height: 360px;
+    padding: 14px;
+  }
+  .customer-workflow__summary {
+    min-height: 70px;
+    padding: 10px 12px;
+  }
+  .customer-workflow__summary h2,
+  .customer-workflow__summary-list,
+  .customer-workflow__summary > small {
+    display: none;
+  }
+  .customer-workflow__actions {
+    position: sticky;
+    bottom: 58px;
+    z-index: 2;
+  }
+  .customer-workflow__actions > * {
+    flex: 1;
+  }
+  .customer-workflow__field-grid,
+  .customer-workflow__quick-ticket,
+  .customer-workflow__receipt {
+    grid-template-columns: 1fr;
+  }
+  .customer-workflow__legacy-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}

@@ -40,7 +40,7 @@ async function expectNoSeriousAxeViolations(page: import('@playwright/test').Pag
 }
 
 test('客户门户只呈现当前企业数据边界', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?mock=1');
   await expect(page.getByText('深圳鑫源贸易有限公司').first()).toBeVisible();
   await expect(page.getByText('华南跨境供应链')).toHaveCount(0);
   await page.screenshot({
@@ -52,17 +52,17 @@ test('客户门户只呈现当前企业数据边界', async ({ page }) => {
     'data-active',
     'true'
   );
-  await expect(page.getByRole('table', { name: '最近账单' })).toContainText('ST202605-0008');
+  await expect(page.getByRole('table', { name: '最近账单' })).toContainText('INV-202607-018');
   await expect(page.getByRole('table', { name: '付款记录' })).not.toContainText('PAY-20260512-01');
-  await page.getByRole('button', { name: '支付 ST202605-0008' }).click();
-  await expect(page.getByRole('dialog', { name: '确认支付' })).toContainText('CNY 2,320.00');
-  await page.getByRole('button', { name: '确认支付' }).click();
-  await expect(page.getByRole('status')).toContainText('支付订单已创建');
+  await page.getByRole('button', { name: '查看账单 INV-202607-018' }).click();
+  await page.getByRole('button', { name: '立即支付' }).click();
+  await page.getByRole('button', { name: '确认付款' }).click();
+  await expect(page.getByRole('heading', { name: '支付订单已创建' })).toBeVisible();
   await page.screenshot({ path: 'artifacts/e2e/f1c/customer-1440x900.png', fullPage: true });
 });
 
 test('客户从查价进入新建运单并查看租户内轨迹', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?mock=1');
   await page.getByRole('button', { name: '立即查价', exact: true }).click();
   await page.getByLabel('目的地邮编').fill('90001');
   await page.getByRole('button', { name: '获取报价' }).click();
@@ -84,7 +84,7 @@ test('客户从查价进入新建运单并查看租户内轨迹', async ({ page 
 });
 
 test('客户过期报价被阻止且陈旧快照展示服务端版本差异', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?mock=1');
   await page.getByRole('button', { name: '立即查价', exact: true }).click();
   await page.getByLabel('目的地邮编').fill('EXPIRED');
   await page.getByRole('button', { name: '获取报价' }).click();
@@ -105,7 +105,7 @@ test('客户过期报价被阻止且陈旧快照展示服务端版本差异', as
 
 test('客户门户 390px 完整抽屉导航可达且管理焦点和 aria 状态', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/?mock=1');
   const width = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth,
     client: document.documentElement.clientWidth,
@@ -136,7 +136,7 @@ test('客户门户 390px 完整抽屉导航可达且管理焦点和 aria 状态'
     ['查价', '多渠道查价'],
     ['轨迹查询', '运单轨迹'],
     ['地址簿', '地址簿'],
-    ['API', 'API 申请'],
+    ['API', '申请物流 API 权限'],
   ] as const) {
     await menuTrigger.click();
     await drawerNavigation.getByRole('button', { name: destination, exact: true }).click();
@@ -152,7 +152,7 @@ test('客户门户 390px 完整抽屉导航可达且管理焦点和 aria 状态'
 
 test('客户门户全局搜索在移动端打开 canonical 运单并通过 axe', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/?mock=1');
   const search = page.getByRole('combobox', { name: '全局搜索' });
   await expect(search).toBeVisible();
   await search.fill('S2505120004');
@@ -163,13 +163,13 @@ test('客户门户全局搜索在移动端打开 canonical 运单并通过 axe',
   await expectNoSeriousAxeViolations(page);
   await results.getByRole('option', { name: /运单 S2505120004/ }).click();
   await expect(page.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
-  await expect(page.getByText('S2505120004')).toBeVisible();
+  await expect(page.getByText('S2505120004', { exact: true })).toBeVisible();
   await expect(search).toBeFocused();
 });
 
 test('客户门户全局搜索键盘虚拟焦点始终滚入长列表可视区', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/?mock=1');
   const search = page.getByRole('combobox', { name: '全局搜索' });
   await search.fill('页面');
   const results = page.getByRole('listbox', { name: '全局搜索结果' });
@@ -232,7 +232,7 @@ test('客户门户全局搜索键盘虚拟焦点始终滚入长列表可视区',
 
 test('客户门户全局搜索支持键盘选择和零结果关闭', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/?mock=1');
   const search = page.getByRole('combobox', { name: '全局搜索' });
   await search.fill('S250512000');
   const results = page.getByRole('listbox', { name: '全局搜索结果' });
@@ -267,7 +267,7 @@ test('客户门户全局搜索支持键盘选择和零结果关闭', async ({ pa
   await search.press('ArrowDown');
   await search.press('Enter');
   await expect(page.getByRole('heading', { name: '运单轨迹' })).toBeVisible();
-  await expect(page.getByText('S2505120002')).toBeVisible();
+  await expect(page.getByText('S2505120002', { exact: true })).toBeVisible();
   await expect(search).toBeFocused();
 
   await search.fill('Q2505120042');

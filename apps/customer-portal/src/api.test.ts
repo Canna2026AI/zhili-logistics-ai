@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { validatePreconditionFailed } from '../../../packages/contracts/test/precondition-schema.js';
-import { customerMockFetch } from './api';
+import { createCustomerCommandTransport, customerMockFetch } from './api';
+import { createCustomerUploadTransport } from './api';
 
 const contract = readFileSync(
   resolve(import.meta.dirname, '../../../packages/contracts/openapi/zhili.openapi.yaml'),
@@ -238,5 +239,152 @@ describe('customer mock OpenAPI conformance', () => {
       )
     );
     expect(response.status).toBe(422);
+  });
+});
+
+describe('customer app-local command transport', () => {
+  it.each([409, 412])(
+    'maps a real HTTP %i problem and preserves the caller Idempotency-Key',
+    async (status) => {
+      const productionFetch = vi.fn<typeof fetch>(
+        async () =>
+          new Response(
+            JSON.stringify({
+              code: status === 409 ? 'CONFLICT' : 'STALE_VERSION',
+              message: '服务端版本已更新',
+              remediation: '刷新后重试',
+            }),
+            {
+              status,
+              headers: { 'content-type': 'application/problem+json' },
+            }
+          )
+      );
+      const command = createCustomerCommandTransport('', 'production', productionFetch) as <
+        TRequest extends Record<string, unknown>,
+        TResponse,
+      >(
+        path: string,
+        body: TRequest,
+        idempotencyKey?: string
+      ) => Promise<TResponse>;
+
+      await expect(
+        command('/api/v1/portal/receipts/receipt-1:refresh', { localVersion: 7 }, 'f1c-stable')
+      ).rejects.toMatchObject({
+        name: 'CustomerApiError',
+        status,
+        code: status === 409 ? 'CONFLICT' : 'STALE_VERSION',
+        remediation: '刷新后重试',
+      });
+      expect(productionFetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+        'Idempotency-Key': 'f1c-stable',
+      });
+    }
+  );
+
+  it('replays a lost command response with the exact same Idempotency-Key header', async () => {
+    const productionFetch = vi
+      .fn<typeof fetch>()
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { id: 'same-intent', status: 'PENDING' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      );
+    const command = createCustomerCommandTransport('', 'production', productionFetch) as <
+      TRequest extends Record<string, unknown>,
+      TResponse,
+    >(
+      path: string,
+      body: TRequest,
+      idempotencyKey?: string
+    ) => Promise<TResponse>;
+
+    await expect(
+      command('/api/v1/portal/payment-intents', { amount: '68420.00' }, 'f1c-lost-response')
+    ).rejects.toThrow('Failed to fetch');
+    await expect(
+      command('/api/v1/portal/payment-intents', { amount: '68420.00' }, 'f1c-lost-response')
+    ).resolves.toEqual({ id: 'same-intent', status: 'PENDING' });
+
+    expect(
+      productionFetch.mock.calls.map(
+        (call) => (call[1]?.headers as Record<string, string>)['Idempotency-Key']
+      )
+    ).toEqual(['f1c-lost-response', 'f1c-lost-response']);
+  });
+
+  it('uses real same-origin HTTP outside explicit mock mode', async () => {
+    const productionFetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ resourceId: 'cmd-real', status: 'SUCCEEDED', version: 7 }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+    );
+    const command = createCustomerCommandTransport('', 'production', productionFetch);
+
+    await expect(
+      command('/api/v1/portal/payment-vouchers', { fileName: 'proof.pdf' })
+    ).resolves.toEqual({ resourceId: 'cmd-real', status: 'SUCCEEDED', version: 7 });
+    expect(productionFetch).toHaveBeenCalledWith(
+      '/api/v1/portal/payment-vouchers',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        headers: expect.objectContaining({ 'content-type': 'application/json' }),
+      })
+    );
+  });
+
+  it('keeps the deterministic app-local mock behind mock=1 only', async () => {
+    const productionFetch = vi.fn();
+    const command = createCustomerCommandTransport('?mock=1', 'production', productionFetch);
+
+    await expect(
+      command('/api/v1/portal/preferences/shortcuts', { shortcuts: ['工作台'] })
+    ).resolves.toMatchObject({ status: 'SUCCEEDED' });
+    expect(productionFetch).not.toHaveBeenCalled();
+  });
+
+  it('uploads real evidence bytes as multipart without forcing a JSON content type', async () => {
+    const productionFetch = vi.fn(async (_path: string | URL | Request, init?: RequestInit) => {
+      const form = init?.body as FormData;
+      const file = form.get('file') as File;
+      expect(await file.text()).toBe('real-gate-bytes');
+      return new Response(
+        JSON.stringify({
+          issueId: 'issue-1',
+          status: 'SUCCEEDED',
+          version: 2,
+          failedNotificationIds: [],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    });
+    const upload = createCustomerUploadTransport('', 'production', productionFetch) as <TResponse>(
+      path: string,
+      form: FormData,
+      idempotencyKey?: string
+    ) => Promise<TResponse>;
+    const form = new FormData();
+    form.set('file', new File(['real-gate-bytes'], 'gate.jpg', { type: 'image/jpeg' }));
+    form.set('contact', '李楠');
+
+    await upload('/api/v1/portal/issues/issue-1/materials', form, 'f1c-evidence-retry');
+
+    expect(productionFetch).toHaveBeenCalledWith(
+      '/api/v1/portal/issues/issue-1/materials',
+      expect.objectContaining({
+        method: 'POST',
+        credentials: 'include',
+        body: form,
+      })
+    );
+    const headers = productionFetch.mock.calls[0]?.[1]?.headers as Record<string, string>;
+    expect(headers['content-type']).toBeUndefined();
+    expect(headers['Idempotency-Key']).toBe('f1c-evidence-retry');
   });
 });

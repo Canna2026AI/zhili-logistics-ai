@@ -104,6 +104,18 @@ export type VersionDifference = {
   server: string;
 };
 
+export type ReceiptAllocationSnapshot = {
+  receiptId: string;
+  version: number;
+  total: string;
+  allocated: string;
+  unapplied: string;
+  matchedCount: number;
+  updatedAt: string;
+  updatedBy: string;
+  pendingItems: Array<{ reference: string; reason: string; amount: string }>;
+};
+
 export const customerMockFetch: typeof fetch = async (input) => {
   const request = input instanceof Request ? input : new Request(input);
   const path = new URL(request.url).pathname;
@@ -229,7 +241,10 @@ export const customerMockFetch: typeof fetch = async (input) => {
       orderVersion
     );
   }
-  if (path.endsWith('/payments/statement-orders'))
+  if (path.endsWith('/payments/statement-orders')) {
+    const body = (await request.clone().json()) as {
+      amount?: { amount?: string; currency?: string };
+    };
     return json(
       {
         data: {
@@ -237,7 +252,10 @@ export const customerMockFetch: typeof fetch = async (input) => {
           paymentOrderNo: 'PAY-20260512-01',
           purpose: 'STATEMENT',
           status: 'PENDING',
-          amount: { amount: '2320.00', currency: 'CNY' },
+          amount: {
+            amount: body.amount?.amount ?? '2320.00',
+            currency: body.amount?.currency ?? 'CNY',
+          },
           paidAmount: { amount: '0.00', currency: 'CNY' },
           refundedAmount: { amount: '0.00', currency: 'CNY' },
           version: 1,
@@ -245,6 +263,26 @@ export const customerMockFetch: typeof fetch = async (input) => {
         meta,
       },
       201
+    );
+  }
+  const paymentOrder = path.match(/\/payments\/([^/]+)$/);
+  if (paymentOrder && request.method === 'GET')
+    return json(
+      {
+        data: {
+          id: paymentOrder[1],
+          paymentOrderNo: 'PAY-20260512-01',
+          purpose: 'STATEMENT',
+          status: 'SUCCEEDED',
+          amount: { amount: '68420.00', currency: 'CNY' },
+          paidAmount: { amount: '68420.00', currency: 'CNY' },
+          refundedAmount: { amount: '0.00', currency: 'CNY' },
+          version: 2,
+        },
+        meta,
+      },
+      200,
+      2
     );
   if (path.endsWith('/imports'))
     return json(
@@ -266,7 +304,7 @@ export const customerMockFetch: typeof fetch = async (input) => {
       {
         data: {
           id: '01JISSUE00000000000000001',
-          issueNo: 'T250512009',
+          issueNo: 'TKT-20260723-086',
           status: 'OPEN',
           visibility: 'CUSTOMER',
           version: 1,
@@ -276,6 +314,47 @@ export const customerMockFetch: typeof fetch = async (input) => {
       201,
       1
     );
+  const resolvedIssue = path.match(/\/issues\/([^/]+):resolve$/);
+  if (resolvedIssue) {
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
+    const version = precondition.version + 1;
+    return json(
+      {
+        data: {
+          id: resolvedIssue[1],
+          issueNo: 'TKT-20260723-086',
+          status: 'RESOLVED',
+          visibility: 'CUSTOMER',
+          version,
+        },
+        meta,
+      },
+      200,
+      version
+    );
+  }
+  const allocatedReceipt = path.match(/\/finance\/receipts\/([^/]+):allocate$/);
+  if (allocatedReceipt) {
+    const precondition = readStrongIfMatch(request);
+    if (!precondition.ok) return precondition.response;
+    const version = precondition.version + 1;
+    return json(
+      {
+        data: {
+          id: allocatedReceipt[1],
+          total: { amount: '68420.00', currency: 'CNY' },
+          allocated: { amount: '68420.00', currency: 'CNY' },
+          unapplied: { amount: '0.00', currency: 'CNY' },
+          refunded: { amount: '0.00', currency: 'CNY' },
+          version,
+        },
+        meta,
+      },
+      200,
+      version
+    );
+  }
   const customerAddress = path.match(/\/customers\/[^/]+\/addresses:upsert$/);
   if (customerAddress) {
     const body = (await request.clone().json()) as { mode?: 'CREATE' | 'UPDATE' };
@@ -339,12 +418,51 @@ const mockCustomerCommandFetch = async (
 ): Promise<LocalCommandResponse> => {
   if (path === '/api/v1/portal/payment-vouchers' || path === '/api/v1/portal/preferences/shortcuts')
     return { resourceId: '01JPORTALCOMMAND0000000001', status: 'SUCCEEDED', version: 1 };
+  if (/^\/api\/v1\/portal\/issues\/[^/]+\/materials$/.test(path))
+    return {
+      issueId: path.split('/')[5],
+      status: 'PARTIAL',
+      version: 2,
+      failedNotificationIds: ['notification-sms'],
+    };
   if (path === '/api/v1/portal/dashboard:compare')
     return {
       serverVersion: 'v13',
       differences: [{ field: 'snapshotAt', local: '10:18', server: '10:21' }],
     };
   if (path === '/api/v1/portal/dashboard:refresh') return { version: 'v13', refreshedAt: '10:21' };
+  const receiptSnapshot = path.match(/^\/api\/v1\/portal\/receipts\/([^/]+):snapshot$/);
+  if (receiptSnapshot)
+    return {
+      receiptId: receiptSnapshot[1],
+      version: 1,
+      total: '68420.00',
+      allocated: '67820.00',
+      unapplied: '600.00',
+      matchedCount: 116,
+      updatedAt: '2026-07-23T14:51:02.000Z',
+      updatedBy: '支付对账服务',
+      pendingItems: [
+        { reference: 'SHP-20260708-141', reason: '缺少回单', amount: '320.00' },
+        { reference: 'SHP-20260709-208', reason: '费用争议', amount: '280.00' },
+      ],
+    };
+  const refreshedReceipt = path.match(/^\/api\/v1\/portal\/receipts\/([^/]+):refresh$/);
+  if (refreshedReceipt)
+    return {
+      receiptId: refreshedReceipt[1],
+      version: 2,
+      total: '68420.00',
+      allocated: '67820.00',
+      unapplied: '600.00',
+      matchedCount: 116,
+      updatedAt: '2026-07-23T14:52:18.000Z',
+      updatedBy: '陈思',
+      pendingItems: [
+        { reference: 'SHP-20260708-141', reason: '缺少回单', amount: '320.00' },
+        { reference: 'SHP-20260709-208', reason: '费用争议', amount: '280.00' },
+      ],
+    };
   if (path === '/api/v1/portal/notifications:retry-failed') {
     const itemIds = body.itemIds as string[];
     return { items: itemIds.map((id) => ({ id, status: 'SUCCEEDED' })) };
@@ -352,18 +470,133 @@ const mockCustomerCommandFetch = async (
   throw new Error(`未实现的客户门户命令：${path}`);
 };
 
-async function localCommand<TRequest extends Record<string, unknown>, TResponse>(
-  path: string,
-  body: TRequest
-): Promise<TResponse> {
-  return (await mockCustomerCommandFetch(path, body)) as TResponse;
+export function resolveCustomerTransport(
+  search: string,
+  mode: string = import.meta.env.MODE
+): typeof fetch | undefined {
+  if (mode === 'test' || new URLSearchParams(search).get('mock') === '1') {
+    return customerMockFetch;
+  }
+  return undefined;
 }
 
-const client = createZhiliClient({ baseUrl: 'http://localhost/api/v1', fetch: customerMockFetch });
-const key = () => `f1c-${crypto.randomUUID?.() ?? Date.now()}`;
+export const createCustomerIdempotencyKey = () =>
+  `f1c-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+const key = createCustomerIdempotencyKey;
 
-function ensure<T>(data: T | undefined, error: unknown): T {
-  if (!data || error) throw new Error('业务服务暂时不可用，请保留输入后重试。');
+export function createCustomerCommandTransport(
+  search: string,
+  mode: string = import.meta.env.MODE,
+  productionFetch: typeof fetch = globalThis.fetch
+) {
+  const useMock = mode === 'test' || new URLSearchParams(search).get('mock') === '1';
+  return async <TRequest extends Record<string, unknown>, TResponse>(
+    path: string,
+    body: TRequest,
+    idempotencyKey = key()
+  ): Promise<TResponse> => {
+    if (useMock) return (await mockCustomerCommandFetch(path, body)) as TResponse;
+    const response = await productionFetch(path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'content-type': 'application/json',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      const problem = (await response.json().catch(() => ({}))) as {
+        code?: string;
+        message?: string;
+        remediation?: string;
+      };
+      throw new CustomerApiError(
+        response.status,
+        problem.code ?? 'CUSTOMER_COMMAND_FAILED',
+        problem.message ?? `客户门户命令失败（HTTP ${response.status}）`,
+        problem.remediation
+      );
+    }
+    if (response.status === 204) return {} as TResponse;
+    const payload = (await response.json()) as TResponse | { data: TResponse };
+    return payload && typeof payload === 'object' && 'data' in payload ? payload.data : payload;
+  };
+}
+
+export function createCustomerUploadTransport(
+  search: string,
+  mode: string = import.meta.env.MODE,
+  productionFetch: typeof fetch = globalThis.fetch
+) {
+  const useMock = mode === 'test' || new URLSearchParams(search).get('mock') === '1';
+  return async <TResponse>(
+    path: string,
+    form: FormData,
+    idempotencyKey = key()
+  ): Promise<TResponse> => {
+    if (useMock) {
+      return (await mockCustomerCommandFetch(path, {
+        fileName: (form.get('file') as File | null)?.name ?? '',
+        contact: String(form.get('contact') ?? ''),
+        note: String(form.get('note') ?? ''),
+      })) as TResponse;
+    }
+    const response = await productionFetch(path, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: form,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const problem = payload as { code?: string; message?: string; remediation?: string };
+      throw new CustomerApiError(
+        response.status,
+        problem.code ?? 'EVIDENCE_UPLOAD_FAILED',
+        problem.message ?? `异常资料上传失败（HTTP ${response.status}）`,
+        problem.remediation
+      );
+    }
+    return (
+      payload && typeof payload === 'object' && 'data' in payload
+        ? (payload as { data: TResponse }).data
+        : payload
+    ) as TResponse;
+  };
+}
+
+const runtimeSearch = typeof window === 'undefined' ? '' : window.location.search;
+const runtimeTransport = resolveCustomerTransport(runtimeSearch);
+const customerCommand = createCustomerCommandTransport(runtimeSearch);
+const customerUpload = createCustomerUploadTransport(runtimeSearch);
+const client = createZhiliClient({
+  baseUrl: import.meta.env.MODE === 'test' ? 'http://localhost/api/v1' : '/api/v1',
+  ...(runtimeTransport ? { fetch: runtimeTransport } : {}),
+});
+
+export class CustomerApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string,
+    message: string,
+    readonly remediation?: string
+  ) {
+    super(message);
+    this.name = 'CustomerApiError';
+  }
+}
+
+function ensure<T>(data: T | undefined, error: unknown, response?: Response): T {
+  if (!data || error) {
+    const problem = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
+    throw new CustomerApiError(
+      response?.status ?? 0,
+      String(problem.code ?? 'CUSTOMER_API_FAILED'),
+      String(problem.message ?? '业务服务暂时不可用，请保留输入后重试。'),
+      typeof problem.remediation === 'string' ? problem.remediation : undefined
+    );
+  }
   return data;
 }
 
@@ -516,18 +749,68 @@ export const customerPort = {
       });
     return order;
   },
-  async createPayment() {
+  async createPayment(
+    input: {
+      customerId: string;
+      statementId: string;
+      statementVersion: number;
+      amount: string;
+      currency: 'CNY';
+    } = {
+      customerId: '01JCUSTOMER000000000000001',
+      statementId: '01JSTATEMENT00000000000001',
+      statementVersion: 1,
+      amount: '2320.00',
+      currency: 'CNY',
+    },
+    idempotencyKey = key()
+  ) {
     const response = await client.POST('/payments/statement-orders', {
-      params: { header: { 'Idempotency-Key': key() } },
+      params: { header: { 'Idempotency-Key': idempotencyKey } },
       body: {
-        customerId: '01JCUSTOMER000000000000001',
-        statementId: '01JSTATEMENT00000000000001',
-        statementVersion: 1,
-        amount: { amount: '2320.00', currency: 'CNY' },
+        customerId: input.customerId,
+        statementId: input.statementId,
+        statementVersion: input.statementVersion,
+        amount: { amount: input.amount, currency: input.currency },
         paymentMethod: 'WECHAT_PAY',
       },
     });
+    return ensure(response.data, response.error, response.response).data;
+  },
+  async getPaymentOrder(paymentOrderId: string) {
+    const response = await client.GET('/payments/{paymentOrderId}', {
+      params: { path: { paymentOrderId } },
+    });
     return ensure(response.data, response.error).data;
+  },
+  async allocateReceipt(
+    receiptId: string,
+    version: number,
+    statementId: string,
+    amount: string,
+    idempotencyKey = key()
+  ) {
+    const response = await client.POST('/finance/receipts/{receiptId}:allocate', {
+      params: {
+        path: { receiptId },
+        header: { 'Idempotency-Key': idempotencyKey, 'If-Match': `"${version}"` },
+      },
+      body: { allocations: [{ statementId, amount: { amount, currency: 'CNY' } }] },
+    });
+    return ensure(response.data, response.error, response.response).data;
+  },
+  getReceiptAllocation(receiptId: string) {
+    return customerCommand<Record<string, never>, ReceiptAllocationSnapshot>(
+      `/api/v1/portal/receipts/${receiptId}:snapshot`,
+      {}
+    );
+  },
+  refreshReceiptAllocation(receiptId: string, localVersion: number, idempotencyKey = key()) {
+    return customerCommand<{ localVersion: number }, ReceiptAllocationSnapshot>(
+      `/api/v1/portal/receipts/${receiptId}:refresh`,
+      { localVersion },
+      idempotencyKey
+    );
   },
   async createImport(fileName: string) {
     const response = await client.POST('/imports', {
@@ -549,11 +832,27 @@ export const customerPort = {
     });
     ensure(response.data, response.error);
   },
-  async uploadReceipt(fileName: string) {
-    await localCommand('/api/v1/portal/payment-vouchers', {
-      fileName,
-      statementNo: 'ST202605-0008',
-    });
+  async uploadReceipt(file: File, statementNo: string, idempotencyKey = key()) {
+    const form = new FormData();
+    form.set('file', file, file.name);
+    form.set('statementNo', statementNo);
+    await customerUpload('/api/v1/portal/payment-vouchers', form, idempotencyKey);
+  },
+  submitIssueEvidence(
+    issueId: string,
+    input: { file: File; contact: string; note: string },
+    idempotencyKey = key()
+  ) {
+    const form = new FormData();
+    form.set('file', input.file, input.file.name);
+    form.set('contact', input.contact);
+    form.set('note', input.note);
+    return customerUpload<{
+      issueId: string;
+      status: 'PARTIAL' | 'SUCCEEDED';
+      version: number;
+      failedNotificationIds: string[];
+    }>(`/api/v1/portal/issues/${issueId}/materials`, form, idempotencyKey);
   },
   async createTicket(title: string) {
     const response = await client.POST('/issues', {
@@ -565,6 +864,16 @@ export const customerPort = {
         visibility: 'CUSTOMER',
         priority: 'NORMAL',
       },
+    });
+    return ensure(response.data, response.error).data;
+  },
+  async resolveIssue(issueId: string, version: number, reason: string) {
+    const response = await client.POST('/issues/{issueId}:resolve', {
+      params: {
+        path: { issueId },
+        header: { 'Idempotency-Key': key(), 'If-Match': `"${version}"` },
+      },
+      body: { resolutionCode: 'CUSTOMER_CONFIRMED_RESOLVED', reason },
     });
     return ensure(response.data, response.error).data;
   },
@@ -614,24 +923,24 @@ export const customerPort = {
     ensure(response.data, response.error);
   },
   async saveShortcuts(shortcuts: string[]) {
-    await localCommand('/api/v1/portal/preferences/shortcuts', { shortcuts });
+    await customerCommand('/api/v1/portal/preferences/shortcuts', { shortcuts });
   },
   compareDashboard(localVersion: string) {
-    return localCommand<
+    return customerCommand<
       { localVersion: string },
       { serverVersion: string; differences: VersionDifference[] }
     >('/api/v1/portal/dashboard:compare', { localVersion });
   },
   refreshDashboard(serverVersion = 'v13') {
-    return localCommand<{ serverVersion: string }, { version: string; refreshedAt: string }>(
+    return customerCommand<{ serverVersion: string }, { version: string; refreshedAt: string }>(
       '/api/v1/portal/dashboard:refresh',
       { serverVersion }
     );
   },
-  retryFailedNotifications(itemIds: string[]) {
-    return localCommand<
+  retryFailedNotifications(itemIds: string[], idempotencyKey = key()) {
+    return customerCommand<
       { itemIds: string[] },
       { items: Array<{ id: string; status: 'SUCCEEDED' }> }
-    >('/api/v1/portal/notifications:retry-failed', { itemIds });
+    >('/api/v1/portal/notifications:retry-failed', { itemIds }, idempotencyKey);
   },
 };
