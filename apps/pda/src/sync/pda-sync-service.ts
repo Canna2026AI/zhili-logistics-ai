@@ -3,6 +3,8 @@ import type { MediaQueue } from '../offline/media-queue';
 import type { PdaPort } from '../ports/pda-port';
 import { deviceTaskCacheKey } from '../tasks/task-cache';
 import type { ConflictResolution, DeviceContext, DeviceTask, SyncResult } from '../domain/types';
+import type { QueuedEvent } from '../domain/types';
+import { isFutureInstant } from '../domain/time';
 import { PdaApiError } from '../ports/pda-port';
 
 type ActiveSyncContext = DeviceContext & { expiresAt: string; permissions: string[] };
@@ -51,6 +53,30 @@ function assertTaskSnapshot(tasks: DeviceTask[]) {
   }
 }
 
+function assertConflictSnapshot(
+  event: QueuedEvent,
+  snapshot: Awaited<ReturnType<PdaPort['getDeviceConflict']>>
+) {
+  const conflict = event.conflict;
+  const local = snapshot.conflict.localEvent;
+  if (
+    !conflict ||
+    snapshot.conflict.id !== conflict.conflictId ||
+    local.eventId !== event.envelope.eventId ||
+    local.deviceId !== event.envelope.deviceId ||
+    local.tenantId !== event.envelope.tenantId ||
+    local.warehouseId !== event.envelope.warehouseId ||
+    local.subjectId !== event.envelope.subjectId ||
+    snapshot.conflict.status !== 'OPEN' ||
+    !Number.isSafeInteger(snapshot.conflict.serverVersion) ||
+    snapshot.conflict.serverVersion < conflict.serverVersion ||
+    !Number.isSafeInteger(snapshot.conflict.version) ||
+    snapshot.conflict.version < conflict.version
+  ) {
+    throw new Error('服务器冲突快照与本地 conflict / event / scope 不一致或版本已回退。');
+  }
+}
+
 export class PdaSyncService {
   constructor(
     private readonly queue: OfflineQueue,
@@ -63,8 +89,7 @@ export class PdaSyncService {
   }
 
   async synchronize(context: ActiveSyncContext) {
-    if (new Date(context.expiresAt).getTime() <= Date.now())
-      throw new Error('会话已过期，禁止同步。');
+    if (!isFutureInstant(context.expiresAt)) throw new Error('会话已过期，禁止同步。');
     if (!context.permissions.includes('pda.sync'))
       throw new Error('缺少 pda.sync 权限，禁止同步。');
     this.queue.assertContext(context);
@@ -249,6 +274,7 @@ export class PdaSyncService {
       .events.find((candidate) => candidate.envelope.eventId === eventId);
     if (!event?.conflict) throw new Error('冲突已更新或不存在，请刷新队列。');
     const snapshot = await this.port.getDeviceConflict(event.conflict.conflictId);
+    assertConflictSnapshot(event, snapshot);
     await this.queue.updateConflictSnapshot(eventId, {
       serverVersion: snapshot.conflict.serverVersion,
       serverState: snapshot.conflict.serverState,

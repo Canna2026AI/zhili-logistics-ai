@@ -377,13 +377,14 @@ export class MemoryPdaPort implements PdaPort {
         };
       }
       if (event.entityRef.toUpperCase().includes('CONFLICT')) {
-        this.conflictEvents.set('01JCONFLICT000000000000001', event);
+        const conflictId = event.eventId;
+        this.conflictEvents.set(conflictId, event);
         return {
           eventId: event.eventId,
           disposition: 'CONFLICT' as const,
           claimedMediaRefs: [],
           serverVersion: 9,
-          conflictId: '01JCONFLICT000000000000001',
+          conflictId,
           conflictVersion: 1,
         };
       }

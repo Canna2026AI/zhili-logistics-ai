@@ -276,6 +276,18 @@ describe('PDA application', () => {
       },
     ]);
     const port = new MemoryPdaPort();
+    const readConflict = port.getDeviceConflict.bind(port);
+    port.getDeviceConflict = async (conflictId) => {
+      const snapshot = await readConflict(conflictId);
+      return {
+        ...snapshot,
+        conflict: {
+          ...snapshot.conflict,
+          id: conflictId,
+          localEvent: event.envelope,
+        },
+      };
+    };
     render(<App store={store} port={port} />);
     await screen.findByRole('heading', { name: '任务首页' });
     await userEvent.click(screen.getByRole('button', { name: '离线' }));

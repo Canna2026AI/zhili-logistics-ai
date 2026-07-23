@@ -204,6 +204,48 @@ describe('LastMileService', () => {
     expect(service.snapshot()).toMatchObject({ status: 'OUT_FOR_DELIVERY', version: 8 });
   });
 
+  it('rejects a POD receipt without an immutable proof identity', async () => {
+    const port = new MemoryPdaPort();
+    port.captureProofOfDelivery = vi.fn().mockResolvedValue({
+      deviceEventId: eventId,
+      disposition: 'APPLIED',
+      deliveryTask: {
+        id: taskId,
+        taskNo: 'LM250722001',
+        status: 'COMPLETED',
+        waybillCount: 1,
+        version: 9,
+      },
+      proofOfDelivery: {
+        id: '   ',
+        deliveryTaskId: taskId,
+        versionNo: 1,
+        recipientName: '陈女士',
+        signedAt: '2026-07-22T10:00:00.000Z',
+        evidenceRefs: ['media-pod'],
+      },
+      claimedMediaRefs: ['media-pod'],
+    });
+    const service = new LastMileService(port, {
+      taskId,
+      status: 'OUT_FOR_DELIVERY',
+      version: 8,
+    });
+
+    await expect(
+      service.capturePod(
+        {
+          deviceEventId: eventId,
+          recipientName: '陈女士',
+          signedAt: '2026-07-22T10:00:00.000Z',
+          evidenceRefs: ['media-pod'],
+        },
+        [{ mediaId: 'media-pod', status: 'READY' }]
+      )
+    ).rejects.toThrow('回执');
+    expect(service.snapshot()).toMatchObject({ status: 'OUT_FOR_DELIVERY', version: 8 });
+  });
+
   it('rejects illegal delivery and incomplete POD intents before calling the port', async () => {
     const port = new MemoryPdaPort();
     const transition = vi.spyOn(port, 'updateDeliveryTaskStatus');

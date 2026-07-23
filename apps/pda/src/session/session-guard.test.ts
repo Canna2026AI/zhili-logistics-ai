@@ -43,6 +43,17 @@ describe('SessionGuard', () => {
     expect(() => guard.assertAllowed('NEW_BUSINESS_EVENT')).toThrow(SessionExpiredError);
   });
 
+  it('fails closed when a restored session expiry is not a valid instant', async () => {
+    const queue = new OfflineQueue(new MemoryQueueStore());
+    await queue.restore();
+    const guard = new SessionGuard(queue, () => new Date('2026-07-22T10:00:00.000Z'));
+    guard.setSession({ ...session, expiresAt: 'not-a-date' });
+
+    expect(guard.isExpired()).toBe(true);
+    expect(() => guard.assertAllowed('SYNC')).toThrow(SessionExpiredError);
+    expect(() => guard.assertAllowed('NEW_BUSINESS_EVENT')).toThrow(SessionExpiredError);
+  });
+
   it('blocks binding changes while unsynced data exists', async () => {
     const queue = new OfflineQueue(new MemoryQueueStore());
     await queue.restore();

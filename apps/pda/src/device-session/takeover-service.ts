@@ -4,6 +4,7 @@ import type { OfflineQueue } from '../offline/offline-queue';
 import { readBlobBytes } from '../offline/blob-bytes';
 import type { PdaPort } from '../ports/pda-port';
 import type { LocalDeviceSession } from '../session/session-guard';
+import { isFutureInstant } from '../domain/time';
 import { decodeBase64 } from '../takeover/package-codec';
 import {
   assertTakeoverManifestBinding,
@@ -296,8 +297,6 @@ export class DeviceTakeoverService {
       );
 
       assertExactScope(authorization.scope, session);
-      const authorizationExpired =
-        new Date(authorization.expiresAt).getTime() <= this.now().getTime();
       if (
         authorization.deviceId !== session.deviceId ||
         authorization.manifestHash !== manifestHash ||
@@ -306,7 +305,7 @@ export class DeviceTakeoverService {
         authorization.status !== 'AUTHORIZED' ||
         authorization.keyEncryptionAlgorithm !== 'RSA-OAEP-256' ||
         authorization.contentEncryptionAlgorithm !== 'A256GCM' ||
-        authorizationExpired
+        !isFutureInstant(authorization.expiresAt, this.now().getTime())
       ) {
         throw new Error('管理员接管授权与声明清单不一致或已过期，已保留全部数据。');
       }

@@ -74,6 +74,7 @@ describe('DeviceTakeoverService', () => {
     const { queue, media } = await setup();
     const port = new MemoryPdaPort();
     const authorize = vi.spyOn(port, 'authorizeDeviceTakeoverExport');
+    const upload = vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport');
     const service = new DeviceTakeoverService(queue, media, port);
 
     const first = service.exportAndClear(session, '设备损坏，由主管接管');
@@ -81,7 +82,50 @@ describe('DeviceTakeoverService', () => {
     const [left, right] = await Promise.all([first, second]);
 
     expect(authorize).toHaveBeenCalledTimes(1);
+    expect(upload).toHaveBeenCalledTimes(1);
     expect(right.exportId).toBe(left.exportId);
+  });
+
+  it('fails closed when a takeover authorization expiry is not a valid instant', async () => {
+    const { queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    vi.spyOn(port, 'authorizeDeviceTakeoverExport').mockImplementation(
+      async (deviceId, _key, body) => ({
+        authorizationId,
+        deviceId,
+        scope,
+        manifestHash: body.manifestHash,
+        eventCount: body.eventCount,
+        mediaCount: body.mediaCount,
+        expiresAt: 'not-a-date',
+        keyEncryptionAlgorithm: 'RSA-OAEP-256',
+        contentEncryptionAlgorithm: 'A256GCM',
+        publicKeyJwk: {
+          kty: 'RSA',
+          kid: 'invalid-expiry-key',
+          use: 'enc',
+          alg: 'RSA-OAEP-256',
+          key_ops: ['wrapKey'],
+          n: 'invalid',
+          e: 'AQAB',
+        },
+        maxCiphertextBytes: 5_000_000,
+        status: 'AUTHORIZED',
+      })
+    );
+    const upload = vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport');
+
+    await expect(
+      new DeviceTakeoverService(
+        queue,
+        media,
+        port,
+        () => new Date('2026-07-22T10:00:00.000Z')
+      ).exportAndClear(session, '设备损坏，由主管接管')
+    ).rejects.toThrow('授权与声明清单不一致或已过期');
+    expect(upload).not.toHaveBeenCalled();
+    expect(queue.snapshot().events).toHaveLength(1);
+    expect(media.snapshot()).toHaveLength(1);
   });
 
   it('reports each authorization and encrypted-upload stage in order', async () => {

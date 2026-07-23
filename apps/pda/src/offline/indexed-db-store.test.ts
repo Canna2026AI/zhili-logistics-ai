@@ -125,6 +125,9 @@ describe('IndexedDbQueueStore', () => {
       'image/jpeg',
       'media-atomic'
     );
+    firstMedia.status = 'UPLOADED';
+    firstMedia.remoteStatus = 'READY';
+    firstMedia.remoteExpiresAt = '2099-12-31T23:59:59.000Z';
     await queue.enqueue(context, {
       eventId: firstMedia.eventId,
       action: 'CAPTURE_RECEIPT_PHOTO',
@@ -136,7 +139,11 @@ describe('IndexedDbQueueStore', () => {
     });
     await media.restore();
     expect(queue.snapshot().events[0]?.envelope.mediaRefs).toEqual(['media-atomic']);
-    expect(media.snapshot(context)).toHaveLength(1);
+    expect(media.snapshot(context)[0]).toMatchObject({
+      mediaId: 'media-atomic',
+      remoteStatus: 'READY',
+      remoteExpiresAt: '2099-12-31T23:59:59.000Z',
+    });
     const blockedMedia = await media.prepare(
       context,
       '01JY8Z8F6ME4F0Y9QH2X6D4R8',
@@ -172,6 +179,38 @@ describe('IndexedDbQueueStore', () => {
     expect(completed.events).toEqual([]);
     expect(completed.media).toEqual([]);
     store.close();
+  });
+
+  it('persists the authoritative media reservation expiry across an encrypted restart', async () => {
+    const firstStore = new IndexedDbQueueStore('zhili-pda-test');
+    const first = new MediaQueue(firstStore);
+    await first.restore();
+    const item = await first.enqueue(
+      context,
+      '01JMEDIAEXPIRYEVENT00000001',
+      new Blob(['reservation-photo']),
+      'image/jpeg',
+      'media-expiry-persisted'
+    );
+    await first.uploadRefs(context, [item.mediaId], async () => ({
+      mediaId: item.mediaId,
+      eventId: item.eventId,
+      scope: context,
+      status: 'UPLOADED',
+      objectRef: 'pda/media-expiry-persisted',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+    }));
+    firstStore.close();
+
+    const secondStore = new IndexedDbQueueStore('zhili-pda-test');
+    const restored = await new MediaQueue(secondStore).restore();
+
+    expect(restored[0]).toMatchObject({
+      mediaId: item.mediaId,
+      remoteStatus: 'UPLOADED',
+      remoteExpiresAt: '2099-12-31T23:59:59.000Z',
+    });
+    secondStore.close();
   });
 
   it.each(['CONFLICT', 'REJECTED'] as const)(

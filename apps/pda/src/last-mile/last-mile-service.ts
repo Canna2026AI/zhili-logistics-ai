@@ -120,6 +120,8 @@ export class LastMileService {
       !Number.isSafeInteger(receipt.deliveryTask.version) ||
       receipt.deliveryTask.version <= current.version ||
       receipt.proofOfDelivery.deliveryTaskId !== current.taskId ||
+      typeof receipt.proofOfDelivery.id !== 'string' ||
+      receipt.proofOfDelivery.id.trim().length === 0 ||
       !Number.isSafeInteger(receipt.proofOfDelivery.versionNo) ||
       receipt.proofOfDelivery.versionNo < 1 ||
       receipt.proofOfDelivery.recipientName !== input.recipientName ||

@@ -71,6 +71,7 @@ export interface MediaQueueItem {
   blob: Blob;
   status: 'PENDING' | 'UPLOADING' | 'PROCESSING' | 'RETRY' | 'UPLOADED' | 'REJECTED';
   remoteStatus?: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED';
+  remoteExpiresAt?: string;
   progress: number;
   attempts: number;
   errorMessage?: string;
