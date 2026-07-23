@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import axe from 'axe-core';
 
 test('平台端代入必须展示审计影响与原因', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?mock=1');
   await expect(page.getByRole('heading', { name: '租户管理' })).toBeVisible();
   await page.screenshot({
     path: 'artifacts/e2e/f1c/platform-tenants-1440x900.png',
@@ -31,7 +31,7 @@ test('平台端代入必须展示审计影响与原因', async ({ page }) => {
 });
 
 test('平台配置回写当前租户实体且运行快照可比较', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?mock=1');
   await page.getByRole('button', { name: '配额与用量' }).click();
   await page.getByLabel('配置租户').selectOption({ label: '深圳海运通物流有限公司' });
   await page.getByLabel('租户套餐').selectOption('企业版');
@@ -63,7 +63,7 @@ test('平台配置回写当前租户实体且运行快照可比较', async ({ pa
 
 test('390px 紧凑导航覆盖六个页面并管理 aria、Escape 与焦点', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/?mock=1');
   const trigger = page.getByRole('button', { name: /平台导航/ });
 
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
@@ -95,11 +95,16 @@ test('390px 紧凑导航覆盖六个页面并管理 aria、Escape 与焦点', as
     await expect(drawer).not.toBeVisible();
     await expect(trigger).toBeFocused();
   }
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth > document.documentElement.clientWidth
+    )
+  ).toBe(false);
 });
 
 test('平台全局搜索键盘打开规范租户、点击作业跳转并呈现真实零结果', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto('/');
+  await page.goto('/?mock=1');
   const searchbox = page.getByRole('combobox', { name: '平台全局搜索' });
 
   await searchbox.fill('上海智立');
@@ -153,7 +158,7 @@ test('平台全局搜索键盘打开规范租户、点击作业跳转并呈现�
 });
 
 test('平台全局搜索实时跟随已发布公告和退出后的代入审计记录', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/?mock=1');
   const searchbox = page.getByRole('combobox', { name: '平台全局搜索' });
 
   await page.getByRole('button', { name: '平台公告' }).click();

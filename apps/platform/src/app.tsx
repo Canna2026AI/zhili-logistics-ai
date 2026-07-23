@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
-import { platformPort } from './api';
+import { PlatformApiError, platformPort } from './api';
 import { OperationsPage, type OperationsPageName } from './features/operations/operations-page';
 import { AccessWorkflow } from './features/policies/access-workflow';
 import {
@@ -1375,7 +1375,9 @@ export function App() {
       setImpersonate(null);
     } catch (error) {
       if (created) await platformPort.endImpersonation().catch(() => undefined);
-      if (!(error instanceof TypeError) && impersonationIntentRef.current === intent) {
+      const outcomeUncertain =
+        error instanceof TypeError || (error instanceof PlatformApiError && error.outcomeUncertain);
+      if (!outcomeUncertain && impersonationIntentRef.current === intent) {
         impersonationIntentRef.current = undefined;
       }
       setToast(error instanceof Error ? error.message : '代入会话创建失败');

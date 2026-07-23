@@ -152,6 +152,7 @@ export const platformMockFetch: typeof fetch = async (input) => {
 export type RuntimeDifference = { field: string; local: string; server: string };
 const revokedMockSessions = new Set<string>();
 const pendingPlatformCommandKeys = new Map<string, string>();
+const retryableClientStatuses = new Set([408, 425, 429]);
 
 /** App-local port for platform operations pending inclusion in shared OpenAPI. */
 const platformCommand = async <TResponse>(
@@ -264,7 +265,13 @@ const platformCommand = async <TResponse>(
   }
   if (!response.ok) {
     const value = isRecord(payload) ? payload : {};
-    pendingPlatformCommandKeys.delete(fingerprint);
+    if (
+      response.status >= 400 &&
+      response.status < 500 &&
+      !retryableClientStatuses.has(response.status)
+    ) {
+      pendingPlatformCommandKeys.delete(fingerprint);
+    }
     throw new PlatformApiError(
       response.status,
       String(value.code ?? 'PLATFORM_OPERATION_FAILED'),
@@ -287,7 +294,8 @@ export class PlatformApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
-    readonly remediation?: string
+    readonly remediation?: string,
+    readonly outcomeUncertain = false
   ) {
     super(message);
     this.name = 'PlatformApiError';
@@ -351,8 +359,24 @@ function isRolePolicy(
     isRecord(value) &&
     value.roleId === roleId &&
     Array.isArray(value.statements) &&
+    value.statements.every(isPolicyStatement) &&
     isPositiveVersion(value.version) &&
     value.version > previousVersion
+  );
+}
+
+function isPolicyStatement(value: unknown): value is components['schemas']['PolicyStatement'] {
+  return (
+    isRecord(value) &&
+    typeof value.effect === 'string' &&
+    ['ALLOW', 'DENY'].includes(value.effect) &&
+    typeof value.resource === 'string' &&
+    value.resource.length > 0 &&
+    Array.isArray(value.actions) &&
+    value.actions.length > 0 &&
+    value.actions.every((action) => typeof action === 'string' && action.length > 0) &&
+    typeof value.dataScope === 'string' &&
+    value.dataScope.length > 0
   );
 }
 
@@ -547,7 +571,12 @@ export function createPlatformApi(
       });
       throwResponseError(response);
       const data: unknown = response.data?.data;
-      if (!isTenant(data) || data.id !== tenant.id || data.status !== status)
+      if (
+        !isTenant(data) ||
+        data.id !== tenant.id ||
+        data.status !== status ||
+        data.version <= tenant.version
+      )
         throw new Error('TENANT_STATUS_RESPONSE_INCOMPLETE');
       return data as TenantStatusResult;
     },
@@ -573,7 +602,8 @@ export function createPlatformApi(
         !isRecord(data) ||
         data.tenantId !== tenantId ||
         !Array.isArray(data.modules) ||
-        !isPositiveVersion(data.version)
+        !isPositiveVersion(data.version) ||
+        data.version <= version
       ) {
         throw new Error('TENANT_ENTITLEMENTS_RESPONSE_INCOMPLETE');
       }
@@ -691,14 +721,31 @@ export const platformPort = {
   },
   async startImpersonation(tenantId: string, reason: string, idempotencyKey = key()) {
     const client = runtimeClient();
-    const response = await client.POST('/platform/impersonations', {
-      params: { header: { 'Idempotency-Key': idempotencyKey } },
-      body: { tenantId, reason, durationMinutes: 60 },
-    });
+    let response: Awaited<ReturnType<typeof client.POST>>;
+    try {
+      response = await client.POST('/platform/impersonations', {
+        params: { header: { 'Idempotency-Key': idempotencyKey } },
+        body: { tenantId, reason, durationMinutes: 60 },
+      });
+    } catch {
+      throw new PlatformApiError(
+        0,
+        'IMPERSONATION_RESPONSE_INCOMPLETE',
+        '代入会话响应不完整，已保留原幂等键供恢复。',
+        undefined,
+        true
+      );
+    }
     throwResponseError(response);
     const created: unknown = ensure(response.data, response.error).data;
     if (!isImpersonationSession(created, tenantId)) {
-      throw new Error('IMPERSONATION_RESPONSE_MISMATCH');
+      throw new PlatformApiError(
+        Number(response.response?.status ?? 201),
+        'IMPERSONATION_RESPONSE_INCOMPLETE',
+        '代入会话响应与当前租户不匹配，已保留原幂等键供恢复。',
+        undefined,
+        true
+      );
     }
     revokedMockSessions.delete(created.id);
     return created;

@@ -931,7 +931,15 @@ describe('平台控制台', () => {
   it('代入未决同意图复用 key，明确 422 后取消切租户必须隔离新 key', async () => {
     const start = vi
       .spyOn(platformPort, 'startImpersonation')
-      .mockRejectedValueOnce(new TypeError('response lost'))
+      .mockRejectedValueOnce(
+        new PlatformApiError(
+          201,
+          'IMPERSONATION_RESPONSE_INCOMPLETE',
+          'response incomplete',
+          undefined,
+          true
+        )
+      )
       .mockRejectedValueOnce(new PlatformApiError(422, 'INVALID_REASON', 'reason rejected'));
     const user = userEvent.setup();
     render(<App />);

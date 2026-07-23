@@ -116,6 +116,65 @@ describe('platform OpenAPI adapter', () => {
     ).rejects.toThrow('ROLE_POLICY_RESPONSE_MISMATCH');
   });
 
+  it('fails closed when tenant status or entitlements do not advance the If-Match version', async () => {
+    const createPlatformApi = (apiModule as unknown as { createPlatformApi?: PlatformApiFactory })
+      .createPlatformApi!;
+    const tenant = {
+      id: '01JTENANT0000000000000001',
+      name: '上海智立科技有限公司',
+      slug: 'zhili-sh',
+      status: 'ACTIVE' as const,
+      version: 7,
+    };
+    const api = createPlatformApi(
+      {
+        POST: vi.fn().mockResolvedValue({
+          data: { data: { ...tenant, status: 'SUSPENDED', version: 7 } },
+        }),
+        PUT: vi.fn().mockResolvedValue({
+          data: {
+            data: {
+              tenantId: tenant.id,
+              modules: [{ moduleCode: 'portal', enabled: true, quotas: {} }],
+              version: 6,
+            },
+          },
+        }),
+        DELETE: vi.fn(),
+      },
+      () => 'idem-version'
+    );
+
+    await expect(api.changeTenantStatus(tenant, 'SUSPENDED')).rejects.toThrow(
+      'TENANT_STATUS_RESPONSE_INCOMPLETE'
+    );
+    await expect(
+      api.saveEntitlements(tenant.id, tenant.version, {
+        modules: [{ moduleCode: 'portal', enabled: true, quotas: {} }],
+      })
+    ).rejects.toThrow('TENANT_ENTITLEMENTS_RESPONSE_INCOMPLETE');
+  });
+
+  it('rejects malformed authoritative role statements before returning saved state', async () => {
+    const createPlatformApi = (apiModule as unknown as { createPlatformApi?: PlatformApiFactory })
+      .createPlatformApi!;
+    const roleId = '01JROLE000000000000000001';
+    const api = createPlatformApi(
+      {
+        PUT: vi.fn().mockResolvedValue({
+          data: { data: { roleId, statements: [{}], version: 19 } },
+        }),
+        POST: vi.fn(),
+        DELETE: vi.fn(),
+      },
+      () => 'idem-statements'
+    );
+
+    await expect(
+      api.updateRolePolicy(roleId, 18, { statements: [], reason: '季度权限复核' })
+    ).rejects.toThrow('ROLE_POLICY_RESPONSE_MISMATCH');
+  });
+
   it('reuses an app-local command idempotency key after a lost response and rotates it after success', async () => {
     window.history.replaceState({}, '', '/');
     const fetchMock = vi
@@ -202,6 +261,102 @@ describe('platform OpenAPI adapter', () => {
     vi.unstubAllGlobals();
   });
 
+  it('keeps the same app-local command key after retryable 5xx and rotates after recovery', async () => {
+    window.history.replaceState({}, '', '/');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'UPSTREAM_UNAVAILABLE', message: 'retry later' }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: { operationId: 'OPS-RECOVERED', status: 'SUCCEEDED', message: 'done' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: { operationId: 'OPS-NEXT', status: 'SUCCEEDED', message: 'done again' },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiModule.platformPort.executeOperation('系统健康')).rejects.toMatchObject({
+      status: 503,
+      code: 'UPSTREAM_UNAVAILABLE',
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-RECOVERED',
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-NEXT',
+    });
+
+    const idempotencyKeys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get('Idempotency-Key')
+    );
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[2]).not.toBe(idempotencyKeys[1]);
+    vi.unstubAllGlobals();
+  });
+
+  it('retains a command key for retryable 429 but rotates it after terminal 422', async () => {
+    window.history.replaceState({}, '', '/');
+    const success = (operationId: string) =>
+      new Response(
+        JSON.stringify({
+          data: { operationId, status: 'SUCCEEDED', message: 'done' },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'RATE_LIMITED', message: 'retry later' }), {
+          status: 429,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(success('OPS-AFTER-429'))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ code: 'INVALID_COMMAND', message: 'terminal' }), {
+          status: 422,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(success('OPS-AFTER-422'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiModule.platformPort.executeOperation('系统健康')).rejects.toMatchObject({
+      status: 429,
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-AFTER-429',
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).rejects.toMatchObject({
+      status: 422,
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-AFTER-422',
+    });
+
+    const idempotencyKeys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get('Idempotency-Key')
+    );
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[2]).not.toBe(idempotencyKeys[1]);
+    expect(idempotencyKeys[3]).not.toBe(idempotencyKeys[2]);
+    vi.unstubAllGlobals();
+  });
+
   it('rejects a successful impersonation response for a different tenant', async () => {
     window.history.replaceState({}, '', '/');
     vi.stubGlobal(
@@ -224,7 +379,31 @@ describe('platform OpenAPI adapter', () => {
 
     await expect(
       apiModule.platformPort.startImpersonation('01JTENANT0000000000000001', '排查')
-    ).rejects.toThrow('IMPERSONATION_RESPONSE_MISMATCH');
+    ).rejects.toMatchObject({
+      code: 'IMPERSONATION_RESPONSE_INCOMPLETE',
+      outcomeUncertain: true,
+    });
+    vi.unstubAllGlobals();
+  });
+
+  it('marks malformed impersonation JSON as an uncertain command outcome', async () => {
+    window.history.replaceState({}, '', '/');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('{"data":', {
+          status: 201,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+    );
+
+    await expect(
+      apiModule.platformPort.startImpersonation('01JTENANT0000000000000001', '排查')
+    ).rejects.toMatchObject({
+      code: 'IMPERSONATION_RESPONSE_INCOMPLETE',
+      outcomeUncertain: true,
+    });
     vi.unstubAllGlobals();
   });
 
