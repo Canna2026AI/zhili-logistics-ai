@@ -129,6 +129,8 @@ function assertVerifiedReceipt(
 }
 
 export class DeviceTakeoverService {
+  private exportPromise?: Promise<DeviceTakeoverExportReceipt>;
+
   constructor(
     private readonly queue: OfflineQueue,
     private readonly media: MediaQueue,
@@ -253,7 +255,16 @@ export class DeviceTakeoverService {
     }
   }
 
-  async exportAndClear(session: LocalDeviceSession, reason: string) {
+  exportAndClear(session: LocalDeviceSession, reason: string) {
+    if (this.exportPromise) return this.exportPromise;
+    const operation = this.exportAndClearUnlocked(session, reason).finally(() => {
+      if (this.exportPromise === operation) this.exportPromise = undefined;
+    });
+    this.exportPromise = operation;
+    return operation;
+  }
+
+  private async exportAndClearUnlocked(session: LocalDeviceSession, reason: string) {
     if (!session.permissions.includes('pda.takeover.export')) {
       throw new Error('缺少 pda.takeover.export 权限，禁止管理员接管导出。');
     }

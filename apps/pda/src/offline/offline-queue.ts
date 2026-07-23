@@ -175,18 +175,28 @@ export class OfflineQueue {
           eventId: result.eventId,
           disposition: result.disposition,
           claimedMediaRefs: result.claimedMediaRefs,
-          serverVersion: result.serverVersion ?? event.envelope.baseVersion,
+          serverVersion: result.serverVersion ?? Number.NaN,
           operation: 'EVENT_SYNC',
         });
         continue;
       }
       if (result.disposition === 'CONFLICT') {
+        if (
+          typeof result.conflictId !== 'string' ||
+          result.conflictId.length === 0 ||
+          !Number.isSafeInteger(result.serverVersion) ||
+          Number(result.serverVersion) <= event.envelope.baseVersion ||
+          !Number.isSafeInteger(result.conflictVersion) ||
+          Number(result.conflictVersion) < 1
+        ) {
+          throw new Error('服务器冲突回执缺少权威 ID 或已推进版本，已保留本地作业。');
+        }
         counts.conflict += 1;
         event.state = 'CONFLICT';
         event.conflict = {
-          conflictId: result.conflictId ?? result.eventId,
-          serverVersion: result.serverVersion ?? event.envelope.baseVersion + 1,
-          version: result.conflictVersion ?? 1,
+          conflictId: result.conflictId,
+          serverVersion: Number(result.serverVersion),
+          version: Number(result.conflictVersion),
           snapshotNotice:
             '当前同步契约未返回服务器字段快照；仅可核对真实 serverVersion/conflictId，完整 diff 需后端扩展。',
         };
@@ -208,6 +218,12 @@ export class OfflineQueue {
     }
     const event = this.events.find((candidate) => candidate.envelope.eventId === receipt.eventId);
     if (!event) throw new Error(`服务器回执对应的本地事件 ${receipt.eventId} 不存在，禁止清理。`);
+    if (
+      !Number.isSafeInteger(receipt.serverVersion) ||
+      receipt.serverVersion <= event.envelope.baseVersion
+    ) {
+      throw new Error('服务器回执未返回严格推进的权威版本，已保留本地作业。');
+    }
     if (!exactlySameRefs(event.envelope.mediaRefs, receipt.claimedMediaRefs)) {
       throw new Error('服务器媒体认领回执与本地事件不一致，已保留事件和全部媒体。');
     }

@@ -194,6 +194,8 @@ describe('IndexedDbQueueStore', () => {
           disposition,
           claimedMediaRefs: [],
           conflictId: disposition === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
+          serverVersion: disposition === 'CONFLICT' ? 9 : undefined,
+          conflictVersion: disposition === 'CONFLICT' ? 1 : undefined,
           errorCode: disposition === 'REJECTED' ? 'INVALID_STATE' : undefined,
         },
       ]);

@@ -33,6 +33,30 @@ describe('MediaQueue', () => {
     });
   });
 
+  it('rejects an upload receipt that belongs to another media reservation', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new MediaQueue(store);
+    const item = await queue.enqueue(
+      context,
+      '01JY8Z8F6ME4F0Y9QH2X6D4R7',
+      new Blob(['photo'], { type: 'image/jpeg' }),
+      'image/jpeg',
+      'media-expected'
+    );
+
+    await queue.uploadRefs(context, [item.mediaId], async () => ({
+      mediaId: 'media-other',
+      eventId: item.eventId,
+      scope: context,
+      status: 'READY',
+      objectRef: 'pda/media-other',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+    }));
+
+    expect(queue.snapshot()[0]).toMatchObject({ status: 'RETRY' });
+    expect(queue.snapshot()[0]?.remoteStatus).toBeUndefined();
+  });
+
   it('does not consume the 200 business-event capacity', async () => {
     const store = new MemoryQueueStore();
     const queue = new MediaQueue(store);
@@ -54,7 +78,14 @@ describe('MediaQueue', () => {
     const upload = vi
       .fn()
       .mockRejectedValueOnce(new Error('network'))
-      .mockResolvedValueOnce({ status: 'UPLOADED' });
+      .mockImplementationOnce(async (item) => ({
+        mediaId: item.mediaId,
+        eventId: item.eventId,
+        scope: context,
+        status: 'UPLOADED',
+        objectRef: `pda/${item.mediaId}`,
+        expiresAt: '2099-12-31T23:59:59.000Z',
+      }));
 
     await queue.uploadPending(upload);
     expect(queue.snapshot()[0]).toMatchObject({ status: 'RETRY', attempts: 1, progress: 0 });

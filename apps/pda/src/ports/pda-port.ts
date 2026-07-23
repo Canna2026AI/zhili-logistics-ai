@@ -8,6 +8,7 @@ import type {
   DeviceTakeoverExportReceipt,
   DeviceConflict,
   DeviceEventEnvelope,
+  DeviceMedia,
   DeviceSession,
   DeviceTask,
   ProofOfDeliveryAmendmentInput,
@@ -57,11 +58,7 @@ export interface PdaPort {
     deviceId: string,
     input: UploadMediaInput,
     idempotencyKey: string
-  ): Promise<{
-    mediaId: string;
-    status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED';
-    objectRef: string;
-  }>;
+  ): Promise<DeviceMedia>;
   getDeviceConflict(conflictId: string): Promise<{ conflict: DeviceConflict; etag: string }>;
   resolveDeviceConflict(
     conflictId: string,

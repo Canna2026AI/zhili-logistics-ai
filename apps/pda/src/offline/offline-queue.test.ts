@@ -233,6 +233,7 @@ describe('OfflineQueue', () => {
           : [],
       serverVersion: 9,
       conflictId: dispositions[index] === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
+      conflictVersion: dispositions[index] === 'CONFLICT' ? 1 : undefined,
       errorCode: dispositions[index] === 'REJECTED' ? 'INVALID_STATE' : undefined,
     }));
 
@@ -308,6 +309,8 @@ describe('OfflineQueue', () => {
           disposition,
           claimedMediaRefs: [],
           conflictId: disposition === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
+          serverVersion: disposition === 'CONFLICT' ? 9 : undefined,
+          conflictVersion: disposition === 'CONFLICT' ? 1 : undefined,
           errorCode: disposition === 'REJECTED' ? 'INVALID_STATE' : undefined,
         },
       ]);
@@ -379,6 +382,31 @@ describe('OfflineQueue', () => {
         operation: 'EVENT_SYNC',
       })
     ).rejects.toThrow('APPLIED/DUPLICATE');
+    expect(await store.getEvents()).toHaveLength(1);
+  });
+
+  it('rejects success receipts without a strictly advanced server version', async () => {
+    const store = new MemoryQueueStore();
+    const queue = createQueue(store);
+    await queue.restore();
+    const event = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'VERSION-GUARD',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 7,
+    });
+
+    await expect(
+      queue.applySyncResults([
+        {
+          eventId: event.envelope.eventId,
+          disposition: 'APPLIED',
+          claimedMediaRefs: [],
+          serverVersion: 7,
+        },
+      ])
+    ).rejects.toThrow('版本');
     expect(await store.getEvents()).toHaveLength(1);
   });
 });

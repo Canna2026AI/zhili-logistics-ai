@@ -70,6 +70,20 @@ function bytesFromBase64(value: string) {
 }
 
 describe('DeviceTakeoverService', () => {
+  it('coalesces concurrent export attempts before issuing an authorization', async () => {
+    const { queue, media } = await setup();
+    const port = new MemoryPdaPort();
+    const authorize = vi.spyOn(port, 'authorizeDeviceTakeoverExport');
+    const service = new DeviceTakeoverService(queue, media, port);
+
+    const first = service.exportAndClear(session, '设备损坏，由主管接管');
+    const second = service.exportAndClear(session, '设备损坏，由主管接管');
+    const [left, right] = await Promise.all([first, second]);
+
+    expect(authorize).toHaveBeenCalledTimes(1);
+    expect(right.exportId).toBe(left.exportId);
+  });
+
   it('reports each authorization and encrypted-upload stage in order', async () => {
     const { queue, media } = await setup();
     const port = new MemoryPdaPort();

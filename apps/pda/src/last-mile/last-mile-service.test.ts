@@ -99,6 +99,28 @@ describe('LastMileService', () => {
     expect(service.snapshot()).toMatchObject({ status: 'LOADED', version: 7 });
   });
 
+  it('fails closed when a transition receipt does not advance the authoritative version', async () => {
+    const port = new MemoryPdaPort();
+    port.updateDeliveryTaskStatus = vi.fn().mockResolvedValue({
+      deviceEventId: eventId,
+      disposition: 'APPLIED',
+      deliveryTask: {
+        id: taskId,
+        taskNo: 'LM250722001',
+        status: 'OUT_FOR_DELIVERY',
+        waybillCount: 1,
+        version: 7,
+      },
+      claimedMediaRefs: [],
+    });
+    const service = new LastMileService(port, { taskId, status: 'LOADED', version: 7 });
+
+    await expect(
+      service.transition(eventId, 'OUT_FOR_DELIVERY', { scannedCode: 'LM250722001' })
+    ).rejects.toThrow('回执');
+    expect(service.snapshot()).toMatchObject({ status: 'LOADED', version: 7 });
+  });
+
   it('uses the POD authoritative aggregate and never increments the version locally', async () => {
     const port = new MemoryPdaPort();
     const capture = vi.spyOn(port, 'captureProofOfDelivery').mockResolvedValue({
@@ -138,6 +160,48 @@ describe('LastMileService', () => {
     expect(capture).toHaveBeenCalledWith(taskId, '"8"', expect.stringContaining(eventId), input);
     expect(receipt.disposition).toBe('DUPLICATE');
     expect(service.snapshot()).toMatchObject({ status: 'COMPLETED', version: 63 });
+  });
+
+  it('rejects a POD receipt with a stale aggregate version or mismatched immutable proof', async () => {
+    const port = new MemoryPdaPort();
+    port.captureProofOfDelivery = vi.fn().mockResolvedValue({
+      deviceEventId: eventId,
+      disposition: 'APPLIED',
+      deliveryTask: {
+        id: taskId,
+        taskNo: 'LM250722001',
+        status: 'COMPLETED',
+        waybillCount: 1,
+        version: 8,
+      },
+      proofOfDelivery: {
+        id: '01JPOD0000000000000000001',
+        deliveryTaskId: taskId,
+        versionNo: 1,
+        recipientName: '其他人',
+        signedAt: '2026-07-22T10:00:00.000Z',
+        evidenceRefs: ['media-other'],
+      },
+      claimedMediaRefs: ['media-pod'],
+    });
+    const service = new LastMileService(port, {
+      taskId,
+      status: 'OUT_FOR_DELIVERY',
+      version: 8,
+    });
+
+    await expect(
+      service.capturePod(
+        {
+          deviceEventId: eventId,
+          recipientName: '陈女士',
+          signedAt: '2026-07-22T10:00:00.000Z',
+          evidenceRefs: ['media-pod'],
+        },
+        [{ mediaId: 'media-pod', status: 'READY' }]
+      )
+    ).rejects.toThrow('回执');
+    expect(service.snapshot()).toMatchObject({ status: 'OUT_FOR_DELIVERY', version: 8 });
   });
 
   it('rejects illegal delivery and incomplete POD intents before calling the port', async () => {

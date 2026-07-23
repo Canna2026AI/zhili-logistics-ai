@@ -1,4 +1,4 @@
-import type { DeviceContext, MediaQueueItem } from '../domain/types';
+import type { DeviceContext, DeviceMedia, MediaQueueItem } from '../domain/types';
 import type { QueueStore } from './queue-store';
 import { readBlobBytes } from './blob-bytes';
 
@@ -10,7 +10,9 @@ async function contentHash(blob: Blob) {
   return value;
 }
 
-function sameContext(left: DeviceContext | undefined, right: DeviceContext) {
+type DeviceScope = Pick<DeviceContext, 'deviceId' | 'tenantId' | 'warehouseId' | 'subjectId'>;
+
+function sameContext(left: DeviceScope | undefined, right: DeviceScope) {
   return (
     left !== undefined &&
     left.deviceId === right.deviceId &&
@@ -67,20 +69,14 @@ export class MediaQueue {
     return item;
   }
 
-  async uploadPending(
-    upload: (
-      item: MediaQueueItem
-    ) => Promise<{ status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED' }>
-  ) {
+  async uploadPending(upload: (item: MediaQueueItem) => Promise<DeviceMedia>) {
     return this.uploadSelected(() => true, upload);
   }
 
   async uploadRefs(
     context: DeviceContext,
     mediaRefs: string[],
-    upload: (
-      item: MediaQueueItem
-    ) => Promise<{ status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED' }>
+    upload: (item: MediaQueueItem) => Promise<DeviceMedia>
   ) {
     const refs = new Set(mediaRefs);
     const foreign = this.items.find(
@@ -95,9 +91,7 @@ export class MediaQueue {
 
   private async uploadSelected(
     select: (item: MediaQueueItem) => boolean,
-    upload: (
-      item: MediaQueueItem
-    ) => Promise<{ status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED' }>
+    upload: (item: MediaQueueItem) => Promise<DeviceMedia>
   ) {
     for (const item of this.items.filter(
       (candidate) => select(candidate) && ['PENDING', 'RETRY'].includes(candidate.status)
@@ -108,6 +102,16 @@ export class MediaQueue {
       await this.store.putMedia(item);
       try {
         const result = await upload(item);
+        if (
+          result.mediaId !== item.mediaId ||
+          result.eventId !== item.eventId ||
+          !sameContext(result.scope, item.context) ||
+          typeof result.objectRef !== 'string' ||
+          result.objectRef.length === 0 ||
+          !Number.isFinite(Date.parse(result.expiresAt))
+        ) {
+          throw new Error('媒体上传回执与本地预留的 ID、事件或设备作用域不一致。');
+        }
         item.remoteStatus = result.status;
         item.status =
           result.status === 'READY'

@@ -85,6 +85,27 @@ describe('PdaSyncService', () => {
     expect(queue.snapshot().events).toHaveLength(2);
   });
 
+  it('rejects a sync response that omits or duplicates requested event identities', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'BATCH-IDENTITY',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const port = new MemoryPdaPort();
+    port.syncDeviceEvents = vi.fn().mockResolvedValue([]);
+
+    await expect(new PdaSyncService(queue, media, port).synchronize(syncContext)).rejects.toThrow(
+      '批次'
+    );
+    expect(queue.snapshot().events).toHaveLength(1);
+  });
+
   it('fails closed before any port call when event or media context differs', async () => {
     const store = new MemoryQueueStore();
     const queue = new OfflineQueue(store);
@@ -375,9 +396,14 @@ describe('PdaSyncService', () => {
       baseVersion: 1,
     });
     const port = new MemoryPdaPort();
-    port.uploadDeviceMedia = vi
-      .fn()
-      .mockResolvedValue({ mediaId: item.mediaId, status: 'SCANNING', objectRef: 'pda/photo' });
+    port.uploadDeviceMedia = vi.fn().mockResolvedValue({
+      mediaId: item.mediaId,
+      eventId: item.eventId,
+      scope: context,
+      status: 'SCANNING',
+      objectRef: 'pda/photo',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+    });
     const sync = vi.spyOn(port, 'syncDeviceEvents');
     port.getDeviceTasks = vi.fn().mockResolvedValue([
       {
@@ -434,6 +460,49 @@ describe('PdaSyncService', () => {
       });
       expect(queue.snapshot().events).toHaveLength(0);
     }
+  });
+
+  it('retains the local conflict when the resolution receipt is for another conflict', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const event = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'CONFLICT',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 7,
+    });
+    await queue.applySyncResults([
+      {
+        eventId: event.envelope.eventId,
+        disposition: 'CONFLICT',
+        claimedMediaRefs: [],
+        conflictId: '01JCONFLICT000000000000001',
+        serverVersion: 9,
+        conflictVersion: 1,
+      },
+    ]);
+    const port = new MemoryPdaPort();
+    port.resolveDeviceConflict = vi.fn().mockResolvedValue({
+      id: '01JCONFLICT000000000000099',
+      localEvent: event.envelope,
+      serverVersion: 10,
+      serverState: { status: 'PICKED' },
+      differences: [],
+      status: 'RESOLVED',
+      version: 2,
+    });
+
+    await expect(
+      new PdaSyncService(queue, media, port).resolveConflict(
+        event.envelope.eventId,
+        'KEEP_SERVER',
+        '现场主管已经复核'
+      )
+    ).rejects.toThrow('回执');
+    expect(queue.snapshot().events).toHaveLength(1);
   });
 
   it('preserves the complete 409 envelope after refreshing the newest conflict snapshot', async () => {

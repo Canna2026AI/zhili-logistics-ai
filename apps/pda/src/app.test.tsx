@@ -50,6 +50,30 @@ describe('PDA application', () => {
     expect(screen.getByText('本地队列已恢复')).toBeVisible();
   });
 
+  it('rejects a bind receipt whose server-owned scope differs from the requested binding', async () => {
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+    const store = new MemoryQueueStore();
+    const port = new MemoryPdaPort();
+    vi.spyOn(port, 'bindDevice').mockResolvedValue({
+      deviceId: '01JDEVICE00000000000000004',
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: '01JWAREHOUSE00000000000002',
+      subjectId: '01JSUBJECT0000000000000002',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+      permissions: ['pda.use'],
+    });
+    const tasks = vi.spyOn(port, 'getDeviceTasks');
+
+    render(<App store={store} port={port} />);
+    await screen.findByRole('heading', { name: '设备登录与仓库绑定' });
+    await userEvent.click(screen.getByRole('button', { name: '绑定设备并登录' }));
+
+    expect(await screen.findByText(/绑定回执.*不一致/)).toBeVisible();
+    expect(screen.getByRole('heading', { name: '设备登录与仓库绑定' })).toBeVisible();
+    expect(tasks).not.toHaveBeenCalled();
+    expect(await new OfflineQueue(store).getMeta('device-session')).toBeUndefined();
+  });
+
   it('does not call current-run newly queued work a startup recovery', async () => {
     render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
     await bind();

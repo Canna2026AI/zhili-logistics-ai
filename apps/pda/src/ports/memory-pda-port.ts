@@ -195,6 +195,7 @@ export class MemoryPdaPort implements PdaPort {
   readonly conflictResolutions: Array<{ conflictId: string; resolution: string; reason: string }> =
     [];
   readonly uploadedMedia = new Set<string>();
+  private readonly conflictEvents = new Map<string, DeviceEventEnvelope>();
   syncCallCount = 0;
   uploadFailures = new Set<string>();
   private readonly deviceBindings = new Map<string, TakeoverScope>([
@@ -376,6 +377,7 @@ export class MemoryPdaPort implements PdaPort {
         };
       }
       if (event.entityRef.toUpperCase().includes('CONFLICT')) {
+        this.conflictEvents.set('01JCONFLICT000000000000001', event);
         return {
           eventId: event.eventId,
           disposition: 'CONFLICT' as const,
@@ -406,14 +408,23 @@ export class MemoryPdaPort implements PdaPort {
   }
 
   async uploadDeviceMedia(
-    _deviceId: string,
+    deviceId: string,
     input: { eventId: string; mediaId: string; contentHash: string; file: Blob },
     _idempotencyKey: string
   ) {
     void _idempotencyKey;
     if (this.uploadFailures.delete(input.mediaId)) throw new Error('弱网上传中断');
+    const scope = this.deviceBindings.get(deviceId);
+    if (!scope) throw new Error('模拟设备尚未成功绑定，禁止上传媒体。');
     this.uploadedMedia.add(input.mediaId);
-    return { mediaId: input.mediaId, status: 'READY' as const, objectRef: `pda/${input.mediaId}` };
+    return {
+      mediaId: input.mediaId,
+      eventId: input.eventId,
+      scope,
+      status: 'READY' as const,
+      objectRef: `pda/${input.mediaId}`,
+      expiresAt: future,
+    };
   }
 
   async resolveDeviceConflict(
@@ -424,9 +435,11 @@ export class MemoryPdaPort implements PdaPort {
   ): Promise<DeviceConflict> {
     void _idempotencyKey;
     this.conflictResolutions.push({ conflictId, ...body });
+    const localEvent = this.conflictEvents.get(conflictId);
+    if (!localEvent) throw new Error('模拟冲突不存在，禁止解析。');
     return {
       id: conflictId,
-      localEvent: {} as DeviceEventEnvelope,
+      localEvent,
       serverVersion: 9,
       serverState: { status: 'PICKED' },
       differences: [],
@@ -436,7 +449,7 @@ export class MemoryPdaPort implements PdaPort {
   }
 
   async getDeviceConflict(conflictId: string) {
-    const localEvent: DeviceEventEnvelope = {
+    const fallbackEvent: DeviceEventEnvelope = {
       eventId: '01JY8Z8F6ME4F0Y9QH2X6D4R7',
       deviceId: '01JDEVICE00000000000000003',
       localSequence: 1842,
@@ -453,6 +466,8 @@ export class MemoryPdaPort implements PdaPort {
       timezone: 'Asia/Shanghai',
       appVersion: '0.2.0',
     };
+    const localEvent = this.conflictEvents.get(conflictId) ?? fallbackEvent;
+    this.conflictEvents.set(conflictId, localEvent);
     return {
       conflict: {
         id: conflictId,

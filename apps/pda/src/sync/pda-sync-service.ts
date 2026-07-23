@@ -20,6 +20,37 @@ function expectedDeliveryStatus(action: string) {
   return undefined;
 }
 
+function assertExactSyncBatch(events: Array<{ eventId: string }>, results: SyncResult[]) {
+  const expected = events.map((event) => event.eventId);
+  const actual = results.map((result) => result.eventId);
+  if (
+    actual.length !== expected.length ||
+    new Set(actual).size !== actual.length ||
+    actual.some((eventId) => !expected.includes(eventId)) ||
+    expected.some((eventId) => !actual.includes(eventId))
+  ) {
+    throw new Error('服务器同步批次回执未精确覆盖本次事件 ID，已保留全部本地作业。');
+  }
+}
+
+function assertTaskSnapshot(tasks: DeviceTask[]) {
+  if (
+    !Array.isArray(tasks) ||
+    new Set(tasks.map((task) => task.id)).size !== tasks.length ||
+    tasks.some(
+      (task) =>
+        typeof task.id !== 'string' ||
+        task.id.length === 0 ||
+        typeof task.reference !== 'string' ||
+        task.reference.length === 0 ||
+        !Number.isSafeInteger(task.version) ||
+        task.version < 1
+    )
+  ) {
+    throw new Error('服务器设备任务快照包含重复 ID 或无效权威版本。');
+  }
+}
+
 export class PdaSyncService {
   constructor(
     private readonly queue: OfflineQueue,
@@ -68,6 +99,7 @@ export class PdaSyncService {
         events,
         key('sync', context.deviceId, ...events.map((event) => event.idempotencyKey))
       );
+      assertExactSyncBatch(events, results);
       const succeeded = new Set(
         results
           .filter(
@@ -103,6 +135,7 @@ export class PdaSyncService {
         let refreshed: DeviceTask[] | undefined;
         try {
           refreshed = await this.port.getDeviceTasks(context.deviceId);
+          assertTaskSnapshot(refreshed);
           await this.queue.setMeta(deviceTaskCacheKey(context), refreshed);
           authoritativeTasks = refreshed;
         } catch (error) {
@@ -195,6 +228,16 @@ export class PdaSyncService {
         throw error;
       }
       throw error;
+    }
+    if (
+      server.id !== event.conflict.conflictId ||
+      server.status !== 'RESOLVED' ||
+      !Number.isSafeInteger(server.serverVersion) ||
+      server.serverVersion < snapshot.conflict.serverVersion ||
+      !Number.isSafeInteger(server.version) ||
+      server.version <= snapshot.conflict.version
+    ) {
+      throw new Error('服务器冲突处理回执与本地事件、冲突 ID 或权威版本不一致，已保留本地作业。');
     }
     await this.queue.resolveLocalConflict(eventId, resolution, server.serverVersion);
     return server;

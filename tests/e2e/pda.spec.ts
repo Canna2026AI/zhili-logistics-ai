@@ -6,7 +6,9 @@ import { chromium, expect, test, type Page, type Route } from '@playwright/test'
 import axe from 'axe-core';
 
 const deviceId = '01JDEVICE00000000000000003';
+const tenantId = '01JTENANT0000000000000001';
 const warehouseId = '01JWAREHOUSE00000000000001';
+const subjectId = '01JSUBJECT0000000000000001';
 const productionUrl = 'http://127.0.0.1:4202';
 const meta = { requestId: 'req-pda-e2e', asOf: '2026-07-22T10:00:00.000Z' };
 const evidencePng = Buffer.from(
@@ -50,6 +52,21 @@ function multipartPart(body: Buffer, name: string) {
   return body.subarray(start, end);
 }
 
+function multipartText(body: string, name: string) {
+  return new RegExp(`name="${name}"\\r?\\n\\r?\\n([^\\r\\n]+)`).exec(body)?.[1]?.trim() ?? '';
+}
+
+function mediaReceipt(mediaId: string, eventId: string, status: 'UPLOADED' | 'SCANNING' | 'READY') {
+  return {
+    mediaId,
+    eventId,
+    scope: { deviceId, tenantId, warehouseId, subjectId },
+    status,
+    objectRef: `reservation/${mediaId}`,
+    expiresAt: '2099-12-31T23:59:59.000Z',
+  };
+}
+
 async function installProductionApi(
   page: Page,
   override?: (route: Route, path: string) => Promise<boolean>
@@ -61,9 +78,9 @@ async function installProductionApi(
       await reply(route, {
         data: {
           deviceId,
-          tenantId: '01JTENANT0000000000000001',
+          tenantId,
           warehouseId,
-          subjectId: '01JSUBJECT0000000000000001',
+          subjectId,
           permissions: [
             'pda.use',
             'pda.sync',
@@ -173,15 +190,13 @@ test('persists encrypted event, media and PWA shell across a real browser restar
   });
   const productionApi = async (route: Route, path: string) => {
     if (path.endsWith(`/devices/${deviceId}/media`)) {
+      const postData = route.request().postData() ?? '';
+      const mediaId = multipartText(postData, 'mediaId');
+      const eventId = multipartText(postData, 'eventId');
       await reply(
         route,
         {
-          data: {
-            mediaId: 'media-restored',
-            eventId: 'event-restored',
-            status: 'UPLOADED',
-            objectRef: 'pda/offline-restart.jpg',
-          },
+          data: mediaReceipt(mediaId, eventId, 'UPLOADED'),
           meta,
         },
         201
@@ -630,10 +645,7 @@ test('falls back when camera permission or BarcodeDetector is unavailable', asyn
     const start = performance.now();
     return new Promise<number>((resolve) => {
       const observer = new MutationObserver(() => {
-        const command = [...document.querySelectorAll('button')].find((candidate) =>
-          candidate.textContent?.includes('确认作业')
-        ) as HTMLButtonElement | undefined;
-        if (command?.disabled) {
+        if (document.querySelector('[data-testid="pending-count"]')?.textContent === '1') {
           observer.disconnect();
           resolve(performance.now() - start);
         }
@@ -741,12 +753,7 @@ test('runs the production PALLETIZED to POD lifecycle from authoritative receipt
       await reply(
         route,
         {
-          data: {
-            mediaId,
-            eventId: uploadedEventId,
-            status: 'UPLOADED',
-            objectRef: `reservation/${mediaId}`,
-          },
+          data: mediaReceipt(mediaId, uploadedEventId, 'UPLOADED'),
           meta,
         },
         201
@@ -774,7 +781,7 @@ test('runs the production PALLETIZED to POD lifecycle from authoritative receipt
               deliveryTaskId: taskId,
               versionNo: 1,
               recipientName: body.recipientName,
-              signedAt: '2026-07-22T10:00:00.000Z',
+              signedAt: body.signedAt,
               evidenceRefs: body.evidenceRefs,
             },
             claimedMediaRefs: body.evidenceRefs,
@@ -912,20 +919,19 @@ test('retains blobs and retries idempotent multipart media upload after restart'
           { code: 'WEAK_NETWORK', message: 'upload interrupted', requestId: meta.requestId },
           503
         );
-      else
+      else {
+        const postData = route.request().postData() ?? '';
+        const mediaId = multipartText(postData, 'mediaId');
+        const eventId = multipartText(postData, 'eventId');
         await reply(
           route,
           {
-            data: {
-              mediaId: 'server-keeps-client-id',
-              eventId: 'evt',
-              status: 'UPLOADED',
-              objectRef: 'pda/photo.jpg',
-            },
+            data: mediaReceipt(mediaId, eventId, 'UPLOADED'),
             meta,
           },
           201
         );
+      }
       return true;
     }
     if (path.endsWith('/devices/events:sync')) {
@@ -1149,7 +1155,7 @@ test('does not advance delivery state when production transition rejects', async
   await expect(alert).toContainText('expected version 4');
   await expect(alert).toContainText('req-delivery-409');
   await expect(page.getByTestId('pending-count')).toHaveText('1');
-  await page.getByRole('button', { name: '任务' }).click();
+  await page.getByRole('button', { name: '任务', exact: true }).click();
   await page.getByRole('button', { name: /LM250722001/ }).click();
   await expect(page.getByTestId('selected-task')).toContainText('OUT_FOR_DELIVERY · v4');
   expect(ifMatches).toEqual(['"3"']);

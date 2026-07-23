@@ -66,6 +66,43 @@ function apiStatus(error: unknown) {
   return typeof error === 'object' && error && 'status' in error ? Number(error.status) : 0;
 }
 
+function assertBoundSession(
+  bound: Awaited<ReturnType<PdaPort['bindDevice']>>,
+  requested: BindingInput
+) {
+  if (
+    bound.deviceId !== requested.deviceId ||
+    bound.warehouseId !== requested.warehouseId ||
+    bound.subjectId !== requested.subjectId ||
+    typeof bound.tenantId !== 'string' ||
+    bound.tenantId.length === 0 ||
+    !Array.isArray(bound.permissions) ||
+    new Set(bound.permissions).size !== bound.permissions.length ||
+    !Number.isFinite(Date.parse(bound.expiresAt)) ||
+    Date.parse(bound.expiresAt) <= Date.now()
+  ) {
+    throw new Error('服务器绑定回执与请求的 device / warehouse / subject 不一致或已过期。');
+  }
+}
+
+function assertDeviceTasks(value: DeviceTask[]) {
+  if (
+    !Array.isArray(value) ||
+    new Set(value.map((task) => task.id)).size !== value.length ||
+    value.some(
+      (task) =>
+        typeof task.id !== 'string' ||
+        task.id.length === 0 ||
+        typeof task.reference !== 'string' ||
+        task.reference.length === 0 ||
+        !Number.isSafeInteger(task.version) ||
+        task.version < 1
+    )
+  ) {
+    throw new Error('服务器设备任务快照包含重复 ID 或无效权威版本。');
+  }
+}
+
 export function App({
   store: injectedStore,
   port: injectedPort,
@@ -106,6 +143,7 @@ export function App({
   );
   const replaceTasks = async (next: DeviceTask[]) => {
     if (!session) return;
+    assertDeviceTasks(next);
     await queue.setMeta(deviceTaskCacheKey(session), next);
     setTasks(next);
     setSelectedTask((current) =>
@@ -177,6 +215,7 @@ export function App({
         if (!navigator.onLine) setTasks(cachedTasks ?? []);
         else {
           const loadedTasks = await port.getDeviceTasks(restored.deviceId);
+          assertDeviceTasks(loadedTasks);
           setTasks(loadedTasks);
           await queue.setMeta(deviceTaskCacheKey(restored), loadedTasks);
         }
@@ -230,6 +269,7 @@ export function App({
         },
         `pda:bind:${input.deviceId}:${input.warehouseId}:${input.subjectId}`
       );
+      assertBoundSession(bound, input);
       if (
         current &&
         bound.tenantId !== current.tenantId &&
@@ -239,6 +279,7 @@ export function App({
         throw new UnsafeBindingChangeError();
       const next: LocalDeviceSession = { ...bound, timezone, appVersion };
       const loadedTasks = await port.getDeviceTasks(next.deviceId);
+      assertDeviceTasks(loadedTasks);
       await guard.persistSession(next);
       await queue.setMeta(deviceTaskCacheKey(next), loadedTasks);
       setSession(next);

@@ -2,6 +2,7 @@ import type { components } from '@zhili/contracts';
 
 export type DeviceEventEnvelope = components['schemas']['DeviceEventEnvelope'];
 export type DeviceTask = components['schemas']['DeviceTask'];
+export type DeviceMedia = components['schemas']['DeviceMedia'];
 export type DeviceSession = components['schemas']['DeviceSession'];
 export type DeviceConflict = components['schemas']['DeviceConflict'];
 export type ConflictResolution = components['schemas']['ResolveDeviceConflictRequest'];
