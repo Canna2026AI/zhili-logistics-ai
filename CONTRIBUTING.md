@@ -12,6 +12,11 @@
 
 一个功能应放在独立目录，并包含视图、状态、API 适配和测试。跨功能依赖只能通过 `@zhili/contracts`、共享 UI 或明确的领域端口，不直接导入另一功能的内部文件。
 
+公开仓库参与者可以 Fork 后提交 PR；受邀协作者从 `main` 创建
+`codex/<surface>-<feature>` 分支。不要直接向 `main` 推送功能提交。一个 PR 只负责
+一个端或一个共享领域，目录映射与局部验收命令见
+[`docs/02-architecture/module-collaboration.md`](docs/02-architecture/module-collaboration.md)。
+
 ## 测试先行
 
 每个生产行为先增加失败测试并确认失败原因正确，再写最小实现。提交前至少运行：
@@ -26,6 +31,10 @@ pnpm e2e
 ```
 
 财务、状态迁移、权限、RLS、幂等、外部回调和 AI 自动动作必须包含负例。前端变更必须附固定画布截图与概念图对照记录。
+
+只修改单端时，先运行该端的 `test`、`lint`、`typecheck`、`build` 与对应
+Playwright project；合并前再运行全仓门禁。共享 OpenAPI 发生变化时还必须运行
+`pnpm contracts:lint`、`pnpm contracts:test` 和 `pnpm contracts:generate:check`。
 
 ## 提交与评审
 

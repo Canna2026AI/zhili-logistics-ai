@@ -32,15 +32,18 @@ pnpm install --frozen-lockfile
 pnpm dev:ops
 ```
 
-五端预览入口：
+五端预览入口。前四端在后端尚未合并前必须显式加 `?mock=1`，这样所有按钮、
+异常恢复与离线流程都使用可重复的本地契约数据；不带该参数时会连接真实
+`/api/v1`，不会静默回退为假成功：
 
-- 运营端：`http://127.0.0.1:4100/`
-- 客户门户：`http://127.0.0.1:4101/`
+- 运营端：`http://127.0.0.1:4100/?mock=1`
+- 客户门户：`http://127.0.0.1:4101/?mock=1`
 - PDA 交互演示：`http://127.0.0.1:4102/?mock=1`
-- SaaS 平台端：`http://127.0.0.1:4103/`
+- SaaS 平台端：`http://127.0.0.1:4103/?mock=1`
 - 官网：`http://127.0.0.1:4104/zhili-logistics-ai/`
 
-PDA 不带 `?mock=1` 时会按生产安全策略连接同源 `/api/v1`，不会静默回退到假数据；
+各端模块入口和所有权见
+[`docs/02-architecture/module-collaboration.md`](docs/02-architecture/module-collaboration.md)；
 Storybook 使用 `6006`。完整质量门槛：
 
 ```bash

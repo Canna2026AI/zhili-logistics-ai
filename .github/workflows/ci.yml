@@ -27,6 +27,8 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm contracts:lint
+      - run: pnpm contracts:test
       - run: pnpm contracts:generate:check
       - run: pnpm format:check
       - run: pnpm lint
@@ -50,6 +52,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e
+      - name: Ops production recovery flows
+        run: pnpm exec playwright test --config tests/e2e/ops-production.playwright.config.ts
       - name: Upload Playwright evidence
         if: always()
         uses: actions/upload-artifact@v4
