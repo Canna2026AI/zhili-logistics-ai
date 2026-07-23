@@ -1,6 +1,11 @@
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { MediaQueueItem, QueuedEvent } from '../domain/types';
+import type { DeviceTakeoverExportReceipt, MediaQueueItem, QueuedEvent } from '../domain/types';
 import { readBlobBytes } from './blob-bytes';
+import {
+  assertTakeoverManifestBinding,
+  assertTakeoverWorkMatchesManifest,
+  type TakeoverManifest,
+} from '../takeover/manifest';
 
 export interface QueueStore {
   getEvents(): Promise<QueuedEvent[]>;
@@ -16,8 +21,15 @@ export interface QueueStore {
   setNextSequence(value: number): Promise<void>;
   getMeta<T>(key: string): Promise<T | undefined>;
   setMeta<T>(key: string, value: T): Promise<void>;
+  deleteMeta(key: string): Promise<void>;
   deleteWork(eventId: string, mediaIds: string[]): Promise<void>;
   deleteWorkPackage(eventIds: string[], mediaIds: string[]): Promise<void>;
+  finalizeTakeoverPackage(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[],
+    manifest: TakeoverManifest
+  ): Promise<void>;
   appendEvent(
     create: (sequence: number) => QueuedEvent,
     dedupeKey: string,
@@ -100,6 +112,10 @@ export class MemoryQueueStore implements QueueStore {
     this.meta.set(key, value);
   }
 
+  async deleteMeta(key: string) {
+    this.meta.delete(key);
+  }
+
   async deleteWork(eventId: string, mediaIds: string[]) {
     this.events.delete(eventId);
     this.eventDedupe.delete(eventId);
@@ -107,6 +123,39 @@ export class MemoryQueueStore implements QueueStore {
   }
 
   async deleteWorkPackage(eventIds: string[], mediaIds: string[]) {
+    for (const eventId of eventIds) {
+      this.events.delete(eventId);
+      this.eventDedupe.delete(eventId);
+    }
+    for (const mediaId of mediaIds) this.media.delete(mediaId);
+  }
+
+  async finalizeTakeoverPackage(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[],
+    manifest: TakeoverManifest
+  ) {
+    if (
+      receipt.status !== 'VERIFIED' ||
+      receipt.eventCount !== eventIds.length ||
+      receipt.mediaCount !== mediaIds.length ||
+      new Set(eventIds).size !== eventIds.length ||
+      new Set(mediaIds).size !== mediaIds.length ||
+      eventIds.some((eventId) => !this.events.has(eventId)) ||
+      mediaIds.some((mediaId) => !this.media.has(mediaId))
+    ) {
+      throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
+    }
+    await assertTakeoverWorkMatchesManifest(
+      receipt,
+      manifest,
+      eventIds.map((eventId) => this.events.get(eventId)!),
+      mediaIds.map((mediaId) => this.media.get(mediaId)!)
+    );
+    this.meta.set('last-takeover-export-receipt', receipt);
+    this.meta.delete('pending-takeover-finalize');
+    this.meta.delete('pending-takeover-upload');
     for (const eventId of eventIds) {
       this.events.delete(eventId);
       this.eventDedupe.delete(eventId);
@@ -192,6 +241,24 @@ interface StoredEncryptedRecord {
   value: CipherRecord;
 }
 
+function sameStoredRecord(
+  left: StoredEncryptedRecord | undefined,
+  right: StoredEncryptedRecord | undefined
+) {
+  if (!left || !right || left.id !== right.id || left.dedupeHash !== right.dedupeHash) return false;
+  if (
+    left.value.iv.length !== right.value.iv.length ||
+    left.value.iv.some((value, index) => value !== right.value.iv[index])
+  )
+    return false;
+  const leftBytes = new Uint8Array(left.value.ciphertext);
+  const rightBytes = new Uint8Array(right.value.ciphertext);
+  return (
+    leftBytes.length === rightBytes.length &&
+    leftBytes.every((value, index) => value === rightBytes[index])
+  );
+}
+
 interface PdaQueueDatabase extends DBSchema {
   events: {
     key: string;
@@ -214,6 +281,10 @@ async function hashKey(value: string) {
 export class IndexedDbQueueStore implements QueueStore {
   private readonly database: Promise<IDBPDatabase<PdaQueueDatabase>>;
   private codecPromise?: Promise<QueueCodec>;
+
+  protected beforeFinalizeCommit(_abort: () => void) {
+    void _abort;
+  }
 
   constructor(
     readonly databaseName = 'zhili-pda-offline-v1',
@@ -324,6 +395,7 @@ export class IndexedDbQueueStore implements QueueStore {
       mimeType: item.mimeType,
       status: item.status,
       remoteStatus: item.remoteStatus,
+      remoteExpiresAt: item.remoteExpiresAt,
       progress: item.progress,
       attempts: item.attempts,
       errorMessage: item.errorMessage,
@@ -378,6 +450,10 @@ export class IndexedDbQueueStore implements QueueStore {
     await database.put('meta', { id: key, value: await codec.encode(value) });
   }
 
+  async deleteMeta(key: string) {
+    await (await this.database).delete('meta', key);
+  }
+
   async deleteWork(eventId: string, mediaIds: string[]) {
     const database = await this.database;
     const transaction = database.transaction(['events', 'media'], 'readwrite');
@@ -396,6 +472,98 @@ export class IndexedDbQueueStore implements QueueStore {
       ...mediaIds.map((mediaId) => transaction.objectStore('media').delete(mediaId)),
     ]);
     await transaction.done;
+  }
+
+  async finalizeTakeoverPackage(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[],
+    manifest: TakeoverManifest
+  ) {
+    if (
+      receipt.status !== 'VERIFIED' ||
+      receipt.eventCount !== eventIds.length ||
+      receipt.mediaCount !== mediaIds.length ||
+      new Set(eventIds).size !== eventIds.length ||
+      new Set(mediaIds).size !== mediaIds.length
+    ) {
+      throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
+    }
+    const [database, codec] = await Promise.all([this.database, this.codec()]);
+    await assertTakeoverManifestBinding(manifest, {
+      manifestHash: receipt.manifestHash,
+      scope: receipt.scope,
+      eventIds,
+      mediaIds,
+      eventCount: receipt.eventCount,
+      mediaCount: receipt.mediaCount,
+    });
+    const [validatedEventRecords, validatedMediaRecords] = await Promise.all([
+      Promise.all(eventIds.map((eventId) => database.get('events', eventId))),
+      Promise.all(mediaIds.map((mediaId) => database.get('media', mediaId))),
+    ]);
+    if (
+      validatedEventRecords.some((record) => !record) ||
+      validatedMediaRecords.some((record) => !record)
+    ) {
+      throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
+    }
+    const [validatedEvents, validatedMedia] = await Promise.all([
+      Promise.all(validatedEventRecords.map((record) => codec.decode<QueuedEvent>(record!.value))),
+      Promise.all(
+        validatedMediaRecords.map(async (record) => {
+          const stored = await codec.decode<SerializableMedia>(record!.value);
+          const { fileBytes, ...item } = stored;
+          return {
+            ...item,
+            blob: new Blob([new Uint8Array(fileBytes)], { type: item.mimeType }),
+          };
+        })
+      ),
+    ]);
+    await assertTakeoverWorkMatchesManifest(receipt, manifest, validatedEvents, validatedMedia);
+    const encryptedReceipt = await codec.encode(receipt);
+    const transaction = database.transaction(['meta', 'events', 'media'], 'readwrite');
+    const eventStore = transaction.objectStore('events');
+    const mediaStore = transaction.objectStore('media');
+    const [events, media] = await Promise.all([
+      Promise.all(eventIds.map((eventId) => eventStore.get(eventId))),
+      Promise.all(mediaIds.map((mediaId) => mediaStore.get(mediaId))),
+    ]);
+    if (
+      events.some((event, index) => !sameStoredRecord(event, validatedEventRecords[index])) ||
+      media.some((item, index) => !sameStoredRecord(item, validatedMediaRecords[index]))
+    ) {
+      transaction.abort();
+      try {
+        await transaction.done;
+      } catch {
+        /* expected abort: no receipt or work-package change is committed */
+      }
+      throw new Error('接管清理清单无效，已保留回执与全部本地数据。');
+    }
+    const mutations = [
+      transaction.objectStore('meta').put({
+        id: 'last-takeover-export-receipt',
+        value: encryptedReceipt,
+      }),
+      transaction.objectStore('meta').delete('pending-takeover-finalize'),
+      transaction.objectStore('meta').delete('pending-takeover-upload'),
+      ...eventIds.map((eventId) => eventStore.delete(eventId)),
+      ...mediaIds.map((mediaId) => mediaStore.delete(mediaId)),
+    ];
+    this.beforeFinalizeCommit(() => transaction.abort());
+    try {
+      await Promise.all(mutations);
+      await transaction.done;
+    } catch (error) {
+      try {
+        await transaction.done;
+      } catch {
+        /* consume the transaction abort after preserving the original failure */
+      }
+      throw error;
+    }
   }
 
   async appendEvent(
@@ -423,6 +591,7 @@ export class IndexedDbQueueStore implements QueueStore {
             mimeType: item.mimeType,
             status: item.status,
             remoteStatus: item.remoteStatus,
+            remoteExpiresAt: item.remoteExpiresAt,
             progress: item.progress,
             attempts: item.attempts,
             errorMessage: item.errorMessage,

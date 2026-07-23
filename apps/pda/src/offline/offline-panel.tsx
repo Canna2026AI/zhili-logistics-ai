@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Download, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button, StatusTag } from '@zhili/ui';
 import type { MediaQueueItem, QueuedEvent } from '../domain/types';
+import type { TakeoverProgressStage } from '../device-session/takeover-service';
+import { TakeoverProgress } from '../device-session/takeover-progress';
 
 export function OfflinePanel({
   events,
@@ -18,6 +20,8 @@ export function OfflinePanel({
   exportAvailable,
   onRetryMedia,
   onDeleteWork,
+  takeoverStage,
+  restoredFromStorage = false,
 }: {
   events: QueuedEvent[];
   media: MediaQueueItem[];
@@ -33,20 +37,52 @@ export function OfflinePanel({
   exportAvailable: boolean;
   onRetryMedia: (mediaId: string) => Promise<void>;
   onDeleteWork: (eventId: string) => Promise<void>;
+  takeoverStage?: TakeoverProgressStage;
+  restoredFromStorage?: boolean;
 }) {
   const [takeoverReason, setTakeoverReason] = useState('');
   const reserved = media.filter((item) =>
     ['UPLOADED', 'SCANNING', 'READY'].includes(item.remoteStatus ?? '')
   ).length;
+  const full = events.length >= 200;
+  const warning = events.length >= 183;
+  const title = full ? '离线队列已满' : warning ? '离线队列预警' : '离线队列';
   return (
     <section className="pda-page" aria-labelledby="offline-title">
       <div className="pda-page-heading">
         <div>
-          <h1 id="offline-title">离线队列</h1>
+          <h1 id="offline-title">{title}</h1>
           <p>按本地序号同步；部分成功不回滚兄弟项。</p>
         </div>
         <span>{events.length}/200</span>
       </div>
+      {warning && (
+        <div
+          className={`pda-offline-state ${full ? 'pda-offline-state--danger' : ''}`}
+          role="alert"
+        >
+          <strong>
+            {full
+              ? '已阻止新业务扫描'
+              : `容量 ${events.length}/200 · 剩余 ${200 - events.length} 条`}
+          </strong>
+          <span>
+            {full
+              ? '只允许同步、处理冲突或使用服务器授权的管理员加密接管。'
+              : '请尽快同步；达到 200 条后将停止新业务写入。'}
+          </span>
+        </div>
+      )}
+      {restoredFromStorage && events.length > 0 && (
+        <div className="pda-flow-alert pda-restart-recovery" role="status">
+          <strong>本地队列已恢复</strong>
+          <span>
+            已恢复 {events.length} 个事件 · {media.length}{' '}
+            个媒体；租户、用户、设备与仓库作用域已复核。
+          </span>
+        </div>
+      )}
+      <TakeoverProgress stage={takeoverStage} />
       <div className="pda-sync-summary" role="status" aria-live="polite">
         <div>
           <strong>{online ? '在线' : '离线'}</strong>

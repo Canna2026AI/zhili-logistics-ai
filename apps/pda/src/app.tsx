@@ -1,5 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ClipboardList, Cloud, CloudOff, ScanLine, UserRound, WifiOff } from 'lucide-react';
+import {
+  ChevronLeft,
+  ClipboardList,
+  Cloud,
+  CloudOff,
+  ScanLine,
+  UserRound,
+  WifiOff,
+} from 'lucide-react';
 import { createZhiliClient } from '@zhili/api-client';
 import { Button } from '@zhili/ui';
 import type { DeviceTask } from './domain/types';
@@ -17,11 +25,15 @@ import {
 import { PdaSyncService } from './sync/pda-sync-service';
 import { LoginScreen, type BindingInput } from './device-session/login-screen';
 import { TaskHome } from './tasks/task-home';
+import { deviceTaskCacheKey } from './tasks/task-cache';
 import { ScannerScreen } from './scanner/scanner-screen';
 import { OfflinePanel } from './offline/offline-panel';
 import { ConflictPanel } from './conflicts/conflict-panel';
 import { MyScreen } from './device-session/my-screen';
-import { DeviceTakeoverService } from './device-session/takeover-service';
+import {
+  DeviceTakeoverService,
+  type TakeoverProgressStage,
+} from './device-session/takeover-service';
 
 type Tab = 'tasks' | 'scan' | 'offline' | 'my' | 'conflict';
 
@@ -54,6 +66,43 @@ function apiStatus(error: unknown) {
   return typeof error === 'object' && error && 'status' in error ? Number(error.status) : 0;
 }
 
+function assertBoundSession(
+  bound: Awaited<ReturnType<PdaPort['bindDevice']>>,
+  requested: BindingInput
+) {
+  if (
+    bound.deviceId !== requested.deviceId ||
+    bound.warehouseId !== requested.warehouseId ||
+    bound.subjectId !== requested.subjectId ||
+    typeof bound.tenantId !== 'string' ||
+    bound.tenantId.length === 0 ||
+    !Array.isArray(bound.permissions) ||
+    new Set(bound.permissions).size !== bound.permissions.length ||
+    !Number.isFinite(Date.parse(bound.expiresAt)) ||
+    Date.parse(bound.expiresAt) <= Date.now()
+  ) {
+    throw new Error('服务器绑定回执与请求的 device / warehouse / subject 不一致或已过期。');
+  }
+}
+
+function assertDeviceTasks(value: DeviceTask[]) {
+  if (
+    !Array.isArray(value) ||
+    new Set(value.map((task) => task.id)).size !== value.length ||
+    value.some(
+      (task) =>
+        typeof task.id !== 'string' ||
+        task.id.length === 0 ||
+        typeof task.reference !== 'string' ||
+        task.reference.length === 0 ||
+        !Number.isSafeInteger(task.version) ||
+        task.version < 1
+    )
+  ) {
+    throw new Error('服务器设备任务快照包含重复 ID 或无效权威版本。');
+  }
+}
+
 export function App({
   store: injectedStore,
   port: injectedPort,
@@ -64,8 +113,9 @@ export function App({
   const media = useMemo(() => new MediaQueue(store), [store]);
   const guard = useMemo(() => new SessionGuard(queue), [queue]);
   const syncService = useMemo(() => new PdaSyncService(queue, media, port), [queue, media, port]);
+  const [takeoverStage, setTakeoverStage] = useState<TakeoverProgressStage>();
   const takeoverService = useMemo(
-    () => new DeviceTakeoverService(queue, media, port),
+    () => new DeviceTakeoverService(queue, media, port, undefined, setTakeoverStage),
     [queue, media, port]
   );
 
@@ -82,6 +132,8 @@ export function App({
   const [syncMessage, setSyncMessage] = useState<string>();
   const [selectedConflictId, setSelectedConflictId] = useState<string>();
   const [bindingMismatchLocked, setBindingMismatchLocked] = useState(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string>();
+  const [restoredFromStorage, setRestoredFromStorage] = useState(false);
 
   const changed = () => setRevision((value) => value + 1);
   const snapshot = queue.snapshot();
@@ -90,7 +142,9 @@ export function App({
     (event) => event.envelope.eventId === selectedConflictId
   );
   const replaceTasks = async (next: DeviceTask[]) => {
-    await queue.setMeta('device-tasks', next);
+    if (!session) return;
+    assertDeviceTasks(next);
+    await queue.setMeta(deviceTaskCacheKey(session), next);
     setTasks(next);
     setSelectedTask((current) =>
       current ? next.find((task) => task.id === current.id) : undefined
@@ -101,7 +155,13 @@ export function App({
     let cancelled = false;
     void (async () => {
       try {
-        await Promise.all([queue.restore(), media.restore()]);
+        const [restoredQueue, restoredMedia, restoredSyncAt] = await Promise.all([
+          queue.restore(),
+          media.restore(),
+          queue.getMeta<string>('last-successful-sync-at'),
+        ]);
+        setRestoredFromStorage(restoredQueue.events.length > 0 || restoredMedia.length > 0);
+        setLastSyncedAt(restoredSyncAt);
         const restored = await guard.restoreSession();
         if (cancelled) return;
         if (!restored) {
@@ -141,12 +201,23 @@ export function App({
           return;
         }
         setSession(restored);
-        const cachedTasks = await queue.getMeta<DeviceTask[]>('device-tasks');
-        if (!navigator.onLine && cachedTasks) setTasks(cachedTasks);
+        try {
+          const finalized = await takeoverService.retryPendingFinalize(restored, true);
+          if (finalized) {
+            setSyncMessage(
+              `已恢复接管回执并完成本地提交：${finalized.exportId}。未创建新的接管业务提交。`
+            );
+          }
+        } catch (caught) {
+          setSyncMessage(explain(caught));
+        }
+        const cachedTasks = await queue.getMeta<DeviceTask[]>(deviceTaskCacheKey(restored));
+        if (!navigator.onLine) setTasks(cachedTasks ?? []);
         else {
           const loadedTasks = await port.getDeviceTasks(restored.deviceId);
+          assertDeviceTasks(loadedTasks);
           setTasks(loadedTasks);
-          await queue.setMeta('device-tasks', loadedTasks);
+          await queue.setMeta(deviceTaskCacheKey(restored), loadedTasks);
         }
         setPhase('ready');
         changed();
@@ -160,7 +231,7 @@ export function App({
     return () => {
       cancelled = true;
     };
-  }, [guard, media, port, queue]);
+  }, [guard, media, port, queue, takeoverService]);
 
   useEffect(() => {
     const onlineHandler = () => setOnline(true);
@@ -198,6 +269,7 @@ export function App({
         },
         `pda:bind:${input.deviceId}:${input.warehouseId}:${input.subjectId}`
       );
+      assertBoundSession(bound, input);
       if (
         current &&
         bound.tenantId !== current.tenantId &&
@@ -206,13 +278,14 @@ export function App({
       )
         throw new UnsafeBindingChangeError();
       const next: LocalDeviceSession = { ...bound, timezone, appVersion };
+      const loadedTasks = await port.getDeviceTasks(next.deviceId);
+      assertDeviceTasks(loadedTasks);
       await guard.persistSession(next);
+      await queue.setMeta(deviceTaskCacheKey(next), loadedTasks);
       setSession(next);
       setBindingMismatchLocked(false);
-      const loadedTasks = await port.getDeviceTasks(next.deviceId);
       setTasks(loadedTasks);
       setSelectedTask(undefined);
-      await queue.setMeta('device-tasks', loadedTasks);
       setPhase('ready');
       setTab('tasks');
       changed();
@@ -243,6 +316,9 @@ export function App({
       setSyncMessage(
         `同步完成：应用 ${result.applied}，已处理 ${result.duplicate}，冲突 ${result.conflict}，拒绝 ${result.rejected}，媒体已预留 ${result.mediaReserved}。`
       );
+      const syncedAt = new Date().toISOString();
+      await queue.setMeta('last-successful-sync-at', syncedAt);
+      setLastSyncedAt(syncedAt);
       changed();
     } catch (caught) {
       if (apiStatus(caught) === 401) {
@@ -251,7 +327,7 @@ export function App({
         setPhase('login');
       } else {
         const persistedTasks = await queue
-          .getMeta<DeviceTask[]>('device-tasks')
+          .getMeta<DeviceTask[]>(deviceTaskCacheKey(session))
           .catch(() => undefined);
         if (persistedTasks) {
           setTasks(persistedTasks);
@@ -274,6 +350,7 @@ export function App({
     }
     setBusy(true);
     setSyncMessage(undefined);
+    setTakeoverStage(undefined);
     try {
       guard.assertAllowed('EXPORT');
       const receipt = await takeoverService.exportAndClear(session, reason);
@@ -359,17 +436,20 @@ export function App({
   return (
     <main className="pda-app" data-revision={revision}>
       <header className="pda-topbar">
-        <div>
-          <strong>智立科技物流 AI</strong>
-          <span>
-            {session.warehouseId.slice(-8)} · {session.deviceId.slice(-8)}
-          </span>
-        </div>
+        <button
+          type="button"
+          className="pda-topbar-back"
+          aria-label="返回任务"
+          onClick={() => setTab('tasks')}
+        >
+          <ChevronLeft aria-hidden="true" />
+        </button>
+        <strong className="pda-topbar-title">智立科技物流AI系统</strong>
         <div className="pda-network" role="status" aria-live="polite" data-online={online}>
           {online ? <Cloud aria-hidden="true" /> : <CloudOff aria-hidden="true" />}
           <span>
-            {online ? '在线' : '离线'} · 待同步{' '}
-            <b data-testid="pending-count">{snapshot.events.length}</b>/200
+            {online ? '在线' : '离线'} · <b data-testid="pending-count">{snapshot.events.length}</b>
+            /200
             <br />
             媒体 {headerMediaReserved}/{mediaItems.length}
           </span>
@@ -402,7 +482,15 @@ export function App({
       <div className="pda-content">
         {tab === 'tasks' && (
           <TaskHome
+            session={session}
             tasks={tasks}
+            online={online}
+            pendingCount={snapshot.events.length}
+            lastSyncedAt={lastSyncedAt}
+            onSwitchWarehouse={() => {
+              setPhase('login');
+              setError(undefined);
+            }}
             onScan={(task) => {
               setSelectedTask(task);
               setScanCode(task.reference);
@@ -480,6 +568,8 @@ export function App({
               await queue.retryRejected(eventId);
               changed();
             }}
+            takeoverStage={takeoverStage}
+            restoredFromStorage={restoredFromStorage}
           />
         )}
         {tab === 'conflict' && selectedConflict && (
@@ -514,6 +604,7 @@ export function App({
               snapshot.events.length > 0 &&
               session.permissions.includes('pda.takeover.export')
             }
+            takeoverStage={takeoverStage}
           />
         )}
       </div>

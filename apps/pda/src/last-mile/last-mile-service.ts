@@ -76,6 +76,8 @@ export class LastMileService {
       receipt.deviceEventId !== deviceEventId ||
       receipt.deliveryTask.id !== current.taskId ||
       receipt.deliveryTask.status !== nextStatus ||
+      !Number.isSafeInteger(receipt.deliveryTask.version) ||
+      receipt.deliveryTask.version <= current.version ||
       !sameRefs(mediaRefs, receipt.claimedMediaRefs)
     ) {
       throw new Error('服务器尾程回执与本地事件、任务、状态或媒体认领不一致，已保留本地数据。');
@@ -115,7 +117,16 @@ export class LastMileService {
       receipt.deviceEventId !== input.deviceEventId ||
       receipt.deliveryTask.id !== current.taskId ||
       receipt.deliveryTask.status !== 'COMPLETED' ||
+      !Number.isSafeInteger(receipt.deliveryTask.version) ||
+      receipt.deliveryTask.version <= current.version ||
       receipt.proofOfDelivery.deliveryTaskId !== current.taskId ||
+      typeof receipt.proofOfDelivery.id !== 'string' ||
+      receipt.proofOfDelivery.id.trim().length === 0 ||
+      !Number.isSafeInteger(receipt.proofOfDelivery.versionNo) ||
+      receipt.proofOfDelivery.versionNo < 1 ||
+      receipt.proofOfDelivery.recipientName !== input.recipientName ||
+      receipt.proofOfDelivery.signedAt !== input.signedAt ||
+      !sameRefs(input.evidenceRefs, receipt.proofOfDelivery.evidenceRefs) ||
       !sameRefs(input.evidenceRefs, receipt.claimedMediaRefs)
     ) {
       throw new Error('服务器 POD 回执与本地事件、任务或媒体认领不一致，已保留本地数据。');

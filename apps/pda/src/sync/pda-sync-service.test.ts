@@ -5,7 +5,8 @@ import { MemoryQueueStore } from '../offline/queue-store';
 import { MemoryPdaPort } from '../ports/memory-pda-port';
 import { PdaApiError } from '../ports/pda-port';
 import { PdaSyncService } from './pda-sync-service';
-import type { DeviceContext } from '../domain/types';
+import { deviceTaskCacheKey } from '../tasks/task-cache';
+import type { DeviceContext, QueuedEvent } from '../domain/types';
 
 const context: DeviceContext = {
   deviceId: '01JDEVICE00000000000000003',
@@ -21,7 +22,57 @@ const syncContext = {
   permissions: ['pda.sync'],
 };
 
+function bindConflictSnapshot(port: MemoryPdaPort, event: QueuedEvent) {
+  const read = port.getDeviceConflict.bind(port);
+  port.getDeviceConflict = async (conflictId) => {
+    const snapshot = await read(conflictId);
+    return {
+      ...snapshot,
+      conflict: {
+        ...snapshot.conflict,
+        id: conflictId,
+        localEvent: event.envelope,
+      },
+    };
+  };
+}
+
 describe('PdaSyncService', () => {
+  it('keeps mock conflict identities unique and bound to each synchronized event', async () => {
+    const queue = new OfflineQueue(new MemoryQueueStore());
+    await queue.restore();
+    const first = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'CONFLICT-FIRST',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const second = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'CONFLICT-SECOND',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const port = new MemoryPdaPort();
+
+    const results = await port.syncDeviceEvents(
+      [first.envelope, second.envelope],
+      'pda:test:unique-conflict-identities'
+    );
+    const conflictIds = results.map((result) => result.conflictId!);
+    const snapshots = await Promise.all(
+      conflictIds.map((conflictId) => port.getDeviceConflict(conflictId))
+    );
+
+    expect(new Set(conflictIds).size).toBe(2);
+    expect(snapshots.map((snapshot) => snapshot.conflict.localEvent.eventId)).toEqual([
+      first.envelope.eventId,
+      second.envelope.eventId,
+    ]);
+  });
+
   it('resumes ordered batches of 100 and handles four dispositions independently', async () => {
     const store = new MemoryQueueStore();
     const queue = new OfflineQueue(store);
@@ -84,6 +135,27 @@ describe('PdaSyncService', () => {
     expect(queue.snapshot().events).toHaveLength(2);
   });
 
+  it('rejects a sync response that omits or duplicates requested event identities', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'BATCH-IDENTITY',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const port = new MemoryPdaPort();
+    port.syncDeviceEvents = vi.fn().mockResolvedValue([]);
+
+    await expect(new PdaSyncService(queue, media, port).synchronize(syncContext)).rejects.toThrow(
+      '批次'
+    );
+    expect(queue.snapshot().events).toHaveLength(1);
+  });
+
   it('fails closed before any port call when event or media context differs', async () => {
     const store = new MemoryQueueStore();
     const queue = new OfflineQueue(store);
@@ -107,6 +179,25 @@ describe('PdaSyncService', () => {
     await expect(new PdaSyncService(queue, media, port).synchronize(syncContext)).rejects.toThrow(
       '不匹配'
     );
+    expect(sync).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before any port call when the persisted session expiry is invalid', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const port = new MemoryPdaPort();
+    const sync = vi.spyOn(port, 'syncDeviceEvents');
+    const upload = vi.spyOn(port, 'uploadDeviceMedia');
+
+    await expect(
+      new PdaSyncService(queue, media, port).synchronize({
+        ...syncContext,
+        expiresAt: 'not-a-date',
+      })
+    ).rejects.toThrow('会话已过期');
     expect(sync).not.toHaveBeenCalled();
     expect(upload).not.toHaveBeenCalled();
   });
@@ -193,7 +284,7 @@ describe('PdaSyncService', () => {
 
       expect(order).toEqual(['sync', 'tasks']);
       expect(result.authoritativeTasks).toEqual(authoritative);
-      expect(await queue.getMeta('device-tasks')).toEqual(authoritative);
+      expect(await queue.getMeta(deviceTaskCacheKey(syncContext))).toEqual(authoritative);
       expect(queue.snapshot().events).toEqual([]);
     }
   );
@@ -374,9 +465,14 @@ describe('PdaSyncService', () => {
       baseVersion: 1,
     });
     const port = new MemoryPdaPort();
-    port.uploadDeviceMedia = vi
-      .fn()
-      .mockResolvedValue({ mediaId: item.mediaId, status: 'SCANNING', objectRef: 'pda/photo' });
+    port.uploadDeviceMedia = vi.fn().mockResolvedValue({
+      mediaId: item.mediaId,
+      eventId: item.eventId,
+      scope: context,
+      status: 'SCANNING',
+      objectRef: 'pda/photo',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+    });
     const sync = vi.spyOn(port, 'syncDeviceEvents');
     port.getDeviceTasks = vi.fn().mockResolvedValue([
       {
@@ -421,6 +517,7 @@ describe('PdaSyncService', () => {
         },
       ]);
       const port = new MemoryPdaPort();
+      bindConflictSnapshot(port, event);
       const service = new PdaSyncService(queue, media, port);
 
       await expect(
@@ -433,6 +530,141 @@ describe('PdaSyncService', () => {
       });
       expect(queue.snapshot().events).toHaveLength(0);
     }
+  });
+
+  it('retains the local conflict when the resolution receipt is for another conflict', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const event = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'CONFLICT',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 7,
+    });
+    await queue.applySyncResults([
+      {
+        eventId: event.envelope.eventId,
+        disposition: 'CONFLICT',
+        claimedMediaRefs: [],
+        conflictId: '01JCONFLICT000000000000001',
+        serverVersion: 9,
+        conflictVersion: 1,
+      },
+    ]);
+    const port = new MemoryPdaPort();
+    bindConflictSnapshot(port, event);
+    port.resolveDeviceConflict = vi.fn().mockResolvedValue({
+      id: '01JCONFLICT000000000000099',
+      localEvent: event.envelope,
+      serverVersion: 10,
+      serverState: { status: 'PICKED' },
+      differences: [],
+      status: 'RESOLVED',
+      version: 2,
+    });
+
+    await expect(
+      new PdaSyncService(queue, media, port).resolveConflict(
+        event.envelope.eventId,
+        'KEEP_SERVER',
+        '现场主管已经复核'
+      )
+    ).rejects.toThrow('回执');
+    expect(queue.snapshot().events).toHaveLength(1);
+  });
+
+  it.each([
+    [
+      'conflict identity',
+      (conflict: Awaited<ReturnType<MemoryPdaPort['getDeviceConflict']>>['conflict']) => ({
+        ...conflict,
+        id: '01JCONFLICT000000000000099',
+      }),
+    ],
+    [
+      'event identity',
+      (conflict: Awaited<ReturnType<MemoryPdaPort['getDeviceConflict']>>['conflict']) => ({
+        ...conflict,
+        localEvent: { ...conflict.localEvent, eventId: '01JOTHEREVENT0000000000001' },
+      }),
+    ],
+    [
+      'event scope',
+      (conflict: Awaited<ReturnType<MemoryPdaPort['getDeviceConflict']>>['conflict']) => ({
+        ...conflict,
+        localEvent: { ...conflict.localEvent, warehouseId: '01JWAREHOUSE00000000000099' },
+      }),
+    ],
+    [
+      'open status',
+      (conflict: Awaited<ReturnType<MemoryPdaPort['getDeviceConflict']>>['conflict']) => ({
+        ...conflict,
+        status: 'RESOLVED' as const,
+      }),
+    ],
+    [
+      'server version',
+      (conflict: Awaited<ReturnType<MemoryPdaPort['getDeviceConflict']>>['conflict']) => ({
+        ...conflict,
+        serverVersion: 8,
+      }),
+    ],
+    [
+      'conflict version',
+      (conflict: Awaited<ReturnType<MemoryPdaPort['getDeviceConflict']>>['conflict']) => ({
+        ...conflict,
+        version: 0,
+      }),
+    ],
+  ])('rejects a conflict snapshot with mismatched or regressed %s', async (_label, mutate) => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const event = await queue.enqueue(context, {
+      action: 'PICK',
+      entityRef: 'CONFLICT-SNAPSHOT',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 7,
+    });
+    const conflictId = '01JCONFLICT000000000000001';
+    await queue.applySyncResults([
+      {
+        eventId: event.envelope.eventId,
+        disposition: 'CONFLICT',
+        claimedMediaRefs: [],
+        conflictId,
+        serverVersion: 9,
+        conflictVersion: 1,
+      },
+    ]);
+    const port = new MemoryPdaPort();
+    const original = await port.getDeviceConflict(conflictId);
+    port.getDeviceConflict = vi.fn().mockResolvedValue({
+      ...original,
+      conflict: mutate({
+        ...original.conflict,
+        id: conflictId,
+        localEvent: event.envelope,
+        serverVersion: 9,
+        status: 'OPEN',
+        version: 1,
+      }),
+    });
+
+    await expect(
+      new PdaSyncService(queue, media, port).loadConflict(event.envelope.eventId)
+    ).rejects.toThrow('冲突快照');
+    expect(queue.snapshot().events[0]?.conflict).toMatchObject({
+      conflictId,
+      serverVersion: 9,
+      version: 1,
+    });
+    expect(queue.snapshot().events[0]?.conflict?.etag).toBeUndefined();
   });
 
   it('preserves the complete 409 envelope after refreshing the newest conflict snapshot', async () => {
@@ -458,6 +690,7 @@ describe('PdaSyncService', () => {
       },
     ]);
     const port = new MemoryPdaPort();
+    bindConflictSnapshot(port, event);
     const originalSnapshot = port.getDeviceConflict.bind(port);
     let reads = 0;
     port.getDeviceConflict = async (conflictId) => {

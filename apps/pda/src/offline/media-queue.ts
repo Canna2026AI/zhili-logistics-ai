@@ -1,4 +1,5 @@
-import type { DeviceContext, MediaQueueItem } from '../domain/types';
+import type { DeviceContext, DeviceMedia, MediaQueueItem } from '../domain/types';
+import { isFutureInstant } from '../domain/time';
 import type { QueueStore } from './queue-store';
 import { readBlobBytes } from './blob-bytes';
 
@@ -10,7 +11,9 @@ async function contentHash(blob: Blob) {
   return value;
 }
 
-function sameContext(left: DeviceContext | undefined, right: DeviceContext) {
+type DeviceScope = Pick<DeviceContext, 'deviceId' | 'tenantId' | 'warehouseId' | 'subjectId'>;
+
+function sameContext(left: DeviceScope | undefined, right: DeviceScope) {
   return (
     left !== undefined &&
     left.deviceId === right.deviceId &&
@@ -20,10 +23,17 @@ function sameContext(left: DeviceContext | undefined, right: DeviceContext) {
   );
 }
 
+function isAcceptedReservation(status: MediaQueueItem['remoteStatus']) {
+  return status === 'UPLOADED' || status === 'SCANNING' || status === 'READY';
+}
+
 export class MediaQueue {
   private items: MediaQueueItem[] = [];
 
-  constructor(private readonly store: QueueStore) {}
+  constructor(
+    private readonly store: QueueStore,
+    private readonly now = () => new Date()
+  ) {}
 
   async restore() {
     this.items = await this.store.getMedia();
@@ -67,20 +77,14 @@ export class MediaQueue {
     return item;
   }
 
-  async uploadPending(
-    upload: (
-      item: MediaQueueItem
-    ) => Promise<{ status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED' }>
-  ) {
+  async uploadPending(upload: (item: MediaQueueItem) => Promise<DeviceMedia>) {
     return this.uploadSelected(() => true, upload);
   }
 
   async uploadRefs(
     context: DeviceContext,
     mediaRefs: string[],
-    upload: (
-      item: MediaQueueItem
-    ) => Promise<{ status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED' }>
+    upload: (item: MediaQueueItem) => Promise<DeviceMedia>
   ) {
     const refs = new Set(mediaRefs);
     const foreign = this.items.find(
@@ -95,10 +99,21 @@ export class MediaQueue {
 
   private async uploadSelected(
     select: (item: MediaQueueItem) => boolean,
-    upload: (
-      item: MediaQueueItem
-    ) => Promise<{ status: 'UPLOADED' | 'SCANNING' | 'READY' | 'REJECTED' }>
+    upload: (item: MediaQueueItem) => Promise<DeviceMedia>
   ) {
+    for (const item of this.items.filter(
+      (candidate) =>
+        select(candidate) &&
+        isAcceptedReservation(candidate.remoteStatus) &&
+        !this.hasActiveReservation(candidate)
+    )) {
+      item.status = 'RETRY';
+      item.remoteStatus = undefined;
+      item.remoteExpiresAt = undefined;
+      item.progress = 0;
+      item.errorMessage = '媒体预留已过期，正在重新预留。';
+      await this.store.putMedia(item);
+    }
     for (const item of this.items.filter(
       (candidate) => select(candidate) && ['PENDING', 'RETRY'].includes(candidate.status)
     )) {
@@ -108,7 +123,20 @@ export class MediaQueue {
       await this.store.putMedia(item);
       try {
         const result = await upload(item);
+        if (
+          result.mediaId !== item.mediaId ||
+          result.eventId !== item.eventId ||
+          !sameContext(result.scope, item.context) ||
+          typeof result.objectRef !== 'string' ||
+          result.objectRef.length === 0 ||
+          !Number.isFinite(Date.parse(result.expiresAt)) ||
+          (isAcceptedReservation(result.status) &&
+            !isFutureInstant(result.expiresAt, this.now().getTime()))
+        ) {
+          throw new Error('媒体上传回执与本地预留的 ID、事件或设备作用域不一致。');
+        }
         item.remoteStatus = result.status;
+        item.remoteExpiresAt = result.expiresAt;
         item.status =
           result.status === 'READY'
             ? 'UPLOADED'
@@ -119,6 +147,8 @@ export class MediaQueue {
         item.errorMessage = undefined;
       } catch (error) {
         item.status = 'RETRY';
+        item.remoteStatus = undefined;
+        item.remoteExpiresAt = undefined;
         item.progress = 0;
         item.errorMessage = error instanceof Error ? error.message : '媒体上传失败';
       }
@@ -136,8 +166,15 @@ export class MediaQueue {
 
   areReserved(mediaRefs: string[]) {
     return mediaRefs.every((mediaId) => {
-      const status = this.items.find((item) => item.mediaId === mediaId)?.remoteStatus;
-      return status === 'UPLOADED' || status === 'SCANNING' || status === 'READY';
+      const item = this.items.find((candidate) => candidate.mediaId === mediaId);
+      return Boolean(item && this.hasActiveReservation(item));
     });
+  }
+
+  private hasActiveReservation(item: MediaQueueItem) {
+    return (
+      isAcceptedReservation(item.remoteStatus) &&
+      isFutureInstant(item.remoteExpiresAt, this.now().getTime())
+    );
   }
 }

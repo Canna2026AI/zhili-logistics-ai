@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { IndexedDbQueueStore, WebCryptoQueueCodec } from './queue-store';
 import { OfflineQueue } from './offline-queue';
 import { MediaQueue } from './media-queue';
-import type { DeviceContext } from '../domain/types';
+import type { DeviceContext, MediaQueueItem, QueuedEvent } from '../domain/types';
+import type { DeviceTakeoverExportReceipt } from '../domain/types';
+import { hashTakeoverManifest, type TakeoverManifest } from '../takeover/manifest';
 
 const context: DeviceContext = {
   deviceId: '01JDEVICE00000000000000003',
@@ -13,6 +15,56 @@ const context: DeviceContext = {
   timezone: 'Asia/Shanghai',
   appVersion: '0.2.0',
 };
+
+const takeoverReceipt: DeviceTakeoverExportReceipt = {
+  exportId: '01JTAKEOVEREXPORT0000000001',
+  authorizationId: '01JTAKEOVERAUTH00000000001',
+  deviceId: context.deviceId,
+  scope: {
+    deviceId: context.deviceId,
+    tenantId: context.tenantId,
+    warehouseId: context.warehouseId,
+    subjectId: context.subjectId,
+  },
+  manifestHash: 'a'.repeat(64),
+  ciphertextHash: 'b'.repeat(64),
+  eventCount: 1,
+  mediaCount: 1,
+  checksumAlgorithm: 'SHA-256',
+  status: 'VERIFIED',
+  receivedAt: '2026-07-23T01:00:00.000Z',
+  verifiedAt: '2026-07-23T01:00:01.000Z',
+};
+
+async function takeoverFixture(events: QueuedEvent[], media: MediaQueueItem[]) {
+  const manifest: TakeoverManifest = {
+    schemaVersion: 1,
+    scope: takeoverReceipt.scope,
+    eventCount: events.length,
+    mediaCount: media.length,
+    events: events.map((event) => ({
+      eventId: event.envelope.eventId,
+      localSequence: event.envelope.localSequence,
+      idempotencyKey: event.envelope.idempotencyKey,
+      mediaRefs: event.envelope.mediaRefs,
+    })),
+    media: media.map((item) => ({
+      mediaId: item.mediaId,
+      eventId: item.eventId,
+      contentHash: item.contentHash,
+      mimeType: item.mimeType,
+    })),
+  };
+  return {
+    manifest,
+    receipt: {
+      ...takeoverReceipt,
+      manifestHash: await hashTakeoverManifest(manifest),
+      eventCount: events.length,
+      mediaCount: media.length,
+    },
+  };
+}
 
 afterEach(() => indexedDB.deleteDatabase('zhili-pda-test'));
 
@@ -73,6 +125,9 @@ describe('IndexedDbQueueStore', () => {
       'image/jpeg',
       'media-atomic'
     );
+    firstMedia.status = 'UPLOADED';
+    firstMedia.remoteStatus = 'READY';
+    firstMedia.remoteExpiresAt = '2099-12-31T23:59:59.000Z';
     await queue.enqueue(context, {
       eventId: firstMedia.eventId,
       action: 'CAPTURE_RECEIPT_PHOTO',
@@ -84,7 +139,11 @@ describe('IndexedDbQueueStore', () => {
     });
     await media.restore();
     expect(queue.snapshot().events[0]?.envelope.mediaRefs).toEqual(['media-atomic']);
-    expect(media.snapshot(context)).toHaveLength(1);
+    expect(media.snapshot(context)[0]).toMatchObject({
+      mediaId: 'media-atomic',
+      remoteStatus: 'READY',
+      remoteExpiresAt: '2099-12-31T23:59:59.000Z',
+    });
     const blockedMedia = await media.prepare(
       context,
       '01JY8Z8F6ME4F0Y9QH2X6D4R8',
@@ -122,6 +181,38 @@ describe('IndexedDbQueueStore', () => {
     store.close();
   });
 
+  it('persists the authoritative media reservation expiry across an encrypted restart', async () => {
+    const firstStore = new IndexedDbQueueStore('zhili-pda-test');
+    const first = new MediaQueue(firstStore);
+    await first.restore();
+    const item = await first.enqueue(
+      context,
+      '01JMEDIAEXPIRYEVENT00000001',
+      new Blob(['reservation-photo']),
+      'image/jpeg',
+      'media-expiry-persisted'
+    );
+    await first.uploadRefs(context, [item.mediaId], async () => ({
+      mediaId: item.mediaId,
+      eventId: item.eventId,
+      scope: context,
+      status: 'UPLOADED',
+      objectRef: 'pda/media-expiry-persisted',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+    }));
+    firstStore.close();
+
+    const secondStore = new IndexedDbQueueStore('zhili-pda-test');
+    const restored = await new MediaQueue(secondStore).restore();
+
+    expect(restored[0]).toMatchObject({
+      mediaId: item.mediaId,
+      remoteStatus: 'UPLOADED',
+      remoteExpiresAt: '2099-12-31T23:59:59.000Z',
+    });
+    secondStore.close();
+  });
+
   it.each(['CONFLICT', 'REJECTED'] as const)(
     'preserves the original local dedupe identity when an event becomes %s',
     async (disposition) => {
@@ -142,6 +233,8 @@ describe('IndexedDbQueueStore', () => {
           disposition,
           claimedMediaRefs: [],
           conflictId: disposition === 'CONFLICT' ? '01JCONFLICT000000000000001' : undefined,
+          serverVersion: disposition === 'CONFLICT' ? 9 : undefined,
+          conflictVersion: disposition === 'CONFLICT' ? 1 : undefined,
           errorCode: disposition === 'REJECTED' ? 'INVALID_STATE' : undefined,
         },
       ]);
@@ -204,6 +297,153 @@ describe('IndexedDbQueueStore', () => {
     const raw = await store.inspectEncryptedRecordsForTest();
     expect(raw.events).toHaveLength(1);
     expect(raw.media).toHaveLength(1);
+    store.close();
+  });
+
+  it('atomically writes the VERIFIED receipt and removes only its takeover package', async () => {
+    const store = new IndexedDbQueueStore('zhili-pda-test');
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const eventId = '01JFINALIZEEVENT00000000001';
+    const laterEventId = '01JFINALIZELATER0000000001';
+    const evidence = await media.prepare(
+      context,
+      eventId,
+      new Blob(['verified-evidence']),
+      'image/jpeg',
+      'media-finalize'
+    );
+    await queue.enqueue(context, {
+      eventId,
+      action: 'CAPTURE_POD',
+      entityRef: 'TAKEOVER-FINALIZE',
+      payload: {},
+      mediaRefs: [evidence.mediaId],
+      mediaItems: [evidence],
+      baseVersion: 1,
+    });
+    await queue.enqueue(context, {
+      eventId: laterEventId,
+      action: 'WAREHOUSE_RECEIVE',
+      entityRef: 'LATER-WORK',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const event = queue.snapshot().events.find((item) => item.envelope.eventId === eventId)!;
+    const { manifest, receipt } = await takeoverFixture([event], [evidence]);
+    await store.setMeta('pending-takeover-finalize', {
+      receipt,
+      manifest,
+      eventIds: [eventId],
+      mediaIds: [evidence.mediaId],
+    });
+
+    await store.finalizeTakeoverPackage(receipt, [eventId], [evidence.mediaId], manifest);
+
+    expect(await store.getMeta('last-takeover-export-receipt')).toEqual(receipt);
+    expect(await store.getMeta('pending-takeover-finalize')).toBeUndefined();
+    expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([
+      laterEventId,
+    ]);
+    expect(await store.getMedia()).toEqual([]);
+    store.close();
+  });
+
+  it('leaves receipt, events and media unchanged when finalize validation fails', async () => {
+    const store = new IndexedDbQueueStore('zhili-pda-test');
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const eventId = '01JFINALIZEFAIL000000000001';
+    const evidence = await media.prepare(
+      context,
+      eventId,
+      new Blob(['must-remain']),
+      'image/jpeg',
+      'media-finalize-fail'
+    );
+    await queue.enqueue(context, {
+      eventId,
+      action: 'CAPTURE_POD',
+      entityRef: 'FINALIZE-FAIL',
+      payload: {},
+      mediaRefs: [evidence.mediaId],
+      mediaItems: [evidence],
+      baseVersion: 1,
+    });
+    const event = queue.snapshot().events.find((item) => item.envelope.eventId === eventId)!;
+    const { manifest, receipt } = await takeoverFixture([event], [evidence]);
+
+    await expect(
+      store.finalizeTakeoverPackage(
+        receipt,
+        [eventId, 'missing-event'],
+        [evidence.mediaId],
+        manifest
+      )
+    ).rejects.toThrow('接管清理清单');
+
+    expect(await store.getMeta('last-takeover-export-receipt')).toBeUndefined();
+    expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([eventId]);
+    expect((await store.getMedia()).map((item) => item.mediaId)).toEqual([evidence.mediaId]);
+    store.close();
+  });
+
+  it('rolls back receipt, pending markers, events and media when the finalization transaction aborts', async () => {
+    const store = new IndexedDbQueueStore('zhili-pda-test');
+    const queue = new OfflineQueue(store);
+    const media = new MediaQueue(store);
+    await Promise.all([queue.restore(), media.restore()]);
+    const eventId = '01JFINALIZEABORT00000000001';
+    const evidence = await media.prepare(
+      context,
+      eventId,
+      new Blob(['must-survive-abort']),
+      'image/jpeg',
+      'media-finalize-abort'
+    );
+    await queue.enqueue(context, {
+      eventId,
+      action: 'CAPTURE_POD',
+      entityRef: 'FINALIZE-ABORT',
+      payload: {},
+      mediaRefs: [evidence.mediaId],
+      mediaItems: [evidence],
+      baseVersion: 1,
+    });
+    const event = queue.snapshot().events.find((item) => item.envelope.eventId === eventId)!;
+    const { manifest, receipt } = await takeoverFixture([event], [evidence]);
+    const pendingFinalize = {
+      receipt,
+      manifest,
+      eventIds: [eventId],
+      mediaIds: [evidence.mediaId],
+    };
+    const pendingUpload = { authorizationId: receipt.authorizationId };
+    await Promise.all([
+      store.setMeta('pending-takeover-finalize', pendingFinalize),
+      store.setMeta('pending-takeover-upload', pendingUpload),
+    ]);
+    let faultInjected = false;
+    Object.assign(store, {
+      beforeFinalizeCommit: (abort: () => void) => {
+        faultInjected = true;
+        abort();
+      },
+    });
+
+    await expect(
+      store.finalizeTakeoverPackage(receipt, [eventId], [evidence.mediaId], manifest)
+    ).rejects.toThrow();
+
+    expect(faultInjected).toBe(true);
+    expect(await store.getMeta('last-takeover-export-receipt')).toBeUndefined();
+    expect(await store.getMeta('pending-takeover-finalize')).toEqual(pendingFinalize);
+    expect(await store.getMeta('pending-takeover-upload')).toEqual(pendingUpload);
+    expect((await store.getEvents()).map((event) => event.envelope.eventId)).toEqual([eventId]);
+    expect((await store.getMedia()).map((item) => item.mediaId)).toEqual([evidence.mediaId]);
     store.close();
   });
 

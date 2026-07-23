@@ -10,6 +10,9 @@ import { OfflineQueue } from './offline/offline-queue';
 import { MediaQueue } from './offline/media-queue';
 import { SessionGuard, type LocalDeviceSession } from './session/session-guard';
 import type { DeviceTask } from './domain/types';
+import type { DeviceTakeoverExportReceipt } from './domain/types';
+import { deviceTaskCacheKey } from './tasks/task-cache';
+import { hashTakeoverManifest, type TakeoverManifest } from './takeover/manifest';
 
 const bind = async () => {
   await userEvent.click(await screen.findByRole('button', { name: '绑定设备并登录' }));
@@ -44,6 +47,151 @@ describe('PDA application', () => {
     expect(screen.getByTestId('pending-count')).toHaveTextContent('1');
     await userEvent.click(screen.getByRole('button', { name: '离线' }));
     expect(screen.getByText(/#1/)).toHaveTextContent('S2505120004');
+    expect(screen.getByText('本地队列已恢复')).toBeVisible();
+  });
+
+  it('rejects a bind receipt whose server-owned scope differs from the requested binding', async () => {
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+    const store = new MemoryQueueStore();
+    const port = new MemoryPdaPort();
+    vi.spyOn(port, 'bindDevice').mockResolvedValue({
+      deviceId: '01JDEVICE00000000000000004',
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: '01JWAREHOUSE00000000000002',
+      subjectId: '01JSUBJECT0000000000000002',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+      permissions: ['pda.use'],
+    });
+    const tasks = vi.spyOn(port, 'getDeviceTasks');
+
+    render(<App store={store} port={port} />);
+    await screen.findByRole('heading', { name: '设备登录与仓库绑定' });
+    await userEvent.click(screen.getByRole('button', { name: '绑定设备并登录' }));
+
+    expect(await screen.findByText(/绑定回执.*不一致/)).toBeVisible();
+    expect(screen.getByRole('heading', { name: '设备登录与仓库绑定' })).toBeVisible();
+    expect(tasks).not.toHaveBeenCalled();
+    expect(await new OfflineQueue(store).getMeta('device-session')).toBeUndefined();
+  });
+
+  it('does not call current-run newly queued work a startup recovery', async () => {
+    render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
+    await bind();
+    await userEvent.click(screen.getByRole('button', { name: '扫描' }));
+    await userEvent.type(screen.getByLabelText('扫描码 / 运单号'), 'S2505120004{Enter}');
+    await screen.findByText(/已本地排队/);
+    await userEvent.click(screen.getByRole('button', { name: '离线' }));
+
+    expect(screen.queryByText('本地队列已恢复')).not.toBeInTheDocument();
+  });
+
+  it('restores the last successful sync timestamp into the task home', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    await queue.restore();
+    const session: LocalDeviceSession = {
+      deviceId: '01JDEVICE00000000000000003',
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: '01JWAREHOUSE00000000000001',
+      subjectId: '01JSUBJECT0000000000000001',
+      timezone: 'Asia/Shanghai',
+      appVersion: '0.2.0',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+      permissions: ['pda.use', 'pda.sync'],
+    };
+    await new SessionGuard(queue).persistSession(session);
+    await queue.setMeta('last-successful-sync-at', '2026-07-23T01:40:00.000Z');
+
+    render(<App store={store} port={new MemoryPdaPort()} />);
+
+    await screen.findByRole('heading', { name: '任务首页' });
+    expect(screen.getByText(/上次同步/)).toBeVisible();
+  });
+
+  it('finalizes a persisted VERIFIED receipt on startup without authorizing or uploading again', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store, { createId: () => '01JSTARTUPFINALIZEEVENT001' });
+    await queue.restore();
+    const session: LocalDeviceSession = {
+      deviceId: '01JDEVICE00000000000000003',
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: '01JWAREHOUSE00000000000001',
+      subjectId: '01JSUBJECT0000000000000001',
+      timezone: 'Asia/Shanghai',
+      appVersion: '0.2.0',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+      permissions: ['pda.use', 'pda.sync', 'pda.takeover.export'],
+    };
+    await new SessionGuard(queue).persistSession(session);
+    const event = await queue.enqueue(session, {
+      action: 'WAREHOUSE_RECEIVE',
+      entityRef: 'STARTUP-FINALIZE',
+      payload: {},
+      mediaRefs: [],
+      baseVersion: 1,
+    });
+    const receipt: DeviceTakeoverExportReceipt = {
+      exportId: '01JSTARTUPEXPORT00000000001',
+      authorizationId: '01JSTARTUPAUTH000000000001',
+      deviceId: session.deviceId,
+      scope: {
+        deviceId: session.deviceId,
+        tenantId: session.tenantId,
+        warehouseId: session.warehouseId,
+        subjectId: session.subjectId,
+      },
+      manifestHash: 'a'.repeat(64),
+      ciphertextHash: 'b'.repeat(64),
+      eventCount: 1,
+      mediaCount: 0,
+      checksumAlgorithm: 'SHA-256',
+      status: 'VERIFIED',
+      receivedAt: '2026-07-23T01:00:00.000Z',
+      verifiedAt: '2026-07-23T01:00:01.000Z',
+    };
+    const manifest: TakeoverManifest = {
+      schemaVersion: 1,
+      scope: receipt.scope,
+      eventCount: 1,
+      mediaCount: 0,
+      events: [
+        {
+          eventId: event.envelope.eventId,
+          localSequence: event.envelope.localSequence,
+          idempotencyKey: event.envelope.idempotencyKey,
+          mediaRefs: [],
+        },
+      ],
+      media: [],
+    };
+    receipt.manifestHash = await hashTakeoverManifest(manifest);
+    await queue.setMeta('pending-takeover-finalize', {
+      receipt,
+      manifest,
+      eventIds: [event.envelope.eventId],
+      mediaIds: [],
+    });
+    const port = new MemoryPdaPort();
+    const authorize = vi.spyOn(port, 'authorizeDeviceTakeoverExport');
+    const upload = vi.spyOn(port, 'uploadEncryptedDeviceTakeoverExport');
+
+    render(<App store={store} port={port} />);
+
+    await screen.findByRole('heading', { name: '任务首页' });
+    await waitFor(() => expect(screen.getByTestId('pending-count')).toHaveTextContent('0'));
+    await userEvent.click(screen.getByRole('button', { name: '离线' }));
+    expect(screen.getByText(/未创建新的接管业务提交/)).toBeVisible();
+    expect(authorize).not.toHaveBeenCalled();
+    expect(upload).not.toHaveBeenCalled();
+    expect(await queue.getMeta('last-takeover-export-receipt')).toEqual(receipt);
+    expect(await queue.getMeta('pending-takeover-finalize')).toBeUndefined();
+  });
+
+  it('uses the approved product name in the F09 application header', async () => {
+    render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
+    await bind();
+
+    expect(screen.getByText('智立科技物流AI系统')).toBeVisible();
   });
 
   it('labels a repeated business intent as already queued instead of reporting a new success', async () => {
@@ -128,6 +276,18 @@ describe('PDA application', () => {
       },
     ]);
     const port = new MemoryPdaPort();
+    const readConflict = port.getDeviceConflict.bind(port);
+    port.getDeviceConflict = async (conflictId) => {
+      const snapshot = await readConflict(conflictId);
+      return {
+        ...snapshot,
+        conflict: {
+          ...snapshot.conflict,
+          id: conflictId,
+          localEvent: event.envelope,
+        },
+      };
+    };
     render(<App store={store} port={port} />);
     await screen.findByRole('heading', { name: '任务首页' });
     await userEvent.click(screen.getByRole('button', { name: '离线' }));
@@ -184,7 +344,14 @@ describe('PDA application', () => {
     await userEvent.click(screen.getByRole('button', { name: '确认作业' }));
     await screen.findByText(/服务端已确认 派送/);
 
-    const cached = await new OfflineQueue(store).getMeta<DeviceTask[]>('device-tasks');
+    const cached = await new OfflineQueue(store).getMeta<DeviceTask[]>(
+      deviceTaskCacheKey({
+        deviceId: '01JDEVICE00000000000000003',
+        tenantId: '01JTENANT0000000000000001',
+        warehouseId: '01JWAREHOUSE00000000000001',
+        subjectId: '01JSUBJECT0000000000000001',
+      })
+    );
     expect(cached?.find((task) => task.reference === 'LM250722001')).toMatchObject({
       status: 'OUT_FOR_DELIVERY',
       version: 4,
@@ -196,6 +363,80 @@ describe('PDA application', () => {
     await screen.findByRole('heading', { name: '任务首页' });
     await userEvent.click(screen.getByRole('button', { name: /LM250722001/ }));
     expect(screen.getByTestId('selected-task')).toHaveTextContent('OUT_FOR_DELIVERY · v4');
+  });
+
+  it('does not expose a previous binding task cache after a failed scope switch and offline restart', async () => {
+    const store = new MemoryQueueStore();
+    const queue = new OfflineQueue(store);
+    await queue.restore();
+    const oldSession: LocalDeviceSession = {
+      deviceId: '01JDEVICE00000000000000003',
+      tenantId: '01JTENANT0000000000000001',
+      warehouseId: '01JWAREHOUSE00000000000001',
+      subjectId: '01JSUBJECT0000000000000001',
+      timezone: 'Asia/Shanghai',
+      appVersion: '0.2.0',
+      expiresAt: '2099-12-31T23:59:59.000Z',
+      permissions: ['pda.use'],
+    };
+    const oldTasks: DeviceTask[] = [
+      {
+        id: '01JOLDTASK00000000000000001',
+        type: 'RECEIVE',
+        reference: 'OLD-WAREHOUSE-ONLY',
+        status: 'READY',
+        priority: 'URGENT',
+        version: 1,
+      },
+    ];
+    await new SessionGuard(queue).persistSession(oldSession);
+    await queue.setMeta('device-tasks', oldTasks);
+    await queue.setMeta(
+      `device-tasks:${oldSession.tenantId}:${oldSession.warehouseId}:${oldSession.subjectId}:${oldSession.deviceId}`,
+      oldTasks
+    );
+    const port = new MemoryPdaPort();
+    vi.spyOn(port, 'bindDevice').mockResolvedValue({
+      ...oldSession,
+      warehouseId: '01JWAREHOUSE00000000000002',
+      subjectId: '01JSUBJECT0000000000000002',
+    });
+    vi.spyOn(port, 'getDeviceTasks').mockResolvedValue([
+      {
+        id: '01JNEWTASK00000000000000001',
+        type: 'RECEIVE',
+        reference: 'NEW-WAREHOUSE-ONLY',
+        status: 'READY',
+        priority: 'URGENT',
+        version: 1,
+      },
+    ]);
+    const originalSetMeta = store.setMeta.bind(store);
+    const newTaskCacheKey = deviceTaskCacheKey({
+      ...oldSession,
+      warehouseId: '01JWAREHOUSE00000000000002',
+      subjectId: '01JSUBJECT0000000000000002',
+    });
+    vi.spyOn(store, 'setMeta').mockImplementation(async (key, value) => {
+      if (key === newTaskCacheKey) throw new Error('task cache unavailable');
+      await originalSetMeta(key, value);
+    });
+
+    const first = render(<App store={store} port={port} />);
+    await screen.findByText('OLD-WAREHOUSE-ONLY');
+    await userEvent.click(screen.getByRole('button', { name: '切换仓库' }));
+    await userEvent.clear(screen.getByLabelText('仓库 ID'));
+    await userEvent.type(screen.getByLabelText('仓库 ID'), '01JWAREHOUSE00000000000002');
+    await userEvent.clear(screen.getByLabelText('用户 ID'));
+    await userEvent.type(screen.getByLabelText('用户 ID'), '01JSUBJECT0000000000000002');
+    await userEvent.click(screen.getByRole('button', { name: '绑定设备并登录' }));
+    await screen.findByText(/task cache unavailable/);
+    first.unmount();
+
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: false });
+    render(<App store={store} port={port} />);
+    await screen.findByRole('heading', { name: '任务首页' });
+    expect(screen.queryByText('OLD-WAREHOUSE-ONLY')).not.toBeInTheDocument();
   });
 
   it('adopts a persisted authoritative task snapshot after a partial delivery sync error', async () => {
@@ -379,6 +620,22 @@ describe('PDA application', () => {
     expect(screen.getByRole('button', { name: '获取当前位置（可选）' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '确认作业' })).toBeDisabled();
     expect(screen.getByRole('alert')).toHaveTextContent('缺少 lastmile.pod.write 权限');
+  });
+
+  it('completes the encrypted takeover demo only after a VERIFIED receipt', async () => {
+    Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
+    render(<App store={new MemoryQueueStore()} port={new MemoryPdaPort()} />);
+    await bind();
+    await userEvent.click(screen.getByRole('button', { name: '扫描' }));
+    const scan = screen.getByLabelText('扫描码 / 运单号');
+    await userEvent.type(scan, 'S2505120004{Enter}');
+    await screen.findByText(/已本地排队/);
+    await userEvent.click(screen.getByRole('button', { name: '离线' }));
+    await userEvent.type(screen.getByLabelText('管理员接管原因'), '设备损坏，由主管接管');
+    await userEvent.click(screen.getByRole('button', { name: '导出接管' }));
+
+    expect(await screen.findByRole('heading', { name: '加密接管上传已验证' })).toBeVisible();
+    expect(screen.getByTestId('pending-count')).toHaveTextContent('0');
   });
 
   it('locks the composition root when persisted event context differs from the bound session', async () => {

@@ -1,4 +1,5 @@
 import type { DeviceContext, DeviceSession } from '../domain/types';
+import { isFutureInstant } from '../domain/time';
 import type { OfflineQueue } from '../offline/offline-queue';
 
 export interface LocalDeviceSession extends DeviceContext {
@@ -54,7 +55,7 @@ export class SessionGuard {
     return (
       !this.session ||
       Boolean(this.session.invalidatedAt) ||
-      new Date(this.session.expiresAt).getTime() <= this.now().getTime()
+      !isFutureInstant(this.session.expiresAt, this.now().getTime())
     );
   }
 

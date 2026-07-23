@@ -1,5 +1,6 @@
 import type {
   DeviceContext,
+  DeviceTakeoverExportReceipt,
   QueueSnapshot,
   QueuedEvent,
   SyncResult,
@@ -7,6 +8,7 @@ import type {
   MediaQueueItem,
 } from '../domain/types';
 import type { QueueStore } from './queue-store';
+import type { TakeoverManifest } from '../takeover/manifest';
 
 const DEFAULT_LIMIT = 200;
 const DEFAULT_WARNING = 183;
@@ -15,6 +17,16 @@ export class QueueCapacityError extends Error {
   constructor() {
     super('离线队列已满，请先同步；管理员加密接管契约未完成，当前禁止导出。');
     this.name = 'QueueCapacityError';
+  }
+}
+
+export class TakeoverRehydrateError extends Error {
+  constructor(
+    readonly receipt: DeviceTakeoverExportReceipt,
+    readonly cause: unknown
+  ) {
+    super('接管本地提交已完成，但运行时快照恢复失败；无需重新执行清理。');
+    this.name = 'TakeoverRehydrateError';
   }
 }
 
@@ -163,18 +175,28 @@ export class OfflineQueue {
           eventId: result.eventId,
           disposition: result.disposition,
           claimedMediaRefs: result.claimedMediaRefs,
-          serverVersion: result.serverVersion ?? event.envelope.baseVersion,
+          serverVersion: result.serverVersion ?? Number.NaN,
           operation: 'EVENT_SYNC',
         });
         continue;
       }
       if (result.disposition === 'CONFLICT') {
+        if (
+          typeof result.conflictId !== 'string' ||
+          result.conflictId.length === 0 ||
+          !Number.isSafeInteger(result.serverVersion) ||
+          Number(result.serverVersion) <= event.envelope.baseVersion ||
+          !Number.isSafeInteger(result.conflictVersion) ||
+          Number(result.conflictVersion) < 1
+        ) {
+          throw new Error('服务器冲突回执缺少权威 ID 或已推进版本，已保留本地作业。');
+        }
         counts.conflict += 1;
         event.state = 'CONFLICT';
         event.conflict = {
-          conflictId: result.conflictId ?? result.eventId,
-          serverVersion: result.serverVersion ?? event.envelope.baseVersion + 1,
-          version: result.conflictVersion ?? 1,
+          conflictId: result.conflictId,
+          serverVersion: Number(result.serverVersion),
+          version: Number(result.conflictVersion),
           snapshotNotice:
             '当前同步契约未返回服务器字段快照；仅可核对真实 serverVersion/conflictId，完整 diff 需后端扩展。',
         };
@@ -196,6 +218,12 @@ export class OfflineQueue {
     }
     const event = this.events.find((candidate) => candidate.envelope.eventId === receipt.eventId);
     if (!event) throw new Error(`服务器回执对应的本地事件 ${receipt.eventId} 不存在，禁止清理。`);
+    if (
+      !Number.isSafeInteger(receipt.serverVersion) ||
+      receipt.serverVersion <= event.envelope.baseVersion
+    ) {
+      throw new Error('服务器回执未返回严格推进的权威版本，已保留本地作业。');
+    }
     if (!exactlySameRefs(event.envelope.mediaRefs, receipt.claimedMediaRefs)) {
       throw new Error('服务器媒体认领回执与本地事件不一致，已保留事件和全部媒体。');
     }
@@ -275,6 +303,24 @@ export class OfflineQueue {
     this.events = await this.store.getEvents();
   }
 
+  async finalizeTakeoverPackage(
+    receipt: DeviceTakeoverExportReceipt,
+    eventIds: string[],
+    mediaIds: string[],
+    manifest: TakeoverManifest
+  ) {
+    if (new Set(eventIds).size !== eventIds.length || new Set(mediaIds).size !== mediaIds.length) {
+      throw new Error('接管清理清单包含重复 ID，已保留全部本地数据。');
+    }
+    await this.store.finalizeTakeoverPackage(receipt, eventIds, mediaIds, manifest);
+    try {
+      this.events = await this.store.getEvents();
+    } catch (error) {
+      this.events = this.events.filter((event) => !eventIds.includes(event.envelope.eventId));
+      throw new TakeoverRehydrateError(receipt, error);
+    }
+  }
+
   async deleteWork(eventId: string) {
     const event = this.events.find((candidate) => candidate.envelope.eventId === eventId);
     if (!event) return;
@@ -302,5 +348,9 @@ export class OfflineQueue {
 
   setMeta<T>(key: string, value: T) {
     return this.store.setMeta(key, value);
+  }
+
+  deleteMeta(key: string) {
+    return this.store.deleteMeta(key);
   }
 }

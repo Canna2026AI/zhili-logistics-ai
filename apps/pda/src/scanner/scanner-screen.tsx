@@ -16,6 +16,7 @@ import type { MediaQueue } from '../offline/media-queue';
 import type { PdaPort } from '../ports/pda-port';
 import type { DeviceTask } from '../domain/types';
 import { LastMileService, type DeliveryStatus } from '../last-mile/last-mile-service';
+import { f09Workflow } from '../workflows/f09-workflow';
 
 type BarcodeResult = { rawValue: string };
 type BarcodeDetectorConstructor = new (options?: { formats?: string[] }) => {
@@ -170,6 +171,7 @@ export function ScannerScreen({
     setValues((current) => ({ ...current, [key]: value }));
 
   const unavailableReason = actionUnavailableReason(action, selectedTask, session.permissions);
+  const presentation = f09Workflow(action);
 
   const submit = async (overrideCode?: string) => {
     const entityRef = (overrideCode ?? code).trim();
@@ -414,11 +416,18 @@ export function ScannerScreen({
 
   return (
     <section className="pda-page pda-scan-page" aria-labelledby="scan-title">
-      <div className="pda-page-heading">
-        <div>
-          <h1 id="scan-title">扫描与作业</h1>
-          <p>扫码枪 Enter、广播、相机与手工输入共用同一入队逻辑。</p>
-        </div>
+      <h2 className="pda-sr-only">扫描与作业</h2>
+      <div className="pda-page-heading pda-page-heading--stacked">
+        <h1 id="scan-title">{presentation.title}</h1>
+        <p>{presentation.subtitle}</p>
+      </div>
+      <div className="pda-flow-summary">
+        <strong>{presentation.step}</strong>
+        <span>{presentation.stepMeta}</span>
+      </div>
+      <div className="pda-flow-alert">
+        <strong>{presentation.alertTitle}</strong>
+        <span>{presentation.alertBody}</span>
       </div>
       {selectedTask && (
         <div className="pda-selected-task" data-testid="selected-task">
@@ -676,11 +685,12 @@ export function ScannerScreen({
         )}
         <Button
           size="large"
+          aria-label="确认作业"
           onClick={() => void submit()}
           loading={busy}
           disabled={busy || queue.snapshot().full || Boolean(unavailableReason)}
         >
-          确认作业
+          {presentation.primaryLabel}
         </Button>
       </div>
       <div
