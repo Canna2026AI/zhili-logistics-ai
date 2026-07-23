@@ -31,4 +31,37 @@ describe('createZhiliClient', () => {
     });
     expect(response.data?.data.waybillNo).toBe('S2505120004');
   });
+
+  it('normalizes problem details into a typed recoverable domain error', async () => {
+    const apiClient = await import('../src');
+    expect(apiClient).toHaveProperty('toDomainApiError');
+
+    const normalize = Reflect.get(apiClient, 'toDomainApiError') as (
+      error: unknown,
+      response?: Response
+    ) => Error & {
+      status?: number;
+      code?: string;
+      remediation?: string;
+      requestId?: string;
+    };
+    const error = normalize(
+      {
+        code: 'AI_LOW_CONFIDENCE',
+        message: '映射置信度过低',
+        remediation: '请人工确认字段映射',
+        requestId: 'REQ-LOW-CONFIDENCE',
+      },
+      new Response(null, { status: 422 })
+    );
+
+    expect(error).toMatchObject({
+      name: 'DomainApiError',
+      message: '映射置信度过低',
+      status: 422,
+      code: 'AI_LOW_CONFIDENCE',
+      remediation: '请人工确认字段映射',
+      requestId: 'REQ-LOW-CONFIDENCE',
+    });
+  });
 });

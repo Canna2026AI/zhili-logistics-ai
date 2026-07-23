@@ -2,6 +2,7 @@ import type { ZhiliApiClient } from '@zhili/api-client';
 import type { paths } from '../../../../../packages/contracts/src';
 import type {
   FulfillmentFinanceCommand,
+  FulfillmentFinanceCommandEvidence,
   FulfillmentFinanceCommandPort,
   FulfillmentFinanceOperationId,
 } from './fulfillment-finance-workbench';
@@ -264,33 +265,45 @@ function recordString(record: Record<string, unknown>, key: string) {
   return typeof value === 'string' && value.trim() ? value : undefined;
 }
 
-function serverResultId(data: unknown, response: Response): string | undefined {
+function serverEvidence(
+  data: unknown,
+  response: Response
+): FulfillmentFinanceCommandEvidence | undefined {
   if (typeof data === 'object' && data) {
     const envelope = data as Record<string, unknown>;
+    const result = envelope.data;
+    const resultRecord =
+      typeof result === 'object' && result ? (result as Record<string, unknown>) : undefined;
+    const auditId =
+      recordString(envelope, 'auditEventId') ??
+      recordString(envelope, 'auditId') ??
+      (resultRecord
+        ? (recordString(resultRecord, 'auditEventId') ?? recordString(resultRecord, 'auditId'))
+        : undefined);
+    if (auditId) return { kind: 'audit', auditId };
+
     const meta = envelope.meta;
     if (typeof meta === 'object' && meta) {
       const metaRequestId = recordString(meta as Record<string, unknown>, 'requestId');
-      if (metaRequestId) return metaRequestId;
+      if (metaRequestId) return { kind: 'trace', requestId: metaRequestId };
     }
-    const directId =
+    const requestId =
       recordString(envelope, 'requestId') ??
-      recordString(envelope, 'auditId') ??
-      recordString(envelope, 'resourceId') ??
-      recordString(envelope, 'id');
-    if (directId) return directId;
+      (resultRecord ? recordString(resultRecord, 'requestId') : undefined) ??
+      response.headers.get('x-request-id') ??
+      undefined;
+    if (requestId) return { kind: 'trace', requestId };
 
-    const result = envelope.data;
-    if (typeof result === 'object' && result) {
-      const resultRecord = result as Record<string, unknown>;
-      const resultId =
-        recordString(resultRecord, 'requestId') ??
-        recordString(resultRecord, 'auditId') ??
-        recordString(resultRecord, 'resourceId') ??
-        recordString(resultRecord, 'id');
-      if (resultId) return resultId;
-    }
+    const resourceId =
+      recordString(envelope, 'resourceId') ??
+      recordString(envelope, 'id') ??
+      (resultRecord
+        ? (recordString(resultRecord, 'resourceId') ?? recordString(resultRecord, 'id'))
+        : undefined);
+    if (resourceId) return { kind: 'resource', resourceId };
   }
-  return response.headers.get('x-request-id') ?? undefined;
+  const requestId = response.headers.get('x-request-id');
+  return requestId ? { kind: 'trace', requestId } : undefined;
 }
 
 /** Production adapter: every workbench mutation crosses the generated OpenAPI client. */
@@ -322,9 +335,9 @@ export function createApiFulfillmentFinanceCommandPort(
             });
 
       if (result.error) throw new Error(errorMessage(result.error));
-      const auditId = serverResultId(result.data, result.response);
-      if (!auditId) throw new Error('API 响应缺少 requestId');
-      return { auditId };
+      const evidence = serverEvidence(result.data, result.response);
+      if (!evidence) throw new Error('API 响应缺少审计、请求追踪或资源证据');
+      return { evidence };
     },
   };
 }

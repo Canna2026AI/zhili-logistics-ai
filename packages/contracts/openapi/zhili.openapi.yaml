@@ -7367,8 +7367,9 @@ components:
     ApplyAiMappingsRequest:
       type: object
       additionalProperties: false
-      required: [proposalVersion, acceptedMappingIds]
+      required: [proposalId, proposalVersion, acceptedMappingIds]
       properties:
+        proposalId: {$ref: '#/components/schemas/Ulid'}
         proposalVersion: {type: integer, minimum: 1}
         acceptedMappingIds: {type: array, minItems: 1, items: {$ref: '#/components/schemas/Ulid'}}
         rejectedMappingIds: {type: array, items: {$ref: '#/components/schemas/Ulid'}}

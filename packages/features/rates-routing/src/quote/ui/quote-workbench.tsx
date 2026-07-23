@@ -1,5 +1,6 @@
 import { Button, StatusTag } from '@zhili/ui';
-import { useMemo, useState } from 'react';
+import { toDomainApiError, type DomainApiError } from '@zhili/api-client';
+import { useMemo, useRef, useState } from 'react';
 import {
   calculateQuote,
   formatMoney,
@@ -22,9 +23,12 @@ export interface QuoteWorkbenchProps {
   onSubmitForecast?: () => void | Promise<void>;
   draft?: QuoteWorkflowRequest;
   onDraftChange?: (draft: QuoteWorkflowRequest) => void;
-  snapshot?: CalculatedQuote;
+  snapshot?: CalculatedQuote | null;
   onSnapshotChange?: (snapshot: CalculatedQuote) => void;
+  onError?: (error: DomainApiError, operation: QuoteOperation) => void;
 }
+
+export type QuoteOperation = 'quote' | 'explain' | 'accept' | 'save' | 'submit';
 
 interface QuoteFormState {
   customerId: string;
@@ -166,6 +170,7 @@ export function QuoteWorkbench({
   onDraftChange,
   snapshot,
   onSnapshotChange,
+  onError,
 }: QuoteWorkbenchProps) {
   const [localForm, setLocalForm] = useState<QuoteFormState>(() =>
     draft ? workflowToForm(draft) : initialForm
@@ -176,23 +181,30 @@ export function QuoteWorkbench({
     [draft?.quote.quoteDate, form]
   );
   const [localQuote, setLocalQuote] = useState(() => calculateQuote(quoteInputFixture));
-  const quote = snapshot ?? localQuote;
-  const quoteKey = `${quote.id}:v${quote.version}`;
+  const quote = snapshot === undefined ? localQuote : snapshot;
+  const previewQuote = useMemo(
+    () =>
+      calculateQuote({ request: request.quote, volumeDivisor: quoteInputFixture.volumeDivisor }),
+    [request.quote]
+  );
+  const quoteKey = quote ? `${quote.id}:v${quote.version}` : 'UNQUOTED';
   const [dirtySnapshotKey, setDirtySnapshotKey] = useState<string | null>(null);
   const quoteDirty = dirtySnapshotKey === quoteKey;
   const [selectedId, setSelectedId] = useState('dhl-express');
   const [explanation, setExplanation] = useState<QuoteExplanationView | null>(null);
-  const [pending, setPending] = useState<'quote' | 'explain' | 'accept' | 'save' | 'submit' | null>(
-    null
-  );
+  const [pending, setPending] = useState<QuoteOperation | null>(null);
+  const pendingRef = useRef(false);
   const [actionError, setActionError] = useState('');
   const [actionStatus, setActionStatus] = useState('');
   const commodityCount = 1;
-  const effectiveSelectedId = quote.options.some((option) => option.id === selectedId)
-    ? selectedId
-    : (quote.options.find((option) => option.available)?.id ?? quote.options[0]?.id ?? '');
-  const selected =
-    quote.options.find((option) => option.id === effectiveSelectedId) ?? quote.options[0]!;
+  const effectiveSelectedId = quote
+    ? quote.options.some((option) => option.id === selectedId)
+      ? selectedId
+      : (quote.options.find((option) => option.available)?.id ?? quote.options[0]?.id ?? '')
+    : '';
+  const selected = quote
+    ? (quote.options.find((option) => option.id === effectiveSelectedId) ?? quote.options[0])
+    : undefined;
 
   const updateForm = (update: (current: QuoteFormState) => QuoteFormState) => {
     const next = update(form);
@@ -203,13 +215,17 @@ export function QuoteWorkbench({
     setActionStatus('输入已更改；刷新报价后可解释或接受新快照。');
   };
 
-  const run = async <T,>(kind: NonNullable<typeof pending>, operation: () => Promise<T>) => {
+  const run = async <T,>(kind: QuoteOperation, operation: () => Promise<T>) => {
+    if (pendingRef.current) return undefined;
+    pendingRef.current = true;
     setPending(kind);
     setActionError('');
     setActionStatus('');
     try {
       return await operation();
-    } catch {
+    } catch (error) {
+      const domainError = toDomainApiError(error);
+      onError?.(domainError, kind);
       setActionError(
         kind === 'quote'
           ? '报价失败；没有覆盖当前输入的有效价卡，请修正后重试。'
@@ -217,6 +233,7 @@ export function QuoteWorkbench({
       );
       return undefined;
     } finally {
+      pendingRef.current = false;
       setPending(null);
     }
   };
@@ -235,6 +252,7 @@ export function QuoteWorkbench({
   };
 
   const loadExplanation = async () => {
+    if (!quote || !selected) return;
     if (explanation) {
       setExplanation(null);
       return;
@@ -266,25 +284,6 @@ export function QuoteWorkbench({
     );
   if (state === 'empty')
     return <div className="quote-state">填写始发地、目的地和包裹后开始查价。</div>;
-  if (state === 'failed')
-    return (
-      <div className="quote-state" role="alert">
-        没有适用价卡 — 目的地与重量未命中分区 — 请维护价卡或选择替代渠道。
-      </div>
-    );
-  if (state === 'forbidden')
-    return (
-      <div className="quote-state" role="alert">
-        缺少 quote.create；可查看草稿但不能向渠道查价。
-      </div>
-    );
-  if (state === 'expired')
-    return (
-      <div className="quote-state" role="alert">
-        报价已过期；原结果只读保留，请重新计算。
-      </div>
-    );
-
   return (
     <section className="quote-workbench" aria-labelledby="quote-title">
       <div className="quote-workbench__form">
@@ -306,7 +305,7 @@ export function QuoteWorkbench({
                 updateForm((current) => ({ ...current, customerId: event.target.value }))
               }
             >
-              <option value="customer-xinyuan">深圳鑫源贸易有限公司</option>
+              <option value={quoteInputFixture.request.customerId}>深圳鑫源贸易有限公司</option>
             </select>
           </label>
           <label>
@@ -570,11 +569,11 @@ export function QuoteWorkbench({
             </label>
             <label>
               材积重 (kg)
-              <input value={quote.volumeWeightKg} readOnly />
+              <input value={previewQuote.volumeWeightKg} readOnly />
             </label>
             <label>
               计费重 (kg)
-              <input value={quote.chargeableWeightKg} readOnly />
+              <input value={previewQuote.chargeableWeightKg} readOnly />
             </label>
           </div>
           {Array.from({ length: commodityCount }, (_, index) => (
@@ -678,11 +677,12 @@ export function QuoteWorkbench({
             {pending === 'save' ? '保存中…' : '保存草稿'}
           </Button>
           <Button
-            disabled={readOnly || quoteDirty || pending !== null}
+            disabled={readOnly || !quote || !selected || quoteDirty || pending !== null}
             onClick={() =>
-              void run('submit', () =>
-                port.submitForecast(quote.id, selected.id, quote.version)
-              ).then(async (result) => {
+              void run('submit', () => {
+                if (!quote || !selected) throw new Error('QUOTE_SNAPSHOT_REQUIRED');
+                return port.submitForecast(quote.id, selected.id, quote.version);
+              }).then(async (result) => {
                 if (!result) return;
                 setActionStatus(result.message ?? '预报已提交');
                 await onSubmitForecast?.();
@@ -702,7 +702,7 @@ export function QuoteWorkbench({
         <header>
           <div>
             <h2>报价与限制</h2>
-            <span>{quote.quoteNo}</span>
+            <span>{quote?.quoteNo ?? 'UNQUOTED'}</span>
           </div>
           <Button
             variant="secondary"
@@ -717,109 +717,125 @@ export function QuoteWorkbench({
                 : '刷新报价'}
           </Button>
         </header>
-        {state === 'stale' ? (
-          <div className="quote-alert">
-            价卡已从 v3 发布为 v4；旧结果保留，接受前必须重算。
-            <Button size="compact" onClick={() => void refreshQuote()}>
-              按 v4 重新计算
-            </Button>
+        {!quote || !selected ? (
+          <div className="quote-state">
+            <strong>尚未获取服务端报价</strong>
+            <span>当前只保留输入草稿；刷新成功后才可解释、提交或接受。</span>
           </div>
-        ) : null}
-        <div className="quote-options" role="radiogroup" aria-label="渠道报价">
-          {quote.options.map((option) => (
-            <label
-              key={option.id}
-              data-selected={effectiveSelectedId === option.id || undefined}
-              data-disabled={!option.available || undefined}
-            >
-              <input
-                type="radio"
-                name="channel"
-                aria-label={`${option.product} ${formatMoney(option.total)}`}
-                checked={effectiveSelectedId === option.id}
-                disabled={!option.available}
-                onChange={() => {
-                  setSelectedId(option.id);
-                  setExplanation(null);
-                }}
-              />
-              <span>
-                <strong>{option.product}</strong>
-                {option.recommended ? <em>推荐</em> : null}
-                {option.unavailableReason ? <small>{option.unavailableReason}</small> : null}
-              </span>
-              <b>{formatMoney(option.total)}</b>
-            </label>
-          ))}
-        </div>
-        <section className="quote-breakdown">
-          <h3>
-            已选渠道 <span>{selected.product}</span>
-          </h3>
-          <dl>
-            <dt>计费重</dt>
-            <dd>{quote.chargeableWeightKg} kg</dd>
-            {selected.lines.map((line) => (
-              <div key={line.code}>
-                <dt>{line.label}</dt>
-                <dd>{formatMoney(line.amount)}</dd>
+        ) : (
+          <>
+            {state === 'stale' ? (
+              <div className="quote-alert">
+                价卡已从 v3 发布为 v4；旧结果保留，接受前必须重算。
+                <Button size="compact" onClick={() => void refreshQuote()}>
+                  按 v4 重新计算
+                </Button>
               </div>
-            ))}
-            <dt className="quote-total">预计总价</dt>
-            <dd className="quote-total">{formatMoney(selected.total)}</dd>
-          </dl>
-          {state === 'forbidden-cost' ? (
-            <div className="quote-cost-mask">
-              <strong>成本与利润：••••</strong>
-              <span>缺少 rate.cost.read；复制与导出同样脱敏。</span>
-            </div>
-          ) : (
-            <div className="quote-cost">
-              {selected.cost && selected.margin && selected.marginPercent ? (
-                <>
-                  <span>成本 {formatMoney(selected.cost)}</span>
+            ) : null}
+            <div className="quote-options" role="radiogroup" aria-label="渠道报价">
+              {quote.options.map((option) => (
+                <label
+                  key={option.id}
+                  data-selected={effectiveSelectedId === option.id || undefined}
+                  data-disabled={!option.available || undefined}
+                >
+                  <input
+                    type="radio"
+                    name="channel"
+                    aria-label={`${option.product} ${formatMoney(option.total)}`}
+                    checked={effectiveSelectedId === option.id}
+                    disabled={!option.available}
+                    onChange={() => {
+                      setSelectedId(option.id);
+                      setExplanation(null);
+                    }}
+                  />
                   <span>
-                    毛利 {formatMoney(selected.margin)} / {selected.marginPercent}
+                    <strong>{option.product}</strong>
+                    {option.recommended ? <em>推荐</em> : null}
+                    {option.unavailableReason ? <small>{option.unavailableReason}</small> : null}
                   </span>
-                </>
-              ) : (
-                <span>成本与毛利未由服务端报价契约返回</span>
-              )}
-            </div>
-          )}
-          <Button
-            variant="secondary"
-            size="compact"
-            disabled={quoteDirty || pending !== null}
-            onClick={() => void loadExplanation()}
-          >
-            {pending === 'explain' ? '加载解释…' : explanation ? '收起解释' : '查看解释'}
-          </Button>
-          <Button
-            size="compact"
-            disabled={readOnly || quoteDirty || pending !== null}
-            onClick={() =>
-              void run('accept', () => port.accept(quote.id, selected.id, quote.version)).then(
-                (result) => {
-                  if (result) setActionStatus(`已接受 ${selected.product} 不可变报价快照`);
-                }
-              )
-            }
-          >
-            {pending === 'accept' ? '接受中…' : '接受报价'}
-          </Button>
-        </section>
-        {explanation ? (
-          <section className="quote-explanation">
-            <h3>报价说明</h3>
-            <p>{explanation.rateCardVersion}</p>
-            <ol>
-              {explanation.steps.map((step) => (
-                <li key={step}>{step}</li>
+                  <b>{formatMoney(option.total)}</b>
+                </label>
               ))}
-            </ol>
-          </section>
-        ) : null}
+            </div>
+            <section className="quote-breakdown">
+              <h3>
+                已选渠道 <span>{selected.product}</span>
+              </h3>
+              <dl>
+                <dt>计费重</dt>
+                <dd>{quote.chargeableWeightKg} kg</dd>
+                {selected.lines.map((line) => (
+                  <div key={line.code}>
+                    <dt>{line.label}</dt>
+                    <dd>{formatMoney(line.amount)}</dd>
+                  </div>
+                ))}
+                <dt className="quote-total">预计总价</dt>
+                <dd className="quote-total">{formatMoney(selected.total)}</dd>
+              </dl>
+              {state === 'forbidden-cost' ? (
+                <div className="quote-cost-mask">
+                  <strong>成本与利润：••••</strong>
+                  <span>缺少 rate.cost.read；复制与导出同样脱敏。</span>
+                </div>
+              ) : (
+                <div className="quote-cost">
+                  {selected.cost && selected.margin && selected.marginPercent ? (
+                    <>
+                      <span>成本 {formatMoney(selected.cost)}</span>
+                      <span>
+                        毛利 {formatMoney(selected.margin)} / {selected.marginPercent}
+                      </span>
+                    </>
+                  ) : (
+                    <span>成本与毛利未由服务端报价契约返回</span>
+                  )}
+                </div>
+              )}
+              <Button
+                variant="secondary"
+                size="compact"
+                disabled={quoteDirty || pending !== null}
+                onClick={() => void loadExplanation()}
+              >
+                {pending === 'explain' ? '加载解释…' : explanation ? '收起解释' : '查看解释'}
+              </Button>
+              {state !== 'expired' && state !== 'stale' && state !== 'failed' ? (
+                <Button
+                  size="compact"
+                  disabled={readOnly || quoteDirty || pending !== null}
+                  onClick={() =>
+                    void run('accept', () =>
+                      port.accept(quote.id, selected.id, quote.version)
+                    ).then((result) => {
+                      if (!result) return;
+                      if (onSnapshotChange) onSnapshotChange(result);
+                      else setLocalQuote(result);
+                      setDirtySnapshotKey(null);
+                      setSelectedId(result.acceptedOptionId ?? selected.id);
+                      setActionStatus(`已接受 ${selected.product} 不可变报价快照`);
+                    })
+                  }
+                >
+                  {pending === 'accept' ? '接受中…' : '接受报价'}
+                </Button>
+              ) : null}
+            </section>
+            {explanation ? (
+              <section className="quote-explanation">
+                <h3>报价说明</h3>
+                <p>{explanation.rateCardVersion}</p>
+                <ol>
+                  {explanation.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              </section>
+            ) : null}
+          </>
+        )}
       </aside>
     </section>
   );

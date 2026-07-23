@@ -95,8 +95,17 @@ export interface FulfillmentFinanceCommand {
   payload?: Record<string, unknown>;
 }
 
+export type FulfillmentFinanceCommandEvidence =
+  | { kind: 'audit'; auditId: string }
+  | { kind: 'trace'; requestId: string }
+  | { kind: 'resource'; resourceId: string };
+
+export interface FulfillmentFinanceCommandResult {
+  evidence: FulfillmentFinanceCommandEvidence;
+}
+
 export interface FulfillmentFinanceCommandPort {
-  execute(command: FulfillmentFinanceCommand): Promise<{ auditId: string }>;
+  execute(command: FulfillmentFinanceCommand): Promise<FulfillmentFinanceCommandResult>;
 }
 
 export interface FulfillmentFinanceWorkbenchProps {
@@ -138,6 +147,19 @@ const measurement = deriveMeasurement({
   heightCm: 60,
   volumeDivisor: 6000,
 });
+
+const shipmentHoldId = '01JY8Z8F6ME4F0Y9QH2X6D4R7K';
+
+function evidenceLabel(evidence: FulfillmentFinanceCommandEvidence) {
+  switch (evidence.kind) {
+    case 'audit':
+      return `审计 ${evidence.auditId}`;
+    case 'trace':
+      return `请求追踪 ${evidence.requestId}`;
+    case 'resource':
+      return `资源 ${evidence.resourceId}`;
+  }
+}
 
 const formatMoney = (cents: number) =>
   new Intl.NumberFormat('zh-CN', {
@@ -1101,7 +1123,7 @@ function TrackingWorkbench({ runCommand }: { runCommand: RunCommand }) {
           <Button
             onClick={() =>
               runCommand(
-                command('tracking', 'releaseShipmentHold', 'HOLD-S2505120004', 2, {
+                command('tracking', 'releaseShipmentHold', shipmentHoldId, 2, {
                   reason: '审批通过',
                 }),
                 '扣货已解除，运单恢复履约',
@@ -1911,13 +1933,16 @@ export function FulfillmentFinanceWorkbench({
     try {
       const result = await commandPort.execute(nextCommand);
       onResolved?.();
-      if (!auditedCommandKeysRef.current.has(nextCommand.idempotencyKey)) {
+      if (
+        result.evidence.kind === 'audit' &&
+        !auditedCommandKeysRef.current.has(nextCommand.idempotencyKey)
+      ) {
         auditedCommandKeysRef.current.add(nextCommand.idempotencyKey);
         setAuditCount((count) => count + 1);
       }
       setFeedback({
         kind: 'success',
-        message: `${successMessage} · 审计 ${result.auditId}`,
+        message: `${successMessage} · ${evidenceLabel(result.evidence)}`,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : '命令执行失败';
@@ -1937,7 +1962,10 @@ export function FulfillmentFinanceWorkbench({
     setCommandPending(true);
     try {
       const result = await commandPort.execute(nextCommand);
-      if (!auditedCommandKeysRef.current.has(nextCommand.idempotencyKey)) {
+      if (
+        result.evidence.kind === 'audit' &&
+        !auditedCommandKeysRef.current.has(nextCommand.idempotencyKey)
+      ) {
         auditedCommandKeysRef.current.add(nextCommand.idempotencyKey);
         setAuditCount((count) => count + 1);
       }
@@ -1945,8 +1973,12 @@ export function FulfillmentFinanceWorkbench({
         message,
         evidence: {
           kind: 'server',
-          auditId: result.auditId,
           operationId: nextCommand.operationId,
+          ...(result.evidence.kind === 'audit'
+            ? { auditId: result.evidence.auditId }
+            : result.evidence.kind === 'trace'
+              ? { requestId: result.evidence.requestId }
+              : { resourceId: result.evidence.resourceId }),
         },
       };
     } finally {
@@ -1987,7 +2019,7 @@ export function FulfillmentFinanceWorkbench({
         };
       case 'request-release-approval':
         return executeScenarioCommand(
-          command('tracking', 'requestShipmentHoldReleaseApproval', 'HOLD-S2505120004', 2, {
+          command('tracking', 'requestShipmentHoldReleaseApproval', shipmentHoldId, 2, {
             reason: '信用扣货待财务放货审批',
             requestedAction: 'RELEASE',
           }),

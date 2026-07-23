@@ -4485,6 +4485,7 @@ export interface components {
       meta: components['schemas']['Meta'];
     };
     ApplyAiMappingsRequest: {
+      proposalId: components['schemas']['Ulid'];
       proposalVersion: number;
       acceptedMappingIds: components['schemas']['Ulid'][];
       rejectedMappingIds?: components['schemas']['Ulid'][];

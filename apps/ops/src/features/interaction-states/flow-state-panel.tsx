@@ -17,7 +17,13 @@ export interface FlowStateActionRequest {
 export interface FlowStateActionResult {
   message: string;
   evidence:
-    | { kind: 'server'; operationId: string; auditId?: string; resourceId?: string }
+    | {
+        kind: 'server';
+        operationId: string;
+        auditId?: string;
+        requestId?: string;
+        resourceId?: string;
+      }
     | { kind: 'local'; evidenceId: string };
   recoverToStateId?: string;
   details?: { title: string; items: string[] };
@@ -175,7 +181,9 @@ export function FlowStatePanel({
             {outcome.result.evidence.kind === 'server'
               ? outcome.result.evidence.auditId
                 ? `审计 ${outcome.result.evidence.auditId} · ${outcome.result.evidence.operationId}`
-                : `服务端资源 ${outcome.result.evidence.resourceId ?? '已更新'} · ${outcome.result.evidence.operationId}`
+                : outcome.result.evidence.requestId
+                  ? `请求追踪 ${outcome.result.evidence.requestId} · ${outcome.result.evidence.operationId}`
+                  : `服务端资源 ${outcome.result.evidence.resourceId ?? '已更新'} · ${outcome.result.evidence.operationId}`
               : `本地证据 ${outcome.result.evidence.evidenceId}`}
           </p>
           {outcome.result.details ? (

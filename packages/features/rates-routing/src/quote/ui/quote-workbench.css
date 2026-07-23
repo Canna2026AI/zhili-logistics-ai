@@ -230,3 +230,65 @@
     width: 1180px;
   }
 }
+
+@media (max-width: 600px) {
+  .quote-workbench {
+    width: auto;
+    min-height: 0;
+    margin: -10px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quote-workbench__result {
+    grid-row: 1;
+    min-width: 0;
+    padding: 14px 12px;
+    border-bottom: 1px solid var(--zl-color-border);
+  }
+
+  .quote-workbench__form {
+    grid-row: 2;
+    min-width: 0;
+    padding: 14px 12px;
+    border-right: 0;
+  }
+
+  .quote-workbench__form > header,
+  .quote-workbench__result > header,
+  .quote-actions,
+  .quote-inline-actions {
+    flex-wrap: wrap;
+  }
+
+  .quote-section {
+    min-inline-size: 0;
+    padding-inline: 9px;
+  }
+
+  .quote-grid--four,
+  .quote-grid--three,
+  .quote-package-row,
+  .quote-commodity-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .quote-span-two {
+    grid-column: auto;
+  }
+
+  .quote-commodity-row {
+    align-items: stretch;
+  }
+
+  .quote-options > label {
+    grid-template-columns: 18px minmax(0, 1fr);
+  }
+
+  .quote-options > label > b {
+    grid-column: 2;
+  }
+
+  .quote-actions {
+    justify-content: flex-start;
+  }
+}

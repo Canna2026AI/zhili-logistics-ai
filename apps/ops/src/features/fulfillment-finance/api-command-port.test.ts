@@ -81,7 +81,7 @@ describe('API fulfillment finance command port', () => {
       reason: '承运商补传尾程费用',
       version: 11,
     });
-    expect(result.auditId).toBe('REQ-FIN-0098');
+    expect(result).toEqual({ evidence: { kind: 'trace', requestId: 'REQ-FIN-0098' } });
   });
 
   it('sends WH-08 print through the generated client instead of local success', async () => {
@@ -113,7 +113,7 @@ describe('API fulfillment finance command port', () => {
       documentType: 'HANDOVER',
       copies: 1,
     });
-    expect(result.auditId).toBe('REQ-PRINT-0001');
+    expect(result).toEqual({ evidence: { kind: 'trace', requestId: 'REQ-PRINT-0001' } });
   });
 
   it('returns a server-owned resource id for successful bare-resource responses', async () => {
@@ -135,7 +135,38 @@ describe('API fulfillment finance command port', () => {
         idempotencyKey: 'getProfitTrace:S2505120004:v11',
         expectedVersion: 11,
       })
-    ).resolves.toEqual({ auditId: 'TRACE-S2505120004' });
+    ).resolves.toEqual({
+      evidence: { kind: 'resource', resourceId: 'TRACE-S2505120004' },
+    });
+  });
+
+  it('marks only an explicit audit event identifier as audit evidence', async () => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json({
+          data: {
+            resourceId: 'CHG-S2505120004',
+            auditEventId: 'AUD-EVENT-0098',
+            status: 'DRAFT',
+            version: 12,
+          },
+          meta: { requestId: 'REQ-FIN-0098', timestamp: '2026-07-22T08:00:00Z' },
+        }),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'finance',
+        operationId: 'unreviewCharge',
+        entityRef: 'CHG-S2505120004',
+        idempotencyKey: 'unreviewCharge:CHG-S2505120004:v11',
+        expectedVersion: 11,
+        payload: { reason: '承运商补传尾程费用' },
+      })
+    ).resolves.toEqual({
+      evidence: { kind: 'audit', auditId: 'AUD-EVENT-0098' },
+    });
   });
 
   it('rejects the server problem without fabricating an audit id', async () => {

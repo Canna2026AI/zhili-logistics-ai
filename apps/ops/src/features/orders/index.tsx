@@ -4,17 +4,19 @@ import { MasterDataPanel } from '@zhili/feature-identity-masterdata';
 import {
   QuoteWorkbench,
   RateCatalogPanel,
-  calculateQuote,
-  quoteInputFixture,
   quoteWorkflowFixture,
   type CalculatedQuote,
   type QuoteWorkflowRequest,
   type QuoteViewState,
+  type QuoteOperation,
 } from '@zhili/feature-rates-routing';
+import type { DomainApiError } from '@zhili/api-client';
 import {
   ImportWorkbench,
   OrderDraftPanel,
   WaybillList,
+  type AiMappingProposalRef,
+  type ImportOperation,
   type ImportJobRef,
 } from '@zhili/feature-waybills';
 import { defaultOpsOrdersPorts, type OpsOrdersPorts } from './ports';
@@ -166,11 +168,12 @@ export function OpsOrdersWorkspace({
     stateId: 'normal',
   });
   const [quoteDraft, setQuoteDraft] = useState<QuoteWorkflowRequest>(quoteWorkflowFixture);
-  const [quoteSnapshot, setQuoteSnapshot] = useState<CalculatedQuote>(() =>
-    calculateQuote(quoteInputFixture)
-  );
+  const [quoteSnapshot, setQuoteSnapshot] = useState<CalculatedQuote | null>(null);
   const [manualMappingOpen, setManualMappingOpen] = useState(false);
-  const [manualMappingId, setManualMappingId] = useState('01JMAP0000000000000000001');
+  const [manualMappingId, setManualMappingId] = useState('01JY8Z8F6ME4F0Y9QH2X6D4R7G');
+  const [importJob, setImportJob] = useState<ImportJobRef | null>(null);
+  const [importProposal, setImportProposal] = useState<AiMappingProposalRef | null>(null);
+  const [mappingApplied, setMappingApplied] = useState(false);
   const [manualMappingJob, setManualMappingJob] = useState<ImportJobRef | null>(null);
   const [mappingPending, setMappingPending] = useState(false);
   const [mappingError, setMappingError] = useState('');
@@ -179,16 +182,33 @@ export function OpsOrdersWorkspace({
   const activePorts = { ...defaultOpsOrdersPorts, ...ports };
 
   const open = (next: OrdersPage) => {
-    if (page !== next && next === 'quotes') {
+    if (showScenarioControls && page !== next && next === 'quotes') {
       setQuoteFlow({ flowId: 'F02', stateId: 'normal' });
     }
-    if (page !== next && next === 'imports') {
+    if (showScenarioControls && page !== next && next === 'imports') {
       setImportFlow({ flowId: 'F10', stateId: 'normal' });
       setManualMappingOpen(false);
       setMappingError('');
     }
     setPage(next);
     setOpenPages((pages) => (pages.includes(next) ? pages : [...pages, next]));
+  };
+
+  const handleQuoteError = (error: DomainApiError, operation: QuoteOperation) => {
+    if (error.status === 410 || error.code === 'QUOTE_EXPIRED') {
+      setQuoteFlow({ flowId: 'F02', stateId: 'expired' });
+      return;
+    }
+    if (
+      error.status === 409 ||
+      error.status === 412 ||
+      error.code === 'STALE_VERSION' ||
+      error.code === 'PRECONDITION_FAILED'
+    ) {
+      setQuoteFlow({ flowId: 'F02', stateId: 'stale-rate' });
+      return;
+    }
+    if (operation === 'quote') setQuoteFlow({ flowId: 'F02', stateId: 'failed-no-rate' });
   };
 
   const runFlowAction = async (request: FlowStateActionRequest): Promise<FlowStateActionResult> => {
@@ -210,12 +230,50 @@ export function OpsOrdersWorkspace({
           },
         };
       }
-      case 'open-manual-mapping':
+      case 'open-manual-mapping': {
+        if ((!importJob || !importProposal) && showScenarioControls) {
+          const fixtureJob: ImportJobRef = {
+            id: '01JY8Z8F6ME4F0Y9QH2X6D4R7E',
+            version: 4,
+            status: 'UPLOADED',
+          };
+          const fixtureProposal: AiMappingProposalRef = {
+            id: '01JY8Z8F6ME4F0Y9QH2X6D4R7F',
+            importId: fixtureJob.id,
+            model: 'Zhili-Map 2.1',
+            promptVersion: 'prompt-17',
+            status: 'READY',
+            version: 3,
+            candidates: [
+              {
+                id: '01JY8Z8F6ME4F0Y9QH2X6D4R7G',
+                sourceColumn: 'receiver_state',
+                targetField: 'receiverState',
+                confidence: 0.61,
+                evidence: ['列名与历史映射相似'],
+                risk: 'MEDIUM',
+              },
+              {
+                id: '01JY8Z8F6ME4F0Y9QH2X6D4R7J',
+                sourceColumn: 'province',
+                targetField: 'receiverState',
+                confidence: 0.32,
+                evidence: ['样本值与州缩写部分匹配'],
+                risk: 'MEDIUM',
+              },
+            ],
+          };
+          setImportJob(fixtureJob);
+          setManualMappingJob(fixtureJob);
+          setImportProposal(fixtureProposal);
+          setManualMappingId(fixtureProposal.candidates[0]!.id);
+        }
         setManualMappingOpen(true);
         return {
           message: 'clientAction 已进入人工字段映射，AI 建议保持可追溯',
           evidence: { kind: 'local', evidenceId: 'CLIENT-F10-MAP' },
         };
+      }
       case 'locate-quote-fields':
         return {
           message: '已定位缺失字段并保留当前报价输入',
@@ -272,13 +330,20 @@ export function OpsOrdersWorkspace({
     setMappingPending(true);
     setMappingError('');
     try {
-      const currentJob =
-        manualMappingJob ?? (await activePorts.imports.create('ai-mapping://current-import'));
-      setManualMappingJob(currentJob);
-      const applied = await activePorts.imports.applyMapping(currentJob.id, currentJob.version, [
-        manualMappingId,
-      ]);
+      const currentJob = manualMappingJob ?? importJob;
+      if (!currentJob || !importProposal) {
+        throw new Error('导入批次或 AI 提案尚未就绪');
+      }
+      const applied = await activePorts.imports.applyMapping(
+        currentJob.id,
+        currentJob.version,
+        importProposal.id,
+        importProposal.version,
+        [manualMappingId]
+      );
       setManualMappingJob(applied);
+      setImportJob(applied);
+      setMappingApplied(true);
       setMappingReceipt(applied);
       setManualMappingOpen(false);
       setImportFlow({ flowId: 'F10', stateId: 'normal' });
@@ -287,6 +352,18 @@ export function OpsOrdersWorkspace({
     } finally {
       mappingPendingRef.current = false;
       setMappingPending(false);
+    }
+  };
+
+  const handleImportError = (error: DomainApiError, operation: ImportOperation) => {
+    if (operation !== 'propose') return;
+    const proposal = error.context?.proposal as AiMappingProposalRef | undefined;
+    if (proposal) {
+      setImportProposal(proposal);
+      setManualMappingId(proposal.candidates[0]?.id ?? '');
+    }
+    if (error.status === 422 || error.code === 'AI_LOW_CONFIDENCE') {
+      setImportFlow({ flowId: 'F10', stateId: 'low-confidence' });
     }
   };
 
@@ -327,10 +404,11 @@ export function OpsOrdersWorkspace({
           snapshot={quoteSnapshot}
           onSnapshotChange={(snapshot) => {
             setQuoteSnapshot(snapshot);
-            if (quoteFlow.stateId === 'stale-rate') {
+            if (['stale-rate', 'expired', 'failed-no-rate'].includes(quoteFlow.stateId)) {
               setQuoteFlow({ flowId: 'F02', stateId: 'normal' });
             }
           }}
+          onError={handleQuoteError}
         />
       </>
     ) : page === 'orders' ? (
@@ -365,9 +443,12 @@ export function OpsOrdersWorkspace({
                 disabled={mappingPending}
                 onChange={(event) => setManualMappingId(event.target.value)}
               >
-                <option value="01JMAP0000000000000000001">receiver_state（置信度 61%）</option>
-                <option value="01JMAP0000000000000000002">province（置信度 32%）</option>
-                <option value="01JMAP0000000000000000003">忽略此列（人工结论）</option>
+                {importProposal?.candidates.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.sourceColumn} → {candidate.targetField}（置信度{' '}
+                    {Math.round(candidate.confidence * 100)}%）
+                  </option>
+                ))}
               </select>
             </label>
             <div className="orders-manual-mapping__actions">
@@ -382,11 +463,32 @@ export function OpsOrdersWorkspace({
         ) : null}
         {mappingReceipt ? (
           <p className="orders-mapping-receipt" role="status">
-            人工映射已应用 · 批次 {mappingReceipt.id} · v{mappingReceipt.version} · 审计{' '}
-            {mappingReceipt.auditId ?? '服务端未返回审计号'}
+            人工映射已应用 · 批次 {mappingReceipt.id} · v{mappingReceipt.version} ·{' '}
+            {mappingReceipt.evidence?.kind === 'audit'
+              ? `审计 ${mappingReceipt.evidence.auditId}`
+              : mappingReceipt.evidence?.kind === 'trace'
+                ? `请求追踪 ${mappingReceipt.evidence.requestId}`
+                : mappingReceipt.evidence?.kind === 'resource'
+                  ? `资源 ${mappingReceipt.evidence.resourceId}`
+                  : '服务端未返回证据编号'}
           </p>
         ) : null}
-        <ImportWorkbench port={activePorts.imports} readOnly={importBlocked} />
+        <ImportWorkbench
+          port={activePorts.imports}
+          readOnly={importBlocked}
+          job={importJob}
+          proposal={importProposal}
+          mappingApplied={mappingApplied}
+          onJobChange={(job) => {
+            setImportJob(job);
+            setManualMappingJob(job);
+          }}
+          onProposalChange={(proposal) => {
+            setImportProposal(proposal);
+            setManualMappingId(proposal.candidates[0]?.id ?? '');
+          }}
+          onError={handleImportError}
+        />
       </>
     ) : (
       <WaybillList

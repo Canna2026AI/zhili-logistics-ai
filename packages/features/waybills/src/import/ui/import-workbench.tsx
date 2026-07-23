@@ -1,39 +1,84 @@
 import { Button, Dialog, Input } from '@zhili/ui';
-import { useState } from 'react';
+import { toDomainApiError, type DomainApiError } from '@zhili/api-client';
+import { useRef, useState } from 'react';
 import {
   memoryImportPort,
   parseImportRows,
+  type AiMappingProposalRef,
   type ImportJobRef,
   type ImportPort,
 } from '../model/import';
 
+export type ImportOperation =
+  'create' | 'propose' | 'apply-mapping' | 'validate' | 'commit' | 'rollback';
+
 export interface ImportWorkbenchProps {
   port?: ImportPort;
   readOnly?: boolean;
+  job?: ImportJobRef | null;
+  proposal?: AiMappingProposalRef | null;
+  mappingApplied?: boolean;
+  onJobChange?: (job: ImportJobRef) => void;
+  onProposalChange?: (proposal: AiMappingProposalRef) => void;
+  onError?: (error: DomainApiError, operation: ImportOperation) => void;
 }
 
 export function ImportWorkbench({
   port = memoryImportPort,
   readOnly = false,
+  job: controlledJob,
+  proposal: controlledProposal,
+  mappingApplied = false,
+  onJobChange,
+  onProposalChange,
+  onError,
 }: ImportWorkbenchProps) {
   const [csv, setCsv] = useState('');
   const [step, setStep] = useState<'upload' | 'mapping' | 'validated' | 'committed'>('upload');
-  const [job, setJob] = useState<ImportJobRef | null>(null);
+  const [localJob, setLocalJob] = useState<ImportJobRef | null>(null);
+  const [localProposal, setLocalProposal] = useState<AiMappingProposalRef | null>(null);
+  const [localMappingApplied, setLocalMappingApplied] = useState(false);
+  const [selectedMappingIds, setSelectedMappingIds] = useState<string[]>([]);
+  const job = controlledJob === undefined ? localJob : controlledJob;
+  const proposal = controlledProposal === undefined ? localProposal : controlledProposal;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [rollbackOpen, setRollbackOpen] = useState(false);
   const [rollbackReason, setRollbackReason] = useState('');
+  const pendingRef = useRef(false);
   const result = parseImportRows(csv);
 
-  const run = async (operation: () => Promise<void>) => {
+  const setJob = (next: ImportJobRef) => {
+    if (onJobChange) onJobChange(next);
+    else setLocalJob(next);
+  };
+
+  const setProposal = (next: AiMappingProposalRef) => {
+    if (onProposalChange) onProposalChange(next);
+    else setLocalProposal(next);
+    setSelectedMappingIds(
+      next.candidates
+        .filter((candidate) => candidate.autoApplicable || candidate.confidence >= 0.8)
+        .map((candidate) => candidate.id)
+    );
+  };
+
+  const run = async <T,>(kind: ImportOperation, operation: () => Promise<T>) => {
+    if (pendingRef.current) return undefined;
+    pendingRef.current = true;
     setPending(true);
     setError('');
     try {
-      await operation();
-    } catch {
+      return await operation();
+    } catch (caught) {
+      const domainError = toDomainApiError(caught);
+      const contextualProposal = domainError.context?.proposal as AiMappingProposalRef | undefined;
+      if (contextualProposal) setProposal(contextualProposal);
+      onError?.(domainError, kind);
       setError('导入命令失败；批次未推进，请检查文件、权限或版本后重试。');
     } finally {
+      pendingRef.current = false;
       setPending(false);
     }
   };
@@ -59,11 +104,19 @@ export function ImportWorkbench({
         <Button
           disabled={readOnly || !csv.trim() || pending}
           onClick={() =>
-            void run(async () => {
-              const created = await port.create(`inline-csv:${csv.length}`);
+            void (async () => {
+              const created = await run('create', () => port.create(`inline-csv:${csv.length}`));
+              if (!created) return;
               setJob(created);
               setStep('mapping');
-            })
+              setLocalMappingApplied(false);
+              if (typeof port.proposeMapping === 'function') {
+                const proposed = await run('propose', () =>
+                  port.proposeMapping(created.id, created.version)
+                );
+                if (proposed) setProposal(proposed);
+              }
+            })()
           }
         >
           {pending ? '处理中…' : '解析并映射'}
@@ -73,15 +126,55 @@ export function ImportWorkbench({
         <fieldset>
           <legend>字段映射</legend>
           <div className="order-row">
-            <span>客户 → customerName</span>
-            <span>重量 → weightKg</span>
-            <span>目的地 → destination</span>
+            {proposal
+              ? proposal.candidates.map((candidate) => (
+                  <label key={candidate.id}>
+                    <input
+                      type="checkbox"
+                      checked={selectedMappingIds.includes(candidate.id)}
+                      disabled={readOnly || pending || mappingApplied || localMappingApplied}
+                      onChange={(event) =>
+                        setSelectedMappingIds((current) =>
+                          event.target.checked
+                            ? [...new Set([...current, candidate.id])]
+                            : current.filter((id) => id !== candidate.id)
+                        )
+                      }
+                    />
+                    {candidate.sourceColumn} → {candidate.targetField} ·{' '}
+                    {Math.round(candidate.confidence * 100)}%
+                  </label>
+                ))
+              : ['客户 → customerName', '重量 → weightKg', '目的地 → destination'].map(
+                  (mapping) => <span key={mapping}>{mapping}</span>
+                )}
           </div>
-          {step === 'mapping' ? (
+          {step === 'mapping' && proposal && !mappingApplied && !localMappingApplied ? (
+            <Button
+              disabled={!job || pending || readOnly || selectedMappingIds.length === 0}
+              onClick={() =>
+                void run('apply-mapping', async () => {
+                  if (!job) return;
+                  const mapped = await port.applyMapping(
+                    job.id,
+                    job.version,
+                    proposal.id,
+                    proposal.version,
+                    selectedMappingIds
+                  );
+                  setJob(mapped);
+                  setLocalMappingApplied(true);
+                })
+              }
+            >
+              应用字段映射
+            </Button>
+          ) : null}
+          {step === 'mapping' && (!proposal || mappingApplied || localMappingApplied) ? (
             <Button
               disabled={!job || pending || readOnly}
               onClick={() =>
-                void run(async () => {
+                void run('validate', async () => {
                   if (!job) return;
                   const validated = await port.validate(job.id, job.version);
                   setJob(validated);
@@ -109,7 +202,7 @@ export function ImportWorkbench({
             <Button
               disabled={!job || pending || readOnly}
               onClick={() =>
-                void run(async () => {
+                void run('commit', async () => {
                   if (!job) return;
                   const committed = await port.commit(job.id, job.version, result.invalid > 0);
                   setJob(committed);
@@ -160,7 +253,7 @@ export function ImportWorkbench({
               variant="danger"
               disabled={!job || rollbackReason.trim().length < 10 || pending}
               onClick={() =>
-                void run(async () => {
+                void run('rollback', async () => {
                   if (!job) return;
                   const rolledBack = await port.rollback(
                     job.id,

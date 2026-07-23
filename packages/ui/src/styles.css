@@ -35,10 +35,10 @@
   background: var(--zl-color-primary);
 }
 .zl-button--primary:hover:not(:disabled) {
-  background: var(--zl-color-teal-600);
+  background: var(--zl-color-teal-800);
 }
 .zl-button--primary:active:not(:disabled) {
-  background: var(--zl-color-teal-800);
+  background: var(--zl-color-teal-900);
 }
 .zl-button--secondary {
   color: var(--zl-color-text);

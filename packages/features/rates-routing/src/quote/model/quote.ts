@@ -29,6 +29,9 @@ export interface CalculatedOption {
 export interface CalculatedQuote {
   id: string;
   quoteNo: string;
+  status?: 'DRAFT' | 'CALCULATED' | 'ACCEPTED' | 'EXPIRED';
+  acceptedOptionId?: string | null;
+  validUntil?: string;
   version: number;
   chargeableWeightKg: string;
   volumeWeightKg: string;
@@ -76,7 +79,7 @@ export interface QuoteActionResult {
 export interface QuotePort {
   create(request: QuoteWorkflowRequest): Promise<CalculatedQuote>;
   explain(snapshot: QuoteSnapshotRef): Promise<QuoteExplanationView>;
-  accept(quoteId: string, optionId: string, version: number): Promise<QuoteActionResult>;
+  accept(quoteId: string, optionId: string, version: number): Promise<CalculatedQuote>;
   saveDraft(request: QuoteWorkflowRequest): Promise<QuoteActionResult>;
   submitForecast(quoteId: string, optionId: string, version: number): Promise<QuoteActionResult>;
 }
@@ -84,7 +87,7 @@ export interface QuotePort {
 export const quoteInputFixture: QuoteInputFixture = {
   volumeDivisor: 6000,
   request: {
-    customerId: 'customer-xinyuan',
+    customerId: '01JY8Z8F6ME4F0Y9QH2X6D4R7A',
     origin: {
       countryCode: 'CN',
       city: '深圳',
@@ -284,7 +287,13 @@ export const memoryQuotePort: QuotePort = {
     };
   },
   async accept(_quoteId, optionId, version) {
-    return { acceptedOptionId: optionId, version: version + 1, message: '报价快照已接受' };
+    return {
+      ...calculateQuote(quoteInputFixture),
+      id: _quoteId,
+      status: 'ACCEPTED',
+      acceptedOptionId: optionId,
+      version: version + 1,
+    };
   },
   async saveDraft() {
     return { version: 1, message: '草稿 ORD-DRAFT-0268 已保存' };

@@ -2,7 +2,7 @@ import type { FulfillmentFinanceCommandPort } from './fulfillment-finance-workbe
 
 export function createInMemoryFulfillmentFinanceCommandPort(): FulfillmentFinanceCommandPort {
   const auditSequence = new Map<string, number>();
-  const completed = new Map<string, { auditId: string }>();
+  const completed = new Map<string, { evidence: { kind: 'audit'; auditId: string } }>();
 
   return {
     async execute(command) {
@@ -15,7 +15,9 @@ export function createInMemoryFulfillmentFinanceCommandPort(): FulfillmentFinanc
       await Promise.resolve();
       const next = (auditSequence.get(command.operationId) ?? 0) + 1;
       auditSequence.set(command.operationId, next);
-      const result = { auditId: `AUD-${command.operationId}-${next}` };
+      const result = {
+        evidence: { kind: 'audit' as const, auditId: `AUD-${command.operationId}-${next}` },
+      };
       completed.set(command.idempotencyKey, result);
       return result;
     },

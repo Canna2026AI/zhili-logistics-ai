@@ -5,6 +5,9 @@ import { calculateQuote, quoteInputFixture } from '../model/quote';
 import { createQuoteApi } from '../adapters/api/quote-api';
 
 describe('multi-channel quote', () => {
+  const quoteId = '01JY8Z8F6ME4F0Y9QH2X6D4R7B';
+  const optionId = '01JY8Z8F6ME4F0Y9QH2X6D4R7C';
+
   it('derives chargeable weight and canonical amount from line formulas', () => {
     const quote = calculateQuote(quoteInputFixture);
     expect(quote.chargeableWeightKg).toBe('123.50');
@@ -35,19 +38,142 @@ describe('multi-channel quote', () => {
     expect(screen.getByRole('button', { name: '按 v4 重新计算' })).toBeInTheDocument();
   });
 
+  it('keeps an explicitly controlled unquoted draft free of accept actions', () => {
+    render(<QuoteWorkbench snapshot={null} />);
+
+    expect(screen.getByText('尚未获取服务端报价')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '刷新报价' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '接受报价' })).not.toBeInTheDocument();
+  });
+
+  it('reports the typed quote operation error to its controlled parent', async () => {
+    const onError = vi.fn();
+    const expired = Object.assign(new Error('报价快照已过期'), {
+      name: 'DomainApiError',
+      status: 410,
+      code: 'QUOTE_EXPIRED',
+      remediation: '请重新计算',
+    });
+    render(
+      <QuoteWorkbench
+        onError={onError}
+        port={
+          {
+            create: vi.fn(),
+            explain: vi.fn(),
+            accept: vi.fn(async () => {
+              throw expired;
+            }),
+          } as never
+        }
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '接受报价' }));
+    await waitFor(() => expect(onError).toHaveBeenCalledWith(expired, 'accept'));
+  });
+
+  it('fails closed when accept has no authoritative quote response', async () => {
+    const POST = vi.fn().mockResolvedValue({ data: undefined, response: new Response(null) });
+    const adapter = createQuoteApi({ POST, GET: vi.fn() } as never, () => 'quote-intent');
+
+    await expect(adapter.accept(quoteId, optionId, 6)).rejects.toThrow(
+      'QUOTE_ACCEPT_RESPONSE_EMPTY'
+    );
+  });
+
+  it('returns the identity-checked authoritative accepted quote snapshot', async () => {
+    const request = {
+      quote: { ...quoteInputFixture.request, customerId: '01JY8Z8F6ME4F0Y9QH2X6D4R7A' },
+      orderContext: { orderType: 'STANDARD' as const },
+    };
+    const calculated = {
+      id: quoteId,
+      quoteNo: 'Q-SERVER-1',
+      status: 'CALCULATED',
+      validUntil: '2026-07-23T10:00:00+08:00',
+      version: 6,
+      options: [
+        {
+          id: optionId,
+          channelProductId: '01JY8Z8F6ME4F0Y9QH2X6D4R7D',
+          chargeableWeightKg: '88.00',
+          lines: [],
+          total: { amount: '999.99', currency: 'CNY' },
+          available: true,
+        },
+      ],
+    };
+    const accepted = { ...calculated, status: 'ACCEPTED', acceptedOptionId: optionId, version: 7 };
+    const POST = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { data: calculated, meta: {} }, response: new Response(null) })
+      .mockResolvedValueOnce({ data: { data: accepted, meta: {} }, response: new Response(null) });
+    const adapter = createQuoteApi({ POST, GET: vi.fn() } as never, () => 'quote-intent');
+
+    await adapter.create(request);
+    await expect(adapter.accept(quoteId, optionId, 6)).resolves.toMatchObject({
+      id: quoteId,
+      version: 7,
+      status: 'ACCEPTED',
+      acceptedOptionId: optionId,
+    });
+  });
+
+  it('reuses the accept intent key after the response is lost', async () => {
+    const request = {
+      quote: { ...quoteInputFixture.request, customerId: '01JY8Z8F6ME4F0Y9QH2X6D4R7A' },
+      orderContext: { orderType: 'STANDARD' as const },
+    };
+    const calculated = {
+      id: quoteId,
+      quoteNo: 'Q-SERVER-LOST-1',
+      status: 'CALCULATED',
+      validUntil: '2026-07-23T10:00:00+08:00',
+      version: 6,
+      options: [
+        {
+          id: optionId,
+          channelProductId: '01JY8Z8F6ME4F0Y9QH2X6D4R7D',
+          chargeableWeightKg: '88.00',
+          lines: [],
+          total: { amount: '999.99', currency: 'CNY' },
+          available: true,
+        },
+      ],
+    };
+    const accepted = { ...calculated, status: 'ACCEPTED', acceptedOptionId: optionId, version: 7 };
+    const POST = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { data: calculated, meta: {} }, response: new Response(null) })
+      .mockRejectedValueOnce(new Error('connection lost after accept commit'))
+      .mockResolvedValueOnce({ data: { data: accepted, meta: {} }, response: new Response(null) });
+    let keyCounter = 0;
+    const adapter = createQuoteApi({ POST, GET: vi.fn() } as never, () => `intent-${++keyCounter}`);
+
+    await adapter.create(request);
+    await expect(adapter.accept(quoteId, optionId, 6)).rejects.toThrow('connection lost');
+    await expect(adapter.accept(quoteId, optionId, 6)).resolves.toMatchObject({ version: 7 });
+
+    const firstAcceptKey = POST.mock.calls[1]?.[1]?.params?.header?.['Idempotency-Key'];
+    const retryAcceptKey = POST.mock.calls[2]?.[1]?.params?.header?.['Idempotency-Key'];
+    expect(firstAcceptKey).toBe('quote-intent-2');
+    expect(retryAcceptKey).toBe(firstAcceptKey);
+  });
+
   it('uses the generated OpenAPI paths for quote and explanation', async () => {
     const POST = vi.fn().mockResolvedValue({
       data: {
         data: {
-          id: 'quote-1',
+          id: quoteId,
           quoteNo: 'Q-1',
           status: 'CALCULATED',
           validUntil: '2026-07-23T10:00:00+08:00',
           version: 1,
           options: [
             {
-              id: 'option-1',
-              channelProductId: 'product-1',
+              id: optionId,
+              channelProductId: '01JY8Z8F6ME4F0Y9QH2X6D4R7D',
               chargeableWeightKg: '123.50',
               lines: [],
               total: { amount: '1.00', currency: 'CNY' },
@@ -60,7 +186,7 @@ describe('multi-channel quote', () => {
     });
     const GET = vi.fn().mockResolvedValue({
       data: {
-        data: { quoteId: 'quote-1', rateCardVersion: 'RATE-v1', steps: [] },
+        data: { quoteId, rateCardVersion: 'RATE-v1', steps: [] },
         meta: {},
       },
     });
@@ -69,13 +195,13 @@ describe('multi-channel quote', () => {
       quote: quoteInputFixture.request,
       orderContext: { orderType: 'STANDARD' },
     });
-    await adapter.explain({ quoteId: 'quote-1', optionId: 'option-1', version: 1 });
+    await adapter.explain({ quoteId, optionId, version: 1 });
     expect(POST).toHaveBeenCalledWith('/quotes', {
       body: quoteInputFixture.request,
       params: { header: { 'Idempotency-Key': expect.any(String) } },
     });
     expect(GET).toHaveBeenCalledWith('/quotes/{quoteId}/explanation', {
-      params: { path: { quoteId: 'quote-1' } },
+      params: { path: { quoteId } },
     });
   });
 
@@ -83,15 +209,15 @@ describe('multi-channel quote', () => {
     const POST = vi.fn().mockResolvedValue({
       data: {
         data: {
-          id: 'quote-server-1',
+          id: quoteId,
           quoteNo: 'Q-SERVER-1',
           status: 'CALCULATED',
           validUntil: '2026-07-23T10:00:00+08:00',
           version: 6,
           options: [
             {
-              id: 'option-server-1',
-              channelProductId: 'channel-product-server-1',
+              id: optionId,
+              channelProductId: '01JY8Z8F6ME4F0Y9QH2X6D4R7D',
               chargeableWeightKg: '88.00',
               available: true,
               lines: [
@@ -115,14 +241,14 @@ describe('multi-channel quote', () => {
       orderContext: { orderType: 'STANDARD' },
     } as never);
     expect(quote).toMatchObject({
-      id: 'quote-server-1',
+      id: quoteId,
       quoteNo: 'Q-SERVER-1',
       version: 6,
       chargeableWeightKg: '88.00',
       options: [
         {
-          id: 'option-server-1',
-          product: 'channel-product-server-1',
+          id: optionId,
+          product: '01JY8Z8F6ME4F0Y9QH2X6D4R7D',
           total: { amount: '999.99', currency: 'CNY' },
           lines: [{ code: 'REMOTE_RATE', ruleVersion: 'REMOTE-v9' }],
         },
@@ -139,7 +265,12 @@ describe('multi-channel quote', () => {
       rateCardVersion: 'RATE-DHL-v4',
       steps: ['200 kg'],
     }));
-    const accept = vi.fn(async () => ({ acceptedOptionId: 'dhl-express', version: 2 }));
+    const accept = vi.fn(async () => ({
+      ...calculateQuote(quoteInputFixture),
+      status: 'ACCEPTED' as const,
+      acceptedOptionId: 'dhl-express',
+      version: 2,
+    }));
     render(<QuoteWorkbench port={{ create, explain, accept } as never} />);
     fireEvent.change(screen.getByLabelText('实重 (kg)'), { target: { value: '200.00' } });
     fireEvent.click(screen.getByRole('button', { name: '刷新报价' }));
@@ -208,7 +339,12 @@ describe('multi-channel quote', () => {
       rateCardVersion: snapshot.optionId === 'ups-saver' ? 'RATE-UPS-v5' : 'RATE-DHL-v3',
       steps: [`${snapshot.optionId} / 123.50 kg`],
     }));
-    const accept = vi.fn(async () => ({ acceptedOptionId: 'ups-saver', version: 2 }));
+    const accept = vi.fn(async () => ({
+      ...calculateQuote(quoteInputFixture),
+      status: 'ACCEPTED' as const,
+      acceptedOptionId: 'ups-saver',
+      version: 2,
+    }));
     render(<QuoteWorkbench port={{ create, explain, accept } as never} />);
     fireEvent.click(screen.getByRole('radio', { name: /UPS Worldwide Saver/ }));
     expect(screen.getByText(/成本 CNY 4,710.00/)).toBeInTheDocument();

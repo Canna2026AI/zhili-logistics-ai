@@ -1,6 +1,8 @@
 import createClient from 'openapi-fetch';
 import type { paths } from '@zhili/contracts';
 
+export * from './domain-error';
+
 export interface ZhiliClientOptions {
   baseUrl?: string;
   fetch?: typeof globalThis.fetch;

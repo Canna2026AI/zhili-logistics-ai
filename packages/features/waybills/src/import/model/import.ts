@@ -12,24 +12,76 @@ export interface ImportJobRef {
   failed?: number;
   status?: string;
   jobId?: string;
-  auditId?: string;
+  evidence?:
+    | { kind: 'audit'; auditId: string }
+    | { kind: 'trace'; requestId: string }
+    | { kind: 'resource'; resourceId: string };
+}
+
+export interface AiMappingCandidateRef {
+  id: string;
+  sourceColumn: string;
+  targetField: string;
+  confidence: number;
+  evidence: string[];
+  sampleValues?: string[];
+  risk: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  autoApplicable?: boolean;
+}
+
+export interface AiMappingProposalRef {
+  id: string;
+  importId: string;
+  model: string;
+  promptVersion: string;
+  status: 'RUNNING' | 'READY' | 'FAILED' | 'PARTIALLY_APPLIED' | 'APPLIED';
+  candidates: AiMappingCandidateRef[];
+  version: number;
 }
 
 export interface ImportPort {
   create(source: string): Promise<ImportJobRef>;
+  proposeMapping(importId: string, importVersion: number): Promise<AiMappingProposalRef>;
   validate(importId: string, version: number): Promise<ImportJobRef>;
   commit(importId: string, version: number, acknowledgePartial: boolean): Promise<ImportJobRef>;
   rollback(importId: string, version: number, reason: string): Promise<ImportJobRef>;
   applyMapping(
     importId: string,
-    version: number,
+    importVersion: number,
+    proposalId: string,
+    proposalVersion: number,
     acceptedMappingIds: string[]
   ): Promise<ImportJobRef>;
 }
 
+const memoryImportId = '01JY8Z8F6ME4F0Y9QH2X6D4R7E';
+const memoryProposalId = '01JY8Z8F6ME4F0Y9QH2X6D4R7F';
+const memoryCandidateId = '01JY8Z8F6ME4F0Y9QH2X6D4R7G';
+
 export const memoryImportPort: ImportPort = {
   async create() {
-    return { id: 'import-local-1', version: 1 };
+    return { id: memoryImportId, version: 1, status: 'UPLOADED' };
+  },
+  async proposeMapping(importId) {
+    return {
+      id: memoryProposalId,
+      importId,
+      model: 'Zhili-Map 2.1',
+      promptVersion: '2026.07',
+      status: 'READY',
+      candidates: [
+        {
+          id: memoryCandidateId,
+          sourceColumn: '收件州',
+          targetField: 'receiverState',
+          confidence: 0.96,
+          evidence: ['列名与目标字段匹配'],
+          risk: 'LOW',
+          autoApplicable: true,
+        },
+      ],
+      version: 1,
+    };
   },
   async validate(importId, version) {
     return { id: importId, version: version + 1 };
@@ -46,12 +98,12 @@ export const memoryImportPort: ImportPort = {
   async rollback(importId, version) {
     return { id: importId, version: version + 1, status: 'ROLLED_BACK' };
   },
-  async applyMapping(importId, version) {
+  async applyMapping(importId, importVersion) {
     return {
       id: importId,
-      version: version + 1,
+      version: importVersion + 1,
       status: 'MAPPING',
-      auditId: `AUD-AI-MAPPING-${importId}`,
+      evidence: { kind: 'audit', auditId: `AUD-AI-MAPPING-${importId}` },
     };
   },
 };
