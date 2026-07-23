@@ -6,6 +6,7 @@ import {
   customerPort,
   type ReceiptAllocationSnapshot,
 } from '../../api';
+import type { CustomerBillingRecord } from '../../customer-records';
 import { SummaryItem, SummaryList, WorkflowShell, type WorkflowTone } from '../workflow-shell';
 
 type BillingStep =
@@ -23,25 +24,34 @@ type BillingStep =
 type BillingFlowProps = {
   notify: (message: string) => void;
   receiptKey: string;
+  records: CustomerBillingRecord[];
   mockMode?: boolean;
 };
 
 type PaymentOrder = {
   id: string;
   paymentOrderNo: string;
+  purpose: 'STATEMENT';
   status: string;
+  amount: { amount: string; currency: string };
+  paidAmount: { amount: string; currency: string };
+  refundedAmount: { amount: string; currency: string };
   version: number;
 };
 
 type PaymentIntent = {
   idempotencyKey: string;
+  customerId: string;
+  receiptId: string;
   statementId: string;
   statementVersion: number;
   amount: string;
+  currency: string;
 };
 
 type BillingSession = {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  generation: number;
   step: PersistedBillingStep;
   intent: PaymentIntent;
   paymentOrder: PaymentOrder | null;
@@ -49,12 +59,14 @@ type BillingSession = {
   allocation: ReceiptAllocationSnapshot | null;
 };
 
+type BillingOperationIntent = {
+  schemaVersion: 1;
+  kind: 'allocate' | 'refresh' | 'upload';
+  idempotencyKey: string;
+  resource: string;
+};
+
 type PersistedBillingStep = Extract<BillingStep, 'creating' | 'pending' | 'partial' | 'conflict'>;
-const receiptId = '01JRECEIPT0000000000000001';
-const statementId = '01JSTATEMENT00000000000001';
-const statementVersion = 1;
-const statementAmount = '68420.00';
-const paymentRequest = { statementId, statementVersion, amount: statementAmount } as const;
 const paymentStatuses = new Set([
   'CREATED',
   'PENDING',
@@ -75,38 +87,77 @@ function parseMoneyCents(value: unknown): bigint | null {
   return BigInt(whole ?? '0') * 100n + BigInt(decimal ?? '0');
 }
 
-function isPaymentIntent(value: unknown): value is PaymentIntent {
-  if (!isRecord(value)) return false;
-  return (
-    typeof value.idempotencyKey === 'string' &&
-    /^f1c-[A-Za-z0-9-]{8,200}$/.test(value.idempotencyKey) &&
-    value.statementId === statementId &&
-    value.statementVersion === statementVersion &&
-    value.amount === statementAmount
+function recordForIntent(records: CustomerBillingRecord[], value: PaymentIntent) {
+  return records.find(
+    (record) =>
+      record.customerId === value.customerId &&
+      record.receiptId === value.receiptId &&
+      record.statementId === value.statementId &&
+      record.statementVersion === value.statementVersion &&
+      record.amount === value.amount &&
+      record.currency === value.currency
   );
 }
 
-function isPaymentOrder(value: unknown): value is PaymentOrder {
+function isPaymentIntent(value: unknown, records: CustomerBillingRecord[]): value is PaymentIntent {
   if (!isRecord(value)) return false;
+  const valid =
+    typeof value.idempotencyKey === 'string' &&
+    /^f1c-[A-Za-z0-9-]{8,200}$/.test(value.idempotencyKey) &&
+    typeof value.customerId === 'string' &&
+    typeof value.receiptId === 'string' &&
+    typeof value.statementId === 'string' &&
+    Number.isSafeInteger(value.statementVersion) &&
+    parseMoneyCents(value.amount) !== null &&
+    typeof value.currency === 'string';
+  return valid && Boolean(recordForIntent(records, value as PaymentIntent));
+}
+
+function isMoney(value: unknown, expectedCurrency?: string): value is PaymentOrder['amount'] {
+  if (!isRecord(value) || parseMoneyCents(value.amount) === null) return false;
   return (
+    typeof value.currency === 'string' &&
+    value.currency.length === 3 &&
+    (expectedCurrency === undefined || value.currency === expectedCurrency)
+  );
+}
+
+function isPaymentOrder(value: unknown, intent?: PaymentIntent): value is PaymentOrder {
+  if (!isRecord(value)) return false;
+  const valid =
     typeof value.id === 'string' &&
     value.id.length > 0 &&
     typeof value.paymentOrderNo === 'string' &&
     value.paymentOrderNo.length > 0 &&
+    value.purpose === 'STATEMENT' &&
     typeof value.status === 'string' &&
     paymentStatuses.has(value.status) &&
+    isMoney(value.amount, intent?.currency) &&
+    isMoney(value.paidAmount, intent?.currency) &&
+    isMoney(value.refundedAmount, intent?.currency) &&
     Number.isSafeInteger(value.version) &&
-    Number(value.version) >= 1
+    Number(value.version) >= 1;
+  if (!valid) return false;
+  const amount = parseMoneyCents((value.amount as PaymentOrder['amount']).amount)!;
+  const paid = parseMoneyCents((value.paidAmount as PaymentOrder['amount']).amount)!;
+  const refunded = parseMoneyCents((value.refundedAmount as PaymentOrder['amount']).amount)!;
+  return (
+    paid <= amount &&
+    refunded <= paid &&
+    (intent === undefined || (value.amount as PaymentOrder['amount']).amount === intent.amount)
   );
 }
 
-function isAllocationSnapshot(value: unknown): value is ReceiptAllocationSnapshot {
+function isAllocationSnapshot(
+  value: unknown,
+  expectedReceiptId: string
+): value is ReceiptAllocationSnapshot {
   if (!isRecord(value)) return false;
   const total = parseMoneyCents(value.total);
   const allocated = parseMoneyCents(value.allocated);
   const unapplied = parseMoneyCents(value.unapplied);
   if (
-    value.receiptId !== receiptId ||
+    value.receiptId !== expectedReceiptId ||
     !Number.isSafeInteger(value.version) ||
     Number(value.version) < 1 ||
     total === null ||
@@ -142,8 +193,18 @@ function isAllocationSnapshot(value: unknown): value is ReceiptAllocationSnapsho
   return pendingTotal === unapplied;
 }
 
-function isBillingSession(value: unknown): value is BillingSession {
-  if (!isRecord(value) || value.schemaVersion !== 1 || !isPaymentIntent(value.intent)) return false;
+function isBillingSession(
+  value: unknown,
+  records: CustomerBillingRecord[]
+): value is BillingSession {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 2 ||
+    !Number.isSafeInteger(value.generation) ||
+    Number(value.generation) < 1 ||
+    !isPaymentIntent(value.intent, records)
+  )
+    return false;
   if (
     !['creating', 'pending', 'partial', 'conflict'].includes(String(value.step)) ||
     !Number.isSafeInteger(value.receiptVersion) ||
@@ -152,22 +213,76 @@ function isBillingSession(value: unknown): value is BillingSession {
     return false;
   if (value.step === 'creating')
     return value.paymentOrder === null && value.allocation === null && value.receiptVersion === 1;
-  if (!isPaymentOrder(value.paymentOrder)) return false;
+  if (!isPaymentOrder(value.paymentOrder, value.intent)) return false;
   if (value.step === 'pending')
     return pendingPaymentStatuses.has(value.paymentOrder.status) && value.allocation === null;
   return (
     value.paymentOrder.status === 'SUCCEEDED' &&
-    isAllocationSnapshot(value.allocation) &&
+    isAllocationSnapshot(value.allocation, value.intent.receiptId) &&
     value.receiptVersion === value.allocation.version
   );
 }
 
-function readBillingSession(key: string): BillingSession | null {
+function migrateLegacyBillingSession(
+  value: unknown,
+  records: CustomerBillingRecord[]
+): BillingSession | null {
+  if (!isRecord(value) || value.schemaVersion !== 1 || !isRecord(value.intent)) return null;
+  const legacyIntent = value.intent;
+  if (
+    typeof legacyIntent.idempotencyKey !== 'string' ||
+    !/^f1c-[A-Za-z0-9-]{8,200}$/.test(legacyIntent.idempotencyKey) ||
+    typeof legacyIntent.statementId !== 'string' ||
+    !Number.isSafeInteger(legacyIntent.statementVersion) ||
+    parseMoneyCents(legacyIntent.amount) === null
+  )
+    return null;
+
+  const matchingRecords = records.filter(
+    (record) =>
+      record.statementId === legacyIntent.statementId &&
+      record.statementVersion === legacyIntent.statementVersion &&
+      record.amount === legacyIntent.amount &&
+      (legacyIntent.customerId === undefined || legacyIntent.customerId === record.customerId) &&
+      (legacyIntent.receiptId === undefined || legacyIntent.receiptId === record.receiptId) &&
+      (legacyIntent.currency === undefined || legacyIntent.currency === record.currency)
+  );
+  if (matchingRecords.length !== 1) return null;
+  const record = matchingRecords[0]!;
+  const migrated: BillingSession = {
+    schemaVersion: 2,
+    generation:
+      Number.isSafeInteger(value.generation) && Number(value.generation) >= 1
+        ? Number(value.generation)
+        : 1,
+    step: value.step as PersistedBillingStep,
+    intent: {
+      idempotencyKey: legacyIntent.idempotencyKey,
+      customerId: record.customerId,
+      receiptId: record.receiptId,
+      statementId: record.statementId,
+      statementVersion: record.statementVersion,
+      amount: record.amount,
+      currency: record.currency,
+    },
+    paymentOrder: value.paymentOrder as PaymentOrder | null,
+    receiptVersion: value.receiptVersion as number,
+    allocation: value.allocation as ReceiptAllocationSnapshot | null,
+  };
+  return isBillingSession(migrated, records) ? migrated : null;
+}
+
+function readBillingSession(key: string, records: CustomerBillingRecord[]): BillingSession | null {
   const stored = localStorage.getItem(key);
   if (stored === null) return null;
   try {
     const parsed: unknown = JSON.parse(stored);
-    if (isBillingSession(parsed)) return parsed;
+    if (isBillingSession(parsed, records)) return parsed;
+    const migrated = migrateLegacyBillingSession(parsed, records);
+    if (migrated) {
+      localStorage.setItem(key, JSON.stringify(migrated));
+      return migrated;
+    }
   } catch {
     // Invalid or truncated state must never be presented as authoritative.
   }
@@ -175,8 +290,89 @@ function readBillingSession(key: string): BillingSession | null {
   return null;
 }
 
-const persistBillingSession = (key: string, session: BillingSession) =>
+const billingStepRank: Record<PersistedBillingStep, number> = {
+  creating: 0,
+  pending: 1,
+  partial: 2,
+  conflict: 2,
+};
+
+function persistBillingSession(
+  key: string,
+  session: BillingSession,
+  records: CustomerBillingRecord[]
+): boolean {
+  const current = readBillingSession(key, records);
+  if (
+    current &&
+    (current.intent.idempotencyKey !== session.intent.idempotencyKey ||
+      current.generation > session.generation ||
+      (current.generation === session.generation &&
+        billingStepRank[current.step] > billingStepRank[session.step]))
+  )
+    return false;
   localStorage.setItem(key, JSON.stringify(session));
+  return true;
+}
+
+function readOperationIntent(key: string, kind: BillingOperationIntent['kind'], resource: string) {
+  const raw = localStorage.getItem(key);
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (
+      isRecord(value) &&
+      value.schemaVersion === 1 &&
+      value.kind === kind &&
+      value.resource === resource &&
+      typeof value.idempotencyKey === 'string' &&
+      /^f1c-[A-Za-z0-9-]{8,200}$/.test(value.idempotencyKey)
+    )
+      return value as BillingOperationIntent;
+  } catch {
+    // Invalid operation state is removed below.
+  }
+  localStorage.removeItem(key);
+  return null;
+}
+
+function ensureOperationIntent(
+  key: string,
+  kind: BillingOperationIntent['kind'],
+  resource: string
+) {
+  const restored = readOperationIntent(key, kind, resource);
+  if (restored) return restored;
+  const created: BillingOperationIntent = {
+    schemaVersion: 1,
+    kind,
+    resource,
+    idempotencyKey: createCustomerIdempotencyKey(),
+  };
+  localStorage.setItem(key, JSON.stringify(created));
+  return created;
+}
+
+function operationIntentMatches(key: string, expected: BillingOperationIntent) {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+    return (
+      isRecord(value) &&
+      value.schemaVersion === expected.schemaVersion &&
+      value.kind === expected.kind &&
+      value.resource === expected.resource &&
+      value.idempotencyKey === expected.idempotencyKey
+    );
+  } catch {
+    return false;
+  }
+}
+
+function clearOperationIntent(key: string, expected: BillingOperationIntent) {
+  if (!operationIntentMatches(key, expected)) return false;
+  localStorage.removeItem(key);
+  return true;
+}
 
 const money = (value: string) =>
   `¥${Number(value).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -257,12 +453,26 @@ const meta: Record<
   },
 };
 
-export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlowProps) {
+export function BillingFlow({ notify, receiptKey, records, mockMode = false }: BillingFlowProps) {
   const workflowKey = `${receiptKey}:billing-workflow`;
-  const [restored] = useState(() => readBillingSession(workflowKey));
+  const [restored] = useState(() => readBillingSession(workflowKey, records));
+  const [selected, setSelected] = useState<CustomerBillingRecord>(() =>
+    restored ? (recordForIntent(records, restored.intent) ?? records[0]!) : records[0]!
+  );
+  const receiptId = selected.receiptId;
+  const statementId = selected.statementId;
+  const statementVersion = selected.statementVersion;
+  const statementAmount = selected.amount;
+  const paymentRequest = {
+    customerId: selected.customerId,
+    statementId,
+    statementVersion,
+    amount: statementAmount,
+    currency: selected.currency,
+  } as const;
   const [step, setStep] = useState<BillingStep>(() => {
     if (!restored) return 'list';
-    return restored.step === 'pending' ? 'pending' : 'recovering';
+    return 'recovering';
   });
   const [busy, setBusy] = useState(false);
   const [receiptBusy, setReceiptBusy] = useState(false);
@@ -278,13 +488,16 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
   const pendingRef = useRef(new Set<string>());
   const intentRef = useRef<PaymentIntent | null>(restored?.intent ?? null);
   const recoverySessionRef = useRef<BillingSession | null>(restored);
-  const allocateKeyRef = useRef<string | null>(null);
-  const refreshKeyRef = useRef<string | null>(null);
-  const uploadKeyRef = useRef<string | null>(null);
-  const current = meta[step];
+  const allocateOperationKey = `${workflowKey}:allocate`;
+  const refreshOperationKey = `${workflowKey}:refresh`;
+  const uploadOperationKey = `${workflowKey}:upload`;
+  const current =
+    step === 'detail'
+      ? { ...meta.detail, title: selected.invoiceNo, description: `账期 ${selected.period}。` }
+      : meta[step];
 
   const applySession = (session: BillingSession) => {
-    persistBillingSession(workflowKey, session);
+    if (!persistBillingSession(workflowKey, session, records)) return false;
     intentRef.current = session.intent;
     recoverySessionRef.current = session;
     if (mountedRef.current) {
@@ -294,9 +507,18 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
       setAllocation(session.allocation);
       setStep(session.step);
     }
+    return true;
   };
 
-  const clearSession = () => {
+  const clearSession = (expected?: BillingSession) => {
+    const currentSession = readBillingSession(workflowKey, records);
+    if (
+      expected &&
+      currentSession &&
+      (currentSession.intent.idempotencyKey !== expected.intent.idempotencyKey ||
+        (currentSession.generation ?? 1) > (expected.generation ?? 1))
+    )
+      return false;
     localStorage.removeItem(workflowKey);
     intentRef.current = null;
     recoverySessionRef.current = null;
@@ -306,20 +528,28 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
       setReceiptVersion(1);
       setAllocation(null);
     }
+    return true;
   };
 
   const executePaymentIntent = async (paymentIntent: PaymentIntent, recovering: boolean) => {
     if (pendingRef.current.has('create-payment')) return;
     pendingRef.current.add('create-payment');
     const creatingSession: BillingSession = {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      generation:
+        recoverySessionRef.current?.intent.idempotencyKey === paymentIntent.idempotencyKey
+          ? (recoverySessionRef.current.generation ?? 1) + 1
+          : 1,
       step: 'creating',
       intent: paymentIntent,
       paymentOrder: null,
       receiptVersion: 1,
       allocation: null,
     };
-    persistBillingSession(workflowKey, creatingSession);
+    if (!persistBillingSession(workflowKey, creatingSession, records)) {
+      pendingRef.current.delete('create-payment');
+      return;
+    }
     intentRef.current = paymentIntent;
     recoverySessionRef.current = creatingSession;
     if (mountedRef.current) {
@@ -335,7 +565,7 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
         paymentRequest,
         paymentIntent.idempotencyKey
       );
-      if (!isPaymentOrder(created) || !pendingPaymentStatuses.has(created.status))
+      if (!isPaymentOrder(created, paymentIntent) || !pendingPaymentStatuses.has(created.status))
         throw new Error('支付创建回执结构无效，已保留支付意图。');
       const pendingSession: BillingSession = {
         ...creatingSession,
@@ -349,7 +579,7 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
       const definitelyRejected =
         error instanceof CustomerApiError && error.status >= 400 && error.status < 500;
       if (definitelyRejected) {
-        clearSession();
+        clearSession(creatingSession);
         if (mountedRef.current) setStep('failed');
       } else if (mountedRef.current) {
         setStep('creating');
@@ -371,10 +601,6 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
       await executePaymentIntent(session.intent, true);
       return;
     }
-    if (session.step === 'pending') {
-      applySession(session);
-      return;
-    }
     if (pendingRef.current.has('recover-snapshot')) return;
     pendingRef.current.add('recover-snapshot');
     if (mountedRef.current) {
@@ -383,19 +609,50 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
       setAllocation(null);
     }
     try {
-      const snapshot = await customerPort.getReceiptAllocation(receiptId);
-      if (!isAllocationSnapshot(snapshot))
-        throw new Error('服务端核销快照校验失败，已拒绝展示缓存。');
-      applySession({
-        ...session,
-        step: 'partial',
-        receiptVersion: snapshot.version,
-        allocation: snapshot,
-      });
-      if (mountedRef.current) notify('已用服务端权威快照恢复核销状态。');
+      const authoritativeOrder = await customerPort.getPaymentOrder(session.paymentOrder!.id);
+      if (
+        !isPaymentOrder(authoritativeOrder, session.intent) ||
+        authoritativeOrder.id !== session.paymentOrder!.id ||
+        authoritativeOrder.paymentOrderNo !== session.paymentOrder!.paymentOrderNo ||
+        authoritativeOrder.version < session.paymentOrder!.version
+      )
+        throw new Error('服务端支付订单校验失败，已拒绝展示缓存。');
+      const generation = (session.generation ?? 1) + 1;
+      if (pendingPaymentStatuses.has(authoritativeOrder.status)) {
+        if (session.step !== 'pending')
+          throw new Error('服务端支付状态与缓存核销步骤冲突，已拒绝展示缓存。');
+        applySession({
+          ...session,
+          generation,
+          step: 'pending',
+          paymentOrder: authoritativeOrder,
+          receiptVersion: 1,
+          allocation: null,
+        });
+        if (mountedRef.current) notify('已用服务端权威支付订单恢复等待状态。');
+      } else if (authoritativeOrder.status === 'SUCCEEDED') {
+        const snapshot = await customerPort.getReceiptAllocation(receiptId);
+        if (!isAllocationSnapshot(snapshot, receiptId))
+          throw new Error('服务端核销快照校验失败，已拒绝展示缓存。');
+        applySession({
+          ...session,
+          generation,
+          step: 'partial',
+          paymentOrder: authoritativeOrder,
+          receiptVersion: snapshot.version,
+          allocation: snapshot,
+        });
+        if (mountedRef.current) notify('已用服务端权威支付订单与核销快照恢复状态。');
+      } else {
+        clearSession(session);
+        if (mountedRef.current) {
+          setStep('failed');
+          notify(`支付订单状态：${authoritativeOrder.status}。`);
+        }
+      }
     } catch (error) {
       if (error instanceof Error && /structure|invalid|校验/.test(error.message)) {
-        clearSession();
+        clearSession(session);
         if (mountedRef.current) setStep('list');
       } else if (mountedRef.current) {
         setStep('recovering');
@@ -409,7 +666,10 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
 
   useEffect(() => {
     mountedRef.current = true;
-    if (restored && restored.step !== 'pending') void recoverStoredSession(restored);
+    if (restored)
+      queueMicrotask(() => {
+        if (mountedRef.current) void recoverStoredSession(restored);
+      });
     return () => {
       mountedRef.current = false;
     };
@@ -420,6 +680,7 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
       intentRef.current ??
       ({
         ...paymentRequest,
+        receiptId,
         idempotencyKey: createCustomerIdempotencyKey(),
       } satisfies PaymentIntent);
     await executePaymentIntent(paymentIntent, false);
@@ -428,16 +689,24 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
   const refreshPayment = async () => {
     const paymentIntent = intentRef.current;
     if (!paymentOrder || !paymentIntent || pendingRef.current.has('query-payment')) return;
+    const sourceSession = recoverySessionRef.current;
     pendingRef.current.add('query-payment');
     setBusy(true);
     try {
       const current = await customerPort.getPaymentOrder(paymentOrder.id);
-      if (!isPaymentOrder(current)) throw new Error('支付状态回执结构无效。');
+      if (
+        !isPaymentOrder(current, paymentIntent) ||
+        current.id !== paymentOrder.id ||
+        current.paymentOrderNo !== paymentOrder.paymentOrderNo ||
+        current.version < paymentOrder.version
+      )
+        throw new Error('支付状态回执结构无效。');
       if (current.status === 'SUCCEEDED') {
         const snapshot = await customerPort.getReceiptAllocation(receiptId);
-        if (!isAllocationSnapshot(snapshot)) throw new Error('服务端核销快照校验失败。');
+        if (!isAllocationSnapshot(snapshot, receiptId)) throw new Error('服务端核销快照校验失败。');
         applySession({
-          schemaVersion: 1,
+          schemaVersion: 2,
+          generation: (recoverySessionRef.current?.generation ?? 1) + 1,
           step: 'partial',
           intent: paymentIntent,
           paymentOrder: current,
@@ -451,12 +720,14 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
         current.status === 'PARTIALLY_REFUNDED' ||
         current.status === 'REFUNDED'
       ) {
-        clearSession();
-        setStep('failed');
-        notify(`支付订单状态：${current.status}。`);
+        if (!sourceSession || clearSession(sourceSession)) {
+          setStep('failed');
+          notify(`支付订单状态：${current.status}。`);
+        }
       } else {
         applySession({
-          schemaVersion: 1,
+          schemaVersion: 2,
+          generation: (recoverySessionRef.current?.generation ?? 1) + 1,
           step: 'pending',
           intent: paymentIntent,
           paymentOrder: current,
@@ -483,7 +754,9 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
     )
       return;
     pendingRef.current.add('allocate-receipt');
-    allocateKeyRef.current ??= createCustomerIdempotencyKey();
+    const sourceSession = recoverySessionRef.current;
+    const resource = `${receiptId}:${receiptVersion}:${statementId}:${allocation.unapplied}`;
+    const operation = ensureOperationIntent(allocateOperationKey, 'allocate', resource);
     setBusy(true);
     try {
       await customerPort.allocateReceipt(
@@ -491,31 +764,33 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
         receiptVersion,
         statementId,
         allocation.unapplied,
-        allocateKeyRef.current
+        operation.idempotencyKey
       );
-      allocateKeyRef.current = null;
-      clearSession();
-      setStep('success');
-      notify('剩余金额已按服务端权威回执完成核销。');
+      if (!clearOperationIntent(allocateOperationKey, operation)) return;
+      if (!sourceSession || clearSession(sourceSession)) {
+        setStep('success');
+        notify('剩余金额已按服务端权威回执完成核销。');
+      }
     } catch (error) {
+      if (!operationIntentMatches(allocateOperationKey, operation)) return;
       const message = error instanceof Error ? error.message : '核销失败。';
       notify(message);
+      if (error instanceof CustomerApiError && error.status >= 400 && error.status < 500)
+        clearOperationIntent(allocateOperationKey, operation);
       if (
         (error instanceof CustomerApiError && [409, 412].includes(error.status)) ||
         /409|412|冲突|版本|STALE/i.test(message)
       ) {
-        allocateKeyRef.current = null;
         const conflictSession: BillingSession = {
-          schemaVersion: 1,
+          schemaVersion: 2,
+          generation: (recoverySessionRef.current?.generation ?? 1) + 1,
           step: 'conflict',
           intent: paymentIntent,
           paymentOrder,
           receiptVersion,
           allocation,
         };
-        persistBillingSession(workflowKey, conflictSession);
-        recoverySessionRef.current = conflictSession;
-        setStep('conflict');
+        applySession(conflictSession);
       }
     } finally {
       pendingRef.current.delete('allocate-receipt');
@@ -527,18 +802,20 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
     const paymentIntent = intentRef.current;
     if (!paymentIntent || !paymentOrder || pendingRef.current.has('refresh-allocation')) return;
     pendingRef.current.add('refresh-allocation');
-    refreshKeyRef.current ??= createCustomerIdempotencyKey();
+    const resource = `${receiptId}:${receiptVersion}`;
+    const operation = ensureOperationIntent(refreshOperationKey, 'refresh', resource);
     setBusy(true);
     try {
       const refreshed = await customerPort.refreshReceiptAllocation(
         receiptId,
         receiptVersion,
-        refreshKeyRef.current
+        operation.idempotencyKey
       );
-      if (!isAllocationSnapshot(refreshed)) throw new Error('服务端核销快照校验失败。');
-      refreshKeyRef.current = null;
+      if (!isAllocationSnapshot(refreshed, receiptId)) throw new Error('服务端核销快照校验失败。');
+      if (!clearOperationIntent(refreshOperationKey, operation)) return;
       applySession({
-        schemaVersion: 1,
+        schemaVersion: 2,
+        generation: (recoverySessionRef.current?.generation ?? 1) + 1,
         step: 'partial',
         intent: paymentIntent,
         paymentOrder,
@@ -547,6 +824,9 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
       });
       notify(`已刷新服务端核销版本 v${refreshed.version}，可安全重试。`);
     } catch (error) {
+      if (!operationIntentMatches(refreshOperationKey, operation)) return;
+      if (error instanceof CustomerApiError && error.status >= 400 && error.status < 500)
+        clearOperationIntent(refreshOperationKey, operation);
       notify(error instanceof Error ? error.message : '刷新核销版本失败。');
     } finally {
       pendingRef.current.delete('refresh-allocation');
@@ -557,31 +837,34 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
   const simulateConflict = () => {
     if (!intent || !paymentOrder || !allocation) return;
     const session: BillingSession = {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      generation: (recoverySessionRef.current?.generation ?? 1) + 1,
       step: 'conflict',
       intent,
       paymentOrder,
       receiptVersion,
       allocation,
     };
-    persistBillingSession(workflowKey, session);
-    recoverySessionRef.current = session;
-    setStep('conflict');
+    applySession(session);
   };
 
   const uploadReceipt = async () => {
     if (!receipt || pendingRef.current.has('upload-receipt')) return;
     pendingRef.current.add('upload-receipt');
-    uploadKeyRef.current ??= createCustomerIdempotencyKey();
+    const resource = `${statementId}:${receipt.name}:${receipt.size}:${receipt.type}:${receipt.lastModified}`;
+    const operation = ensureOperationIntent(uploadOperationKey, 'upload', resource);
     setReceiptBusy(true);
     try {
-      await customerPort.uploadReceipt(receipt, uploadKeyRef.current);
+      await customerPort.uploadReceipt(receipt, selected.statementNo, operation.idempotencyKey);
+      if (!clearOperationIntent(uploadOperationKey, operation)) return;
       localStorage.setItem(receiptKey, receipt.name);
       setReceiptName(receipt.name);
       setReceipt(null);
-      uploadKeyRef.current = null;
-      notify('付款凭证已关联至 ST202605-0008。');
+      notify(`付款凭证已关联至 ${selected.statementNo}。`);
     } catch (error) {
+      if (!operationIntentMatches(uploadOperationKey, operation)) return;
+      if (error instanceof CustomerApiError && error.status >= 400 && error.status < 500)
+        clearOperationIntent(uploadOperationKey, operation);
       notify(error instanceof Error ? error.message : '付款凭证上传失败。');
     } finally {
       pendingRef.current.delete('upload-receipt');
@@ -626,12 +909,12 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
             </>
           ) : (
             <>
-              <SummaryItem label="账单金额" value="¥68,420.00" />
+              <SummaryItem label="账单金额" value={money(statementAmount)} />
               <SummaryItem
                 label="已分配"
                 value={
                   step === 'success'
-                    ? '¥68,420.00'
+                    ? money(statementAmount)
                     : step === 'partial' && allocation
                       ? money(allocation.allocated)
                       : '¥0.00'
@@ -644,7 +927,7 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
                     ? '¥0.00'
                     : step === 'partial' && allocation
                       ? money(allocation.unapplied)
-                      : '¥68,420.00'
+                      : money(statementAmount)
                 }
               />
             </>
@@ -716,16 +999,21 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
         <div className="customer-billing-overview">
           <section className="portal-balance">
             <div>
-              <span>预存款 CNY 128,560.00</span>
-              <small>可用余额</small>
+              <span>待支付账单 {records.length} 张</span>
+              <small>当前客户数据边界</small>
             </div>
             <div>
-              <span>未分配收款 CNY 1,200.00</span>
-              <small>待确认归属</small>
+              <span>
+                待支付总额 {selected.currency}{' '}
+                {records
+                  .reduce((total, record) => total + Number(record.amount), 0)
+                  .toLocaleString('zh-CN', { minimumFractionDigits: 2 })}
+              </span>
+              <small>按可操作账单实时汇总</small>
             </div>
             <div>
-              <span>本期待付款 CNY 2,320.00</span>
-              <small>ST202605-0008</small>
+              <span>当前账单 {selected.invoiceNo}</span>
+              <small>{selected.statementNo}</small>
             </div>
           </section>
           <section className="customer-workflow__receipt">
@@ -738,7 +1026,10 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
                 onChange={(event) => {
                   const selected = event.target.files?.[0] ?? null;
                   setReceipt(selected);
-                  uploadKeyRef.current = selected ? createCustomerIdempotencyKey() : null;
+                  if (selected) {
+                    const resource = `${statementId}:${selected.name}:${selected.size}:${selected.type}:${selected.lastModified}`;
+                    ensureOperationIntent(uploadOperationKey, 'upload', resource);
+                  }
                 }}
               />
             </label>
@@ -758,18 +1049,26 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <td>INV-202607-018</td>
-                  <td>¥68,420.00</td>
-                  <td>
-                    <StatusTag tone="warning">待支付</StatusTag>
-                  </td>
-                  <td>
-                    <button aria-label="查看账单 INV-202607-018" onClick={() => setStep('detail')}>
-                      查看
-                    </button>
-                  </td>
-                </tr>
+                {records.map((record) => (
+                  <tr key={record.statementId}>
+                    <td>{record.invoiceNo}</td>
+                    <td>{money(record.amount)}</td>
+                    <td>
+                      <StatusTag tone="warning">待支付</StatusTag>
+                    </td>
+                    <td>
+                      <button
+                        aria-label={`查看账单 ${record.invoiceNo}`}
+                        onClick={() => {
+                          setSelected(record);
+                          setStep('detail');
+                        }}
+                      >
+                        查看
+                      </button>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -788,8 +1087,13 @@ export function BillingFlow({ notify, receiptKey, mockMode = false }: BillingFlo
                 {paymentOrder ? (
                   <tr>
                     <td>{paymentOrder.paymentOrderNo}</td>
-                    <td>INV-202607-018</td>
-                    <td>CNY 68,420.00</td>
+                    <td>{selected.invoiceNo}</td>
+                    <td>
+                      {selected.currency}{' '}
+                      {Number(selected.amount).toLocaleString('zh-CN', {
+                        minimumFractionDigits: 2,
+                      })}
+                    </td>
                     <td>微信支付</td>
                     <td>
                       <StatusTag tone={paymentOrder.status === 'SUCCEEDED' ? 'success' : 'info'}>

@@ -52,10 +52,10 @@ export default defineConfig({
     },
     {
       name: 'customer',
-      testMatch: /customer\.spec\.ts/,
+      testMatch: /customer(?:-authoritative)?\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://127.0.0.1:4101',
+        baseURL: process.env.CUSTOMER_PORTAL_URL ?? 'http://127.0.0.1:4101',
         viewport: { width: 1440, height: 900 },
       },
     },
@@ -82,7 +82,7 @@ export default defineConfig({
       testMatch: /website\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://127.0.0.1:4104',
+        baseURL: process.env.WEBSITE_URL ?? 'http://127.0.0.1:4104',
         viewport: { width: 1440, height: 900 },
       },
     },
@@ -91,7 +91,7 @@ export default defineConfig({
       testMatch: /website-mobile\.spec\.ts/,
       use: {
         ...devices['Desktop Chrome'],
-        baseURL: 'http://127.0.0.1:4104',
+        baseURL: process.env.WEBSITE_URL ?? 'http://127.0.0.1:4104',
         viewport: { width: 390, height: 844 },
         deviceScaleFactor: 3,
         isMobile: true,

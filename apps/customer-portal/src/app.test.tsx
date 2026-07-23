@@ -497,8 +497,9 @@ describe('客户门户', () => {
     render(<App />);
 
     await user.click(screen.getByRole('button', { name: '账单与付款' }));
-    expect(screen.getByText('预存款 CNY 128,560.00')).toBeVisible();
-    expect(screen.getByText('未分配收款 CNY 1,200.00')).toBeVisible();
+    expect(screen.getByText('待支付账单 2 张')).toBeVisible();
+    expect(screen.getByText('待支付总额 CNY 70,740.00')).toBeVisible();
+    expect(screen.getByText('当前账单 INV-202607-018')).toBeVisible();
     expect(screen.queryByRole('button', { name: '支付 ST202605-0008' })).not.toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: '确认支付' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '查看账单 INV-202607-018' }));

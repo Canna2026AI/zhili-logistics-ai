@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Button, Drawer, StatusTag } from '@zhili/ui';
 import { customerPort, type OrderInput, type QuoteResult, type VersionDifference } from './api';
+import { customerBillingRecords, customerExceptionRecords } from './customer-records';
 import { AccountFlow } from './features/account/account-flow';
 import { BillingFlow } from './features/billing/billing-flow';
 import { ExceptionFlow } from './features/exceptions/exception-flow';
@@ -920,11 +921,27 @@ function CustomerPortalApp({
   else if (page === '轨迹查询')
     content = <TrackingFlow waybillNo={trackingNo} notify={setToast} mockMode={mockMode} />;
   else if (page === '账单与付款')
-    content = <BillingFlow notify={setToast} receiptKey={receiptKey} mockMode={mockMode} />;
-  else if (page === '问题工单') content = <ExceptionFlow notify={setToast} mockMode={mockMode} />;
+    content = (
+      <BillingFlow
+        notify={setToast}
+        receiptKey={receiptKey}
+        records={customerBillingRecords}
+        mockMode={mockMode}
+      />
+    );
+  else if (page === '问题工单')
+    content = (
+      <ExceptionFlow
+        notify={setToast}
+        records={customerExceptionRecords}
+        storageKey={`${receiptKey}:exceptions`}
+        mockMode={mockMode}
+      />
+    );
   else if (page === 'API')
     content = (
       <AccountFlow
+        key="api"
         initialStep="api"
         notify={setToast}
         addressesKey={addressesKey}
@@ -935,6 +952,7 @@ function CustomerPortalApp({
   else if (page === '地址簿')
     content = (
       <AccountFlow
+        key="address"
         initialStep="address"
         notify={setToast}
         addressesKey={addressesKey}

@@ -98,13 +98,8 @@ try {
   );
   await navigateDesktop(desktop, '账单与付款');
   await assertVisible(
-    desktop.getByRole('heading', { name: '支付订单已创建' }),
-    '刷新后未恢复 PENDING 支付订单'
-  );
-  await desktop.getByRole('button', { name: '查询支付结果' }).click();
-  await assertVisible(
     desktop.getByRole('heading', { name: '付款成功，部分金额待分配' }),
-    '付款后未呈现部分核销'
+    '刷新后未用服务端权威支付订单与快照恢复核销状态'
   );
   await desktop.getByRole('button', { name: '模拟并发更新' }).click();
   await assertVisible(
@@ -138,6 +133,13 @@ try {
     };
     resolveDelayedPaymentRequest(requestKey);
   });
+  await delayedPayment.route('**/api/v1/payments/01JPAYMENT0000000000000001', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(paymentOrderResponse),
+    })
+  );
   await delayedPayment.goto(productionUrl.href, { waitUntil: 'networkidle' });
   await navigateDesktop(delayedPayment, '账单与付款');
   await delayedPayment.getByRole('button', { name: '打开账单详情' }).click();
@@ -160,10 +162,14 @@ try {
 
   const lostResponse = await browser.newPage({ viewport: { width: 1440, height: 1024 } });
   const replayKeys = [];
+  const committedPayments = new Map();
   let paymentAttempts = 0;
   await lostResponse.route('**/api/v1/payments/statement-orders', async (route) => {
     paymentAttempts += 1;
-    replayKeys.push(route.request().headers()['idempotency-key']);
+    const idempotencyKey = route.request().headers()['idempotency-key'];
+    replayKeys.push(idempotencyKey);
+    const committed = committedPayments.get(idempotencyKey) ?? paymentOrderResponse;
+    committedPayments.set(idempotencyKey, committed);
     if (paymentAttempts === 1) {
       await route.abort('failed');
       return;
@@ -171,7 +177,7 @@ try {
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
-      body: JSON.stringify(paymentOrderResponse),
+      body: JSON.stringify(committed),
     });
   });
   await lostResponse.goto(productionUrl.href, { waitUntil: 'networkidle' });
@@ -191,6 +197,7 @@ try {
   );
   if (replayKeys.length !== 2 || replayKeys[0] !== replayKeys[1])
     throw new Error('丢失回执后未复用原 Idempotency-Key');
+  if (committedPayments.size !== 1) throw new Error('重放创建了第二个服务端支付意图');
 
   await navigateDesktop(desktop, '地址簿');
   await desktop.getByLabel('地址名称').fill('北京亦庄仓');

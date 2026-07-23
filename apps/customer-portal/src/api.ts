@@ -750,20 +750,28 @@ export const customerPort = {
     return order;
   },
   async createPayment(
-    input: { statementId: string; statementVersion: number; amount: string } = {
+    input: {
+      customerId: string;
+      statementId: string;
+      statementVersion: number;
+      amount: string;
+      currency: 'CNY';
+    } = {
+      customerId: '01JCUSTOMER000000000000001',
       statementId: '01JSTATEMENT00000000000001',
       statementVersion: 1,
       amount: '2320.00',
+      currency: 'CNY',
     },
     idempotencyKey = key()
   ) {
     const response = await client.POST('/payments/statement-orders', {
       params: { header: { 'Idempotency-Key': idempotencyKey } },
       body: {
-        customerId: '01JCUSTOMER000000000000001',
+        customerId: input.customerId,
         statementId: input.statementId,
         statementVersion: input.statementVersion,
-        amount: { amount: input.amount, currency: 'CNY' },
+        amount: { amount: input.amount, currency: input.currency },
         paymentMethod: 'WECHAT_PAY',
       },
     });
@@ -824,13 +832,17 @@ export const customerPort = {
     });
     ensure(response.data, response.error);
   },
-  async uploadReceipt(file: File, idempotencyKey = key()) {
+  async uploadReceipt(file: File, statementNo: string, idempotencyKey = key()) {
     const form = new FormData();
     form.set('file', file, file.name);
-    form.set('statementNo', 'ST202605-0008');
+    form.set('statementNo', statementNo);
     await customerUpload('/api/v1/portal/payment-vouchers', form, idempotencyKey);
   },
-  submitIssueEvidence(issueId: string, input: { file: File; contact: string; note: string }) {
+  submitIssueEvidence(
+    issueId: string,
+    input: { file: File; contact: string; note: string },
+    idempotencyKey = key()
+  ) {
     const form = new FormData();
     form.set('file', input.file, input.file.name);
     form.set('contact', input.contact);
@@ -840,7 +852,7 @@ export const customerPort = {
       status: 'PARTIAL' | 'SUCCEEDED';
       version: number;
       failedNotificationIds: string[];
-    }>(`/api/v1/portal/issues/${issueId}/materials`, form);
+    }>(`/api/v1/portal/issues/${issueId}/materials`, form, idempotencyKey);
   },
   async createTicket(title: string) {
     const response = await client.POST('/issues', {
@@ -925,10 +937,10 @@ export const customerPort = {
       { serverVersion }
     );
   },
-  retryFailedNotifications(itemIds: string[]) {
+  retryFailedNotifications(itemIds: string[], idempotencyKey = key()) {
     return customerCommand<
       { itemIds: string[] },
       { items: Array<{ id: string; status: 'SUCCEEDED' }> }
-    >('/api/v1/portal/notifications:retry-failed', { itemIds });
+    >('/api/v1/portal/notifications:retry-failed', { itemIds }, idempotencyKey);
   },
 };

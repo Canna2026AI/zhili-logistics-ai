@@ -8,6 +8,7 @@ import * as customerApi from '../api';
 
 const billingWorkflowKey =
   'zhili.customer.tenant-xinyuan.customer-xinyuan.receipt:billing-workflow';
+const exceptionWorkflowKey = 'zhili.customer.tenant-xinyuan.customer-xinyuan.receipt:exceptions';
 
 const paymentOrder = {
   id: '01JPAYMENT0000000000000001',
@@ -40,9 +41,12 @@ const persistedPartialSession = () => ({
   step: 'partial',
   intent: {
     idempotencyKey: 'f1c-restored-intent',
+    customerId: '01JCUSTOMER000000000000001',
+    receiptId: '01JRECEIPT0000000000000001',
     statementId: '01JSTATEMENT00000000000001',
     statementVersion: 1,
     amount: '68420.00',
+    currency: 'CNY',
   },
   paymentOrder: { ...paymentOrder, status: 'SUCCEEDED', version: 2 },
   receiptVersion: 1,
@@ -111,7 +115,8 @@ describe('Figma Customer 关键工作流', () => {
         file: evidence,
         contact: '李楠 139****8712',
         note: '东门货运通道 B3',
-      })
+      }),
+      expect.stringMatching(/^f1c-/)
     );
     expect(screen.getByText('PARTIAL · 1 个通知渠道待重试')).toBeVisible();
     await user.click(screen.getByRole('button', { name: '仅重试失败通知' }));
@@ -143,7 +148,7 @@ describe('Figma Customer 关键工作流', () => {
     expect((await screen.findAllByText(/notification-email/)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/客户短信 · 失败/)).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '仅重试失败通知' }));
-    expect(retry).toHaveBeenCalledWith(['notification-email']);
+    expect(retry).toHaveBeenCalledWith(['notification-email'], expect.stringMatching(/^f1c-/));
   });
 
   it('F03 对 PARTIAL 空失败项 fail closed', async () => {
@@ -233,9 +238,11 @@ describe('Figma Customer 关键工作流', () => {
     expect(screen.getAllByText('PENDING · 等待微信支付结果')).not.toHaveLength(0);
     expect(createPayment).toHaveBeenCalledWith(
       {
+        customerId: '01JCUSTOMER000000000000001',
         statementId: '01JSTATEMENT00000000000001',
         statementVersion: 1,
         amount: '68420.00',
+        currency: 'CNY',
       },
       expect.stringMatching(/^f1c-/)
     );
@@ -265,7 +272,7 @@ describe('Figma Customer 关键工作流', () => {
     );
   });
 
-  it('F06 识别真实状态码冲突并在页面切换后恢复 PENDING 支付', async () => {
+  it('F06 识别真实状态码冲突并在页面切换后恢复服务端支付状态', async () => {
     const allocateReceipt = vi
       .spyOn(customerApi.customerPort, 'allocateReceipt')
       .mockRejectedValueOnce(
@@ -282,8 +289,7 @@ describe('Figma Customer 关键工作流', () => {
 
     await user.click(screen.getByRole('button', { name: '工作台' }));
     await user.click(screen.getByRole('button', { name: '账单与付款' }));
-    expect(screen.getByRole('heading', { name: '支付订单已创建' })).toBeVisible();
-    await user.click(screen.getByRole('button', { name: '查询支付结果' }));
+    expect(await screen.findByRole('heading', { name: '付款成功，部分金额待分配' })).toBeVisible();
     await user.click(await screen.findByRole('button', { name: '分配剩余金额' }));
 
     expect(allocateReceipt).toHaveBeenCalledTimes(1);
@@ -326,7 +332,7 @@ describe('Figma Customer 关键工作流', () => {
     );
 
     await user.click(screen.getByRole('button', { name: '账单与付款' }));
-    expect(screen.getByRole('heading', { name: '支付订单已创建' })).toBeVisible();
+    expect(await screen.findByRole('heading', { name: '付款成功，部分金额待分配' })).toBeVisible();
   });
 
   it('F06 丢失创单回执后用同一 Idempotency-Key 恢复支付意图', async () => {
@@ -347,6 +353,158 @@ describe('Figma Customer 关键工作流', () => {
     expect(await screen.findByRole('heading', { name: '支付订单已创建' })).toBeVisible();
     expect(createPayment).toHaveBeenCalledTimes(2);
     expect(createPayment.mock.calls[1]?.[1]).toBe(firstKey);
+  });
+
+  it('F06 安全迁移旧 schema 的 creating intent 并复用原 key', async () => {
+    const createPayment = vi
+      .spyOn(customerApi.customerPort, 'createPayment')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    localStorage.setItem(
+      billingWorkflowKey,
+      JSON.stringify({
+        schemaVersion: 1,
+        step: 'creating',
+        intent: {
+          idempotencyKey: 'f1c-legacy-payment-intent',
+          statementId: '01JSTATEMENT00000000000001',
+          statementVersion: 1,
+          amount: '68420.00',
+        },
+        paymentOrder: null,
+        receiptVersion: 1,
+        allocation: null,
+      })
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+
+    await waitFor(() => expect(createPayment).toHaveBeenCalledTimes(1));
+    expect(createPayment.mock.calls[0]?.[1]).toBe('f1c-legacy-payment-intent');
+    expect(JSON.parse(localStorage.getItem(billingWorkflowKey) ?? 'null')).toMatchObject({
+      schemaVersion: 2,
+      step: 'creating',
+      intent: {
+        customerId: '01JCUSTOMER000000000000001',
+        receiptId: '01JRECEIPT0000000000000001',
+        currency: 'CNY',
+      },
+    });
+  });
+
+  it('F06 恢复 PENDING 时先查询服务端，绝不直接展示缓存订单', async () => {
+    const authoritativeOrder = deferred<typeof paymentOrder>();
+    const getPaymentOrder = vi
+      .spyOn(customerApi.customerPort, 'getPaymentOrder')
+      .mockReturnValueOnce(authoritativeOrder.promise);
+    localStorage.setItem(
+      billingWorkflowKey,
+      JSON.stringify({
+        schemaVersion: 1,
+        step: 'pending',
+        intent: persistedPartialSession().intent,
+        paymentOrder,
+        receiptVersion: 1,
+        allocation: null,
+      })
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+
+    expect(screen.getByRole('heading', { name: '正在恢复账单状态' })).toBeVisible();
+    expect(screen.queryByText(paymentOrder.paymentOrderNo)).not.toBeInTheDocument();
+    expect(getPaymentOrder).toHaveBeenCalledWith(paymentOrder.id);
+
+    await act(async () => authoritativeOrder.resolve(paymentOrder));
+    expect(await screen.findByRole('heading', { name: '支付订单已创建' })).toBeVisible();
+  });
+
+  it('F06 服务端支付回执金额不匹配时清除缓存且不展示资金状态', async () => {
+    vi.spyOn(customerApi.customerPort, 'getPaymentOrder').mockResolvedValueOnce({
+      ...paymentOrder,
+      amount: { amount: '1.00', currency: 'CNY' },
+    });
+    localStorage.setItem(
+      billingWorkflowKey,
+      JSON.stringify({
+        schemaVersion: 1,
+        step: 'pending',
+        intent: persistedPartialSession().intent,
+        paymentOrder,
+        receiptVersion: 1,
+        allocation: null,
+      })
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+
+    expect(await screen.findByRole('heading', { name: '待支付与待核销账单' })).toBeVisible();
+    expect(localStorage.getItem(billingWorkflowKey)).toBeNull();
+  });
+
+  it('F06 服务端支付单号与缓存不一致时拒绝恢复资金状态', async () => {
+    vi.spyOn(customerApi.customerPort, 'getPaymentOrder').mockResolvedValueOnce({
+      ...paymentOrder,
+      paymentOrderNo: 'PAY-OTHER-CUSTOMER',
+    });
+    localStorage.setItem(
+      billingWorkflowKey,
+      JSON.stringify({
+        schemaVersion: 1,
+        step: 'pending',
+        intent: persistedPartialSession().intent,
+        paymentOrder,
+        receiptVersion: 1,
+        allocation: null,
+      })
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+
+    expect(await screen.findByRole('heading', { name: '待支付与待核销账单' })).toBeVisible();
+    expect(localStorage.getItem(billingWorkflowKey)).toBeNull();
+  });
+
+  it('F06 已卸载组件的迟到 PENDING 回执不能覆盖更新的 partial 会话', async () => {
+    const staleCreate = deferred<typeof paymentOrder>();
+    vi.spyOn(customerApi.customerPort, 'createPayment')
+      .mockReturnValueOnce(staleCreate.promise)
+      .mockResolvedValueOnce(paymentOrder);
+    vi.spyOn(customerApi.customerPort, 'getPaymentOrder').mockResolvedValueOnce({
+      ...paymentOrder,
+      status: 'SUCCEEDED',
+      version: 2,
+    });
+    vi.spyOn(customerApi.customerPort, 'getReceiptAllocation').mockResolvedValue(
+      allocationSnapshot
+    );
+    const user = userEvent.setup();
+    render(<App />);
+    await openPaymentConfirmation(user);
+    await user.click(screen.getByRole('button', { name: '确认付款' }));
+    await user.click(screen.getByRole('button', { name: '工作台' }));
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+    await user.click(await screen.findByRole('button', { name: '查询支付结果' }));
+    expect(await screen.findByRole('heading', { name: '付款成功，部分金额待分配' })).toBeVisible();
+
+    const newerSession = JSON.parse(localStorage.getItem(billingWorkflowKey) ?? 'null') as {
+      generation: number;
+      intent: { idempotencyKey: string };
+    };
+    newerSession.generation += 1;
+    newerSession.intent.idempotencyKey = 'f1c-newer-payment-intent';
+    localStorage.setItem(billingWorkflowKey, JSON.stringify(newerSession));
+
+    await act(async () => staleCreate.resolve(paymentOrder));
+    expect(JSON.parse(localStorage.getItem(billingWorkflowKey) ?? 'null')).toMatchObject({
+      generation: newerSession.generation,
+      step: 'partial',
+      intent: { idempotencyKey: 'f1c-newer-payment-intent' },
+      paymentOrder: { status: 'SUCCEEDED' },
+    });
   });
 
   it('F06 端口明确拒绝创单时清理 intent 并进入失败态', async () => {
@@ -485,6 +643,184 @@ describe('Figma Customer 关键工作流', () => {
     expect(allocate.mock.calls[1]?.[4]).toBe(allocate.mock.calls[0]?.[4]);
   });
 
+  it('F06 核销网络失败后切页重进仍复用持久化 Idempotency-Key', async () => {
+    vi.spyOn(customerApi.customerPort, 'getReceiptAllocation').mockResolvedValue(
+      allocationSnapshot
+    );
+    const allocate = vi
+      .spyOn(customerApi.customerPort, 'allocateReceipt')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({
+        id: '01JRECEIPT0000000000000001',
+        total: { amount: '68420.00', currency: 'CNY' },
+        allocated: { amount: '68420.00', currency: 'CNY' },
+        unapplied: { amount: '0.00', currency: 'CNY' },
+        refunded: { amount: '0.00', currency: 'CNY' },
+        version: 2,
+      });
+    const user = userEvent.setup();
+    render(<App />);
+    await openPaymentConfirmation(user);
+    await user.click(screen.getByRole('button', { name: '确认付款' }));
+    await user.click(await screen.findByRole('button', { name: '查询支付结果' }));
+    await user.click(await screen.findByRole('button', { name: '分配剩余金额' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '分配剩余金额' })).toBeEnabled());
+    const firstKey = allocate.mock.calls[0]?.[4];
+
+    await user.click(screen.getByRole('button', { name: '工作台' }));
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+    await user.click(await screen.findByRole('button', { name: '分配剩余金额' }));
+
+    expect(allocate.mock.calls[1]?.[4]).toBe(firstKey);
+  });
+
+  it('F03 同 tick 双击只提交一次异常资料', async () => {
+    const submission = deferred<{
+      issueId: string;
+      status: 'PARTIAL';
+      version: number;
+      failedNotificationIds: string[];
+    }>();
+    const submit = vi
+      .spyOn(customerApi.customerPort, 'submitIssueEvidence')
+      .mockReturnValueOnce(submission.promise);
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '问题工单' }));
+    await user.click(screen.getByRole('button', { name: /EXC-24118/ }));
+    await user.click(screen.getByRole('button', { name: '补充资料' }));
+    await user.upload(
+      screen.getByLabelText('入口照片'),
+      new File(['gate'], 'gate.jpg', { type: 'image/jpeg' })
+    );
+    const button = screen.getByRole('button', { name: '提交资料' });
+    act(() => {
+      button.click();
+      button.click();
+    });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      submission.resolve({
+        issueId: '01JISSUE00000000000000001',
+        status: 'PARTIAL',
+        version: 2,
+        failedNotificationIds: ['notification-email-1'],
+      })
+    );
+  });
+
+  it('F03 已卸载资料请求的迟到回执不能覆盖新异常会话', async () => {
+    const staleSubmission = deferred<{
+      issueId: string;
+      status: 'PARTIAL';
+      version: number;
+      failedNotificationIds: string[];
+    }>();
+    vi.spyOn(customerApi.customerPort, 'submitIssueEvidence')
+      .mockReturnValueOnce(staleSubmission.promise)
+      .mockResolvedValueOnce({
+        issueId: '01JISSUE00000000000000002',
+        status: 'PARTIAL',
+        version: 2,
+        failedNotificationIds: ['notification-sms'],
+      });
+    const user = userEvent.setup();
+    render(<App />);
+
+    await user.click(screen.getByRole('button', { name: '问题工单' }));
+    await user.click(screen.getByRole('button', { name: /EXC-24118/ }));
+    await user.click(screen.getByRole('button', { name: '补充资料' }));
+    await user.upload(
+      screen.getByLabelText('入口照片'),
+      new File(['gate'], 'gate.jpg', { type: 'image/jpeg' })
+    );
+    await user.click(screen.getByRole('button', { name: '提交资料' }));
+
+    await user.click(screen.getByRole('button', { name: '工作台' }));
+    await user.click(screen.getByRole('button', { name: '问题工单' }));
+    await user.click(screen.getByRole('button', { name: /EXC-24109/ }));
+    await user.click(screen.getByRole('button', { name: '补充资料' }));
+    await user.upload(
+      screen.getByLabelText('入口照片'),
+      new File(['proof'], 'proof.pdf', { type: 'application/pdf' })
+    );
+    await user.click(screen.getByRole('button', { name: '提交资料' }));
+    expect(await screen.findByText('notification-sms · 失败')).toBeVisible();
+
+    await act(async () =>
+      staleSubmission.resolve({
+        issueId: '01JISSUE00000000000000001',
+        status: 'PARTIAL',
+        version: 2,
+        failedNotificationIds: ['notification-email'],
+      })
+    );
+    expect(JSON.parse(localStorage.getItem(exceptionWorkflowKey) ?? 'null')).toEqual({
+      schemaVersion: 1,
+      issueId: '01JISSUE00000000000000002',
+      failedNotificationIds: ['notification-sms'],
+    });
+  });
+
+  it('F03 每个异常记录都可选择并使用自身资源 ID', async () => {
+    const submit = vi.spyOn(customerApi.customerPort, 'submitIssueEvidence');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '问题工单' }));
+    await user.click(screen.getByRole('button', { name: /EXC-24109/ }));
+    expect(screen.getByRole('heading', { name: '破损证明缺失' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '补充资料' }));
+    await user.upload(
+      screen.getByLabelText('入口照片'),
+      new File(['proof'], 'proof.pdf', { type: 'application/pdf' })
+    );
+    await user.click(screen.getByRole('button', { name: '提交资料' }));
+
+    expect(submit).toHaveBeenCalledWith(
+      '01JISSUE00000000000000002',
+      expect.objectContaining({ file: expect.any(File) }),
+      expect.stringMatching(/^f1c-/)
+    );
+  });
+
+  it('F03 通知重试网络失败后切页恢复失败项并复用 caller key', async () => {
+    vi.spyOn(customerApi.customerPort, 'submitIssueEvidence').mockResolvedValueOnce({
+      issueId: '01JISSUE00000000000000001',
+      status: 'PARTIAL',
+      version: 2,
+      failedNotificationIds: ['notification-email'],
+    });
+    const retry = vi
+      .spyOn(customerApi.customerPort, 'retryFailedNotifications')
+      .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+      .mockResolvedValueOnce({
+        items: [{ id: 'notification-email', status: 'SUCCEEDED' }],
+      });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '问题工单' }));
+    await user.click(screen.getByRole('button', { name: /EXC-24118/ }));
+    await user.click(screen.getByRole('button', { name: '补充资料' }));
+    await user.upload(
+      screen.getByLabelText('入口照片'),
+      new File(['gate'], 'gate.jpg', { type: 'image/jpeg' })
+    );
+    await user.click(screen.getByRole('button', { name: '提交资料' }));
+    await user.click(await screen.findByRole('button', { name: '仅重试失败通知' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '仅重试失败通知' })).toBeEnabled()
+    );
+    const firstKey = retry.mock.calls[0]?.[1];
+
+    await user.click(screen.getByRole('button', { name: '工作台' }));
+    await user.click(screen.getByRole('button', { name: '问题工单' }));
+    expect(await screen.findByRole('heading', { name: '资料已提交，通知部分失败' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '仅重试失败通知' }));
+
+    expect(retry.mock.calls[1]?.[1]).toBe(firstKey);
+  });
+
   it('F06 快照刷新网络重试复用同一 Idempotency-Key', async () => {
     vi.spyOn(customerApi.customerPort, 'getReceiptAllocation').mockResolvedValue(
       allocationSnapshot
@@ -526,12 +862,35 @@ describe('Figma Customer 关键工作流', () => {
       uploadButton.click();
     });
     expect(upload).toHaveBeenCalledTimes(1);
-    const uploadKey = upload.mock.calls[0]?.[1];
+    expect(upload.mock.calls[0]?.[1]).toBe('ST202607-0018');
+    const uploadKey = upload.mock.calls[0]?.[2];
     expect(uploadKey).toMatch(/^f1c-/);
     await act(async () => firstUpload.reject(new TypeError('Failed to fetch')));
     await user.click(await screen.findByRole('button', { name: '上传并关联凭证' }));
     expect(upload).toHaveBeenCalledTimes(2);
-    expect(upload.mock.calls[1]?.[1]).toBe(uploadKey);
+    expect(upload.mock.calls[1]?.[2]).toBe(uploadKey);
+  });
+
+  it('F06 从选中账单传递资源、金额、币种和版本，不使用流程内固定 ID', async () => {
+    const createPayment = vi.spyOn(customerApi.customerPort, 'createPayment');
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(screen.getByRole('button', { name: '账单与付款' }));
+    await user.click(screen.getByRole('button', { name: '查看账单 INV-202607-019' }));
+    expect(screen.getByRole('heading', { name: 'INV-202607-019' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: '立即支付' }));
+    await user.click(screen.getByRole('button', { name: '确认付款' }));
+
+    expect(createPayment).toHaveBeenCalledWith(
+      {
+        customerId: '01JCUSTOMER000000000000001',
+        statementId: '01JSTATEMENT00000000000002',
+        statementVersion: 3,
+        amount: '2320.00',
+        currency: 'CNY',
+      },
+      expect.stringMatching(/^f1c-/)
+    );
   });
 
   it('F06 坏 localStorage 会被删除且不能显示为权威快照', async () => {

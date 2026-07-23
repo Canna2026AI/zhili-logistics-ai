@@ -1,9 +1,45 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@zhili/ui';
-import { customerPort } from '../../api';
+import { createCustomerIdempotencyKey, CustomerApiError, customerPort } from '../../api';
+import type { CustomerExceptionRecord } from '../../customer-records';
 import { SummaryItem, SummaryList, WorkflowShell, type WorkflowTone } from '../workflow-shell';
 
 type ExceptionStep = 'list' | 'detail' | 'upload' | 'partial' | 'failed' | 'resolved';
+type ExceptionSession = {
+  schemaVersion: 1;
+  issueId: string;
+  failedNotificationIds: string[];
+};
+type ExceptionOperationIntent = {
+  schemaVersion: 1;
+  resource: string;
+  idempotencyKey: string;
+};
+
+function readExceptionSession(key: string, records: CustomerExceptionRecord[]) {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      (value as { schemaVersion?: unknown }).schemaVersion === 1 &&
+      typeof (value as { issueId?: unknown }).issueId === 'string' &&
+      records.some((record) => record.id === (value as { issueId: string }).issueId) &&
+      Array.isArray((value as { failedNotificationIds?: unknown }).failedNotificationIds) &&
+      (value as { failedNotificationIds: unknown[] }).failedNotificationIds.length > 0 &&
+      (value as { failedNotificationIds: unknown[] }).failedNotificationIds.every(
+        (id) => typeof id === 'string' && id.length > 0
+      ) &&
+      new Set((value as { failedNotificationIds: string[] }).failedNotificationIds).size ===
+        (value as { failedNotificationIds: string[] }).failedNotificationIds.length
+    )
+      return value as ExceptionSession;
+  } catch {
+    // Invalid state is removed below.
+  }
+  localStorage.removeItem(key);
+  return null;
+}
 
 const meta: Record<
   ExceptionStep,
@@ -55,43 +91,128 @@ const meta: Record<
 
 export function ExceptionFlow({
   notify,
+  records,
+  storageKey,
   mockMode = false,
 }: {
   notify: (message: string) => void;
+  records: CustomerExceptionRecord[];
+  storageKey: string;
   mockMode?: boolean;
 }) {
-  const [step, setStep] = useState<ExceptionStep>('list');
+  const [restored] = useState(() => readExceptionSession(storageKey, records));
+  const [step, setStep] = useState<ExceptionStep>(() => (restored ? 'partial' : 'list'));
+  const [selected, setSelected] = useState(
+    () => records.find((record) => record.id === restored?.issueId) ?? records[0]!
+  );
   const [file, setFile] = useState<File | null>(null);
-  const [contact, setContact] = useState('李楠 139****8712');
-  const [note, setNote] = useState('东门货运通道 B3');
-  const [failedNotificationIds, setFailedNotificationIds] = useState<string[]>([]);
+  const [contact, setContact] = useState(() => records[0]?.contact ?? '');
+  const [note, setNote] = useState(() => records[0]?.note ?? '');
+  const [failedNotificationIds, setFailedNotificationIds] = useState<string[]>(
+    () => restored?.failedNotificationIds ?? []
+  );
   const [retryComplete, setRetryComplete] = useState(false);
   const [busy, setBusy] = useState(false);
-  const current = meta[step];
+  const pendingRef = useRef(new Set<'evidence' | 'retry'>());
+  const evidenceOperationKey = `${storageKey}:evidence`;
+  const retryOperationKey = `${storageKey}:retry`;
+  const current =
+    step === 'list'
+      ? meta.list
+      : { ...meta[step], title: step === 'detail' ? selected.title : meta[step].title };
+
+  const stableIntent = (key: string, resource: string): ExceptionOperationIntent => {
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+      if (
+        typeof stored === 'object' &&
+        stored !== null &&
+        (stored as { schemaVersion?: unknown }).schemaVersion === 1 &&
+        (stored as { resource?: unknown }).resource === resource &&
+        typeof (stored as { idempotencyKey?: unknown }).idempotencyKey === 'string' &&
+        /^f1c-[A-Za-z0-9-]{8,200}$/.test((stored as { idempotencyKey: string }).idempotencyKey)
+      )
+        return stored as ExceptionOperationIntent;
+    } catch {
+      localStorage.removeItem(key);
+    }
+    const intent: ExceptionOperationIntent = {
+      schemaVersion: 1,
+      resource,
+      idempotencyKey: createCustomerIdempotencyKey(),
+    };
+    localStorage.setItem(key, JSON.stringify(intent));
+    return intent;
+  };
+
+  const operationMatches = (key: string, expected: ExceptionOperationIntent) => {
+    try {
+      const value: unknown = JSON.parse(localStorage.getItem(key) ?? 'null');
+      return (
+        typeof value === 'object' &&
+        value !== null &&
+        (value as { schemaVersion?: unknown }).schemaVersion === expected.schemaVersion &&
+        (value as { resource?: unknown }).resource === expected.resource &&
+        (value as { idempotencyKey?: unknown }).idempotencyKey === expected.idempotencyKey
+      );
+    } catch {
+      return false;
+    }
+  };
+
+  const clearOperation = (key: string, expected: ExceptionOperationIntent) => {
+    if (!operationMatches(key, expected)) return false;
+    localStorage.removeItem(key);
+    return true;
+  };
+
+  const selectRecord = (record: CustomerExceptionRecord) => {
+    setSelected(record);
+    setContact(record.contact);
+    setNote(record.note);
+    setFile(null);
+    setFailedNotificationIds([]);
+    setRetryComplete(false);
+    setStep('detail');
+  };
 
   const submitEvidence = async () => {
-    if (!file) return;
+    if (!file || pendingRef.current.has('evidence')) return;
+    pendingRef.current.add('evidence');
+    const resource = `${selected.id}:${file.name}:${file.size}:${file.type}:${file.lastModified}`;
+    const operation = stableIntent(evidenceOperationKey, resource);
     setBusy(true);
     try {
-      const result = await customerPort.submitIssueEvidence('01JISSUE00000000000000001', {
-        file,
-        contact,
-        note,
-      });
+      const result = await customerPort.submitIssueEvidence(
+        selected.id,
+        { file, contact, note },
+        operation.idempotencyKey
+      );
       const failedIds = result.failedNotificationIds;
       const hasValidFailedIds =
         Array.isArray(failedIds) &&
         failedIds.every((id) => typeof id === 'string' && id.trim().length > 0) &&
         new Set(failedIds).size === failedIds.length;
       const validResult =
-        result.issueId === '01JISSUE00000000000000001' &&
+        result.issueId === selected.id &&
         Number.isSafeInteger(result.version) &&
         result.version >= 1 &&
         hasValidFailedIds &&
         ((result.status === 'PARTIAL' && failedIds.length > 0) ||
           (result.status === 'SUCCEEDED' && failedIds.length === 0));
       if (!validResult) throw new Error('服务端通知回执不一致，未进入可重试状态。');
+      if (!clearOperation(evidenceOperationKey, operation)) return;
       setFailedNotificationIds(failedIds);
+      if (failedIds.length > 0)
+        localStorage.setItem(
+          storageKey,
+          JSON.stringify({
+            schemaVersion: 1,
+            issueId: selected.id,
+            failedNotificationIds: failedIds,
+          })
+        );
+      else localStorage.removeItem(storageKey);
       setRetryComplete(false);
       setStep(result.status === 'PARTIAL' ? 'partial' : 'resolved');
       notify(
@@ -100,23 +221,33 @@ export function ExceptionFlow({
           : '异常资料与通知已全部提交。'
       );
     } catch (error) {
+      if (!operationMatches(evidenceOperationKey, operation)) return;
+      if (error instanceof CustomerApiError && error.status >= 400 && error.status < 500)
+        clearOperation(evidenceOperationKey, operation);
       setFailedNotificationIds([]);
       setRetryComplete(false);
       notify(error instanceof Error ? error.message : '资料提交失败。');
       setStep('failed');
     } finally {
+      pendingRef.current.delete('evidence');
       setBusy(false);
     }
   };
 
   const retryFailed = async () => {
-    if (failedNotificationIds.length === 0) {
+    if (failedNotificationIds.length === 0 || pendingRef.current.has('retry')) {
       notify('没有可重试的服务端失败项。');
       return;
     }
+    pendingRef.current.add('retry');
+    const resource = `${selected.id}:${[...failedNotificationIds].sort().join(',')}`;
+    const operation = stableIntent(retryOperationKey, resource);
     setBusy(true);
     try {
-      const result = await customerPort.retryFailedNotifications(failedNotificationIds);
+      const result = await customerPort.retryFailedNotifications(
+        failedNotificationIds,
+        operation.idempotencyKey
+      );
       const returnedIds = result.items.map((item) => item.id);
       const expected = [...failedNotificationIds].sort();
       const returned = [...returnedIds].sort();
@@ -126,11 +257,17 @@ export function ExceptionFlow({
         returned.some((id, index) => id !== expected[index])
       )
         throw new Error('重试回执与服务端失败项不一致，状态未标记为送达。');
+      if (!clearOperation(retryOperationKey, operation)) return;
       setRetryComplete(true);
+      localStorage.removeItem(storageKey);
       notify(`仅重试失败通知：${failedNotificationIds.join('、')} 已送达。`);
     } catch (error) {
+      if (!operationMatches(retryOperationKey, operation)) return;
+      if (error instanceof CustomerApiError && error.status >= 400 && error.status < 500)
+        clearOperation(retryOperationKey, operation);
       notify(error instanceof Error ? error.message : '失败通知重试未完成。');
     } finally {
+      pendingRef.current.delete('retry');
       setBusy(false);
     }
   };
@@ -160,16 +297,18 @@ export function ExceptionFlow({
             </>
           ) : (
             <>
-              <SummaryItem label="异常单号" value="EXC-24118" />
-              <SummaryItem label="关联运单" value="SHP-20260721-902" />
-              <SummaryItem label="审计编号" value="AUD-88420" />
+              <SummaryItem label="异常单号" value={selected.exceptionNo} />
+              <SummaryItem label="关联运单" value={selected.waybillNo} />
+              <SummaryItem label="审计编号" value={selected.auditNo} />
             </>
           )}
         </SummaryList>
       }
       actions={
         <>
-          {step === 'list' ? <Button onClick={() => setStep('detail')}>查看详情</Button> : null}
+          {step === 'list' ? (
+            <Button onClick={() => selectRecord(selected)}>查看详情</Button>
+          ) : null}
           {step === 'detail' ? <Button onClick={() => setStep('upload')}>补充资料</Button> : null}
           {step === 'upload' ? (
             <>
@@ -205,22 +344,14 @@ export function ExceptionFlow({
       {step === 'list' ? (
         <div>
           <div className="customer-workflow__choice-list">
-            <button onClick={() => setStep('detail')}>
-              <strong>EXC-24118 · 收件地址无法定位</strong>
-              <span>SLA 剩余 1h 26m · 高影响</span>
-            </button>
-            <button>
-              <strong>EXC-24109 · 破损证明缺失</strong>
-              <span>SLA 剩余 3h 10m</span>
-            </button>
-            <button>
-              <strong>EXC-24087 · 温控记录异常</strong>
-              <span>SLA 剩余 5h 42m</span>
-            </button>
-            <button>
-              <strong>EXC-24062 · 签收人信息不全</strong>
-              <span>SLA 剩余 8h 05m</span>
-            </button>
+            {records.map((record) => (
+              <button key={record.id} onClick={() => selectRecord(record)}>
+                <strong>
+                  {record.exceptionNo} · {record.title}
+                </strong>
+                <span>{record.sla}</span>
+              </button>
+            ))}
           </div>
           <form
             className="customer-workflow__quick-ticket"
@@ -243,16 +374,16 @@ export function ExceptionFlow({
       ) : step === 'detail' ? (
         <div className="customer-workflow__choice-list">
           <div>
-            <strong>最新轨迹 · 北京望京站 / 10:42</strong>
-            <span>导航无法定位园区入口</span>
+            <strong>最新轨迹 · {selected.latestEvent}</strong>
+            <span>{selected.description}</span>
           </div>
           <div>
-            <strong>园区入口照片 · 必需</strong>
-            <span>用于承运商重新导航</span>
+            <strong>{selected.requiredEvidence} · 必需</strong>
+            <span>用于承运商核验并继续处理</span>
           </div>
           <div>
-            <strong>现场联系人 · 李楠</strong>
-            <span>139****8712</span>
+            <strong>现场联系人</strong>
+            <span>{selected.contact}</span>
           </div>
         </div>
       ) : step === 'upload' ? (
