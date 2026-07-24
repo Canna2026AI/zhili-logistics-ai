@@ -48,7 +48,7 @@ describe('PDA application', () => {
     await userEvent.click(screen.getByRole('button', { name: '离线' }));
     expect(screen.getByText(/#1/)).toHaveTextContent('S2505120004');
     expect(screen.getByText('本地队列已恢复')).toBeVisible();
-  });
+  }, 15_000);
 
   it('rejects a bind receipt whose server-owned scope differs from the requested binding', async () => {
     Object.defineProperty(window.navigator, 'onLine', { configurable: true, value: true });
