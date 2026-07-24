@@ -17,7 +17,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "openapi-fetch": "^0.14.0"
+    "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
     "@redocly/cli": "^2.0.0",
