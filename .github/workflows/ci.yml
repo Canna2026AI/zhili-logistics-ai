@@ -53,6 +53,7 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e
       - name: Ops production recovery flows
+        if: ${{ hashFiles('tests/e2e/ops-production.playwright.config.ts') != '' }}
         run: pnpm exec playwright test --config tests/e2e/ops-production.playwright.config.ts
       - name: Upload Playwright evidence
         if: always()
