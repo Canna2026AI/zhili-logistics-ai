@@ -7,7 +7,7 @@
 | 文档         | PASSED      | `UI0-v0.1`               | 产品、范围、术语、100 项追踪、交互、架构；独立复审无 Critical/Important 问题                       | 无                                                                          |
 | 本地 UI 设计 | PASSED      | `UI0-v0.1`               | 8 张统一视觉基线、设计令牌、AppShell、状态矩阵、10 条流程与契约全部复审通过                        | 无                                                                          |
 | Figma 同步   | PASSED      | `Mn56UdJSFmLZSmvOZSLIoX` | 61 变量、11 样式、10 个核心组件集/95 变体、163 个五端 Flow 画面、429 条原型 reaction；终审无阻塞项 | Code Connect 受方案与发布条件阻塞，记录为 `BLOCKED_EXTERNAL`，不阻塞本门槛  |
-| 前端         | PASSED      | `9d7f52a`                | 五端、生产 API ports、PDA 离线/PWA、Storybook、41 项 Playwright/axe 全部通过                       | Figma 同步仍为外部协作镜像，不阻塞已验证的本地实现                          |
+| 前端         | PASSED      | `0d229b0`                | 五端交互 v2、生产 API ports、PDA 离线/PWA、Storybook、57 项全端 E2E 与 9 项 Ops 生产恢复全部通过   | 真实后端领域实现尚未关闭；完整交互预览必须显式使用 `?mock=1`                |
 | 后端         | IN_PROGRESS | `fe56518`                | Foundation、B1 统一 schema/迁移、OpenAPI/适配器公共基线均经独立 C0/I0/M0 审查并合入主线            | 三个领域 repository、service、controller 与 Mock-off 集成仍在独立工作树实现 |
 | 发布         | OPEN        | —                        | 待 Compose 冷启动、恢复、性能、安全、沙箱和矩阵报告                                                | 前置门槛未通过                                                              |
 
@@ -33,6 +33,16 @@ Code Connect 当前是明确的外部门槛：Pro 方案与未发布的本地组
 - 总计 163 个 Flow 画面 / 429 条真实点击关系，覆盖 10 条核心流程的正常、选择、加载、空、失败、无权限、数据过期、部分成功、并发冲突、危险确认和恢复路径。
 - Ops、Customer、PDA、Platform 与 Website 均完成点击目标审计，不存在零点击 Flow 画面；移动端画布按 390×844 检查，业务端按 1280×720 检查。
 - 本轮交互冻结后才建立四个前端独立工作树；后端工作树保持暂停，继续遵守“交互 → 前端 → 后端”的顺序。
+
+## 2026-07-24 五端交互 v2 与统一前端总门槛
+
+- 四个前端独立工作树按 Customer/Website、PDA、Platform、Ops 顺序完成非实现者复核并合入 `main`；Ops 功能合并提交为 `65ad6b4`，最终门槛修复提交为 `0d229b0`。
+- Customer 为 97/97 单测与 10/10 生产 E2E，Website 为 11/11 单测与 2/2 E2E；PDA 为 219/219 单测与 14/14 生产 E2E；Platform 为 69/69 单测与 9/9 独立生产 E2E；Ops 为 68/68 单测与 9/9 生产恢复 E2E。
+- Ops 最终独立复核为 `0 Critical / 0 Important / 0 Minor`。F10 提案失败或缺失回执时 fail-closed；版本化 POST 拒绝缺失资源、错误 ID、非整数版本和未递增版本；F04 支持 `412 → GET 权威 v8 → If-Match "8" 重试`，刷新失败时保持 stale。
+- 主工作树执行 `pnpm format:check`、Contracts lint/test/generate check、24/24 lint、24/24 typecheck、35/35 test tasks 和 20/20 build tasks，全部退出码 0。Worker 的 PostgreSQL/Redis Testcontainers 集成测试为 42/42。
+- `CI=1 pnpm e2e` 为 57/57；`CI=1 pnpm exec playwright test --config tests/e2e/ops-production.playwright.config.ts` 为 9/9。覆盖五端桌面/390px、PDA 重启与离线、幂等恢复、并发版本、错误回执、生产恢复和 axe serious/critical 0。
+- 运营生产组合根不展示演示权限或场景控制器；场景矩阵只在专用 `e2e.html` 预览装配中显式开启。前四端在后端领域实现完成前只允许通过 `?mock=1` 进入完整交互预览，生产 API 失败不会静默回退为假成功。
+- 公开协作仓库为 `Canna2026AI/zhili-logistics-ai`；五端入口、共享包、模块所有权、CODEOWNERS、贡献流程和 CI 均已纳入版本控制。
 
 ## 证据记录规则
 
