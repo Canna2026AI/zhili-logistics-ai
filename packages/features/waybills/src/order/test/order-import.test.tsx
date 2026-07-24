@@ -192,7 +192,11 @@ describe('waybill import', () => {
 
   it('awaits create, validate, commit and rollback import operations', async () => {
     const port = {
-      create: vi.fn(async () => ({ id: 'import-1', version: 1 })),
+      create: vi.fn(async () => ({
+        id: 'import-1',
+        version: 1,
+        mappingStatus: 'NOT_REQUIRED',
+      })),
       validate: vi.fn(async () => ({ id: 'import-1', version: 2 })),
       commit: vi.fn(async () => ({ id: 'import-1', version: 3, created: 1, failed: 1 })),
       rollback: vi.fn(async () => ({ id: 'import-1', version: 4, status: 'ROLLED_BACK' })),
@@ -223,7 +227,11 @@ describe('waybill import', () => {
 
   it('renders the committed result returned by the port rather than the local CSV estimate', async () => {
     const port = {
-      create: vi.fn(async () => ({ id: 'import-1', version: 1 })),
+      create: vi.fn(async () => ({
+        id: 'import-1',
+        version: 1,
+        mappingStatus: 'NOT_REQUIRED',
+      })),
       validate: vi.fn(async () => ({ id: 'import-1', version: 2 })),
       commit: vi.fn(async () => ({ id: 'import-1', version: 3, created: 7, failed: 2 })),
       rollback: vi.fn(),
@@ -244,7 +252,11 @@ describe('waybill import', () => {
     'surfaces a rejected import %s command and keeps the current step retryable',
     async (method) => {
       const port = {
-        create: vi.fn().mockResolvedValue({ id: 'import-1', version: 1 }),
+        create: vi.fn().mockResolvedValue({
+          id: 'import-1',
+          version: 1,
+          mappingStatus: 'NOT_REQUIRED',
+        }),
         validate: vi.fn().mockResolvedValue({ id: 'import-1', version: 2 }),
         commit: vi.fn().mockResolvedValue({ id: 'import-1', version: 3, created: 1, failed: 0 }),
         rollback: vi.fn(),
@@ -276,7 +288,11 @@ describe('waybill import', () => {
 
   it('keeps rollback confirmation open when the rollback port rejects', async () => {
     const port = {
-      create: vi.fn(async () => ({ id: 'import-1', version: 1 })),
+      create: vi.fn(async () => ({
+        id: 'import-1',
+        version: 1,
+        mappingStatus: 'NOT_REQUIRED',
+      })),
       validate: vi.fn(async () => ({ id: 'import-1', version: 2 })),
       commit: vi.fn(async () => ({ id: 'import-1', version: 3, created: 1, failed: 0 })),
       rollback: vi.fn().mockRejectedValue(new Error('STALE_VERSION')),
@@ -500,6 +516,62 @@ describe('waybill import', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: '校验数据' }));
     await waitFor(() => expect(port.validate).toHaveBeenCalledWith(importId, 5));
+  });
+
+  it('fails closed when mapping proposal retrieval fails', async () => {
+    const validate = vi.fn();
+    const port = {
+      create: vi.fn(async () => ({ id: importId, version: 4, status: 'UPLOADED' })),
+      proposeMapping: vi.fn(async () => {
+        throw Object.assign(new Error('proposal upstream unavailable'), {
+          status: 500,
+          code: 'AI_PROPOSAL_UNAVAILABLE',
+        });
+      }),
+      applyMapping: vi.fn(),
+      validate,
+      commit: vi.fn(),
+      rollback: vi.fn(),
+    };
+    render(<ImportWorkbench port={port} />);
+    fireEvent.change(screen.getByLabelText('导入 CSV'), {
+      target: { value: '客户,重量,目的地\n深圳鑫源贸易有限公司,122,US-LAX' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '解析并映射' }));
+
+    await screen.findByRole('alert');
+    expect(screen.queryByRole('button', { name: '校验数据' })).not.toBeInTheDocument();
+    expect(validate).not.toHaveBeenCalled();
+  });
+
+  it('allows validation only when the authoritative import says mapping is not required', async () => {
+    const validate = vi.fn(async () => ({ id: importId, version: 5, status: 'VALIDATING' }));
+    const proposeMapping = vi.fn();
+    const port = {
+      create: vi.fn(async () => ({
+        id: importId,
+        version: 4,
+        status: 'UPLOADED',
+        mappingStatus: 'NOT_REQUIRED' as const,
+      })),
+      proposeMapping,
+      applyMapping: vi.fn(),
+      validate,
+      commit: vi.fn(),
+      rollback: vi.fn(),
+    };
+    render(<ImportWorkbench port={port} />);
+    fireEvent.change(screen.getByLabelText('导入 CSV'), {
+      target: { value: '客户,重量,目的地\n深圳鑫源贸易有限公司,122,US-LAX' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '解析并映射' }));
+
+    const validateButton = await screen.findByRole('button', { name: '校验数据' });
+    expect(proposeMapping).not.toHaveBeenCalled();
+    fireEvent.click(validateButton);
+    await waitFor(() => expect(validate).toHaveBeenCalledWith(importId, 4));
   });
 
   it('uses generated import create, validate, commit and rollback paths', async () => {

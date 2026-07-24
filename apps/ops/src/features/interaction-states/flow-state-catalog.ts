@@ -7,6 +7,7 @@ export type OpsFlowActionId =
   | 'attach-receipt-evidence'
   | 'retry-issue-notification'
   | 'download-load-report'
+  | 'reload-authoritative-load'
   | 'request-release-approval'
   | 'open-dispatch-confirmation'
   | 'retry-carrier-sync'
@@ -165,6 +166,11 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['本地版本 7', '服务器版本 8', '陈敏已移除 1 票运单'],
         tone: 'warning',
         role: 'alert',
+        action: {
+          id: 'reload-authoritative-load',
+          label: '刷新装载单版本',
+          kind: 'command',
+        },
       },
       {
         id: 'forbidden-release',

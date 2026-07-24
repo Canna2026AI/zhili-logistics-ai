@@ -104,14 +104,13 @@ describe('API fulfillment finance command port', () => {
       domain: 'warehouse',
       operationId: 'createPrintJob',
       entityRef: 'S2505120004',
-      idempotencyKey: 'createPrintJob:S2505120004:v7',
-      expectedVersion: 7,
+      idempotencyKey: 'createPrintJob:S2505120004:vnone',
       payload: { documentType: 'HANDOVER', copies: 1 },
     });
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe('https://api.zhili.test/v1/documents/print-jobs');
-    expect(requests[0]?.headers.get('Idempotency-Key')).toBe('createPrintJob:S2505120004:v7');
+    expect(requests[0]?.headers.get('Idempotency-Key')).toBe('createPrintJob:S2505120004:vnone');
     await expect(requests[0]?.json()).resolves.toMatchObject({
       documentType: 'HANDOVER',
       copies: 1,
@@ -231,6 +230,53 @@ describe('API fulfillment finance command port', () => {
     });
   });
 
+  it('reloads the authoritative load-unit version through the generated GET contract', async () => {
+    let request: Request | undefined;
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async (input) => {
+        request = new Request(input);
+        return Response.json({
+          data: {
+            id: 'CNT-SZX-260722-01',
+            status: 'SEALED',
+            version: 8,
+          },
+          meta: { requestId: 'REQ-LOAD-REFRESH-8', timestamp: '2026-07-22T08:00:00Z' },
+        });
+      },
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).reloadResource?.('CNT-SZX-260722-01')
+    ).resolves.toEqual({
+      evidence: { kind: 'trace', requestId: 'REQ-LOAD-REFRESH-8' },
+      resource: { id: 'CNT-SZX-260722-01', version: 8 },
+    });
+    expect(request?.method).toBe('GET');
+    expect(request?.url).toBe('https://api.zhili.test/v1/linehaul/load-units/CNT-SZX-260722-01');
+  });
+
+  it.each([
+    ['wrong resource id', { id: 'CNT-OTHER', version: 8 }],
+    ['missing resource version', { id: 'CNT-SZX-260722-01' }],
+  ])('rejects an invalid authoritative reload receipt: %s', async (_label, data) => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json({
+          data,
+          meta: { requestId: 'REQ-LOAD-INVALID', timestamp: '2026-07-22T08:00:00Z' },
+        }),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).reloadResource?.('CNT-SZX-260722-01')
+    ).rejects.toMatchObject({
+      code: 'FULFILLMENT_RELOAD_RECEIPT_INVALID',
+    });
+  });
+
   it('fails closed when a versioned mutation does not advance the resource version', async () => {
     const client = createZhiliClient({
       baseUrl: 'https://api.zhili.test/v1',
@@ -255,6 +301,53 @@ describe('API fulfillment finance command port', () => {
         payload: { actualWeightKg: 123.5 },
       })
     ).rejects.toMatchObject({ code: 'FULFILLMENT_VERSION_NOT_ADVANCED' });
+  });
+
+  it.each([
+    [
+      'missing resource',
+      {
+        data: { auditEventId: 'AUD-RCV-MISSING' },
+        meta: { requestId: 'REQ-RCV-MISSING' },
+      },
+    ],
+    [
+      'wrong resource id',
+      {
+        data: {
+          resourceId: 'RCV-OTHER',
+          auditEventId: 'AUD-RCV-WRONG',
+          version: 8,
+        },
+        meta: { requestId: 'REQ-RCV-WRONG' },
+      },
+    ],
+    [
+      'missing resource version',
+      {
+        data: {
+          resourceId: 'RCV-S2505120004',
+          auditEventId: 'AUD-RCV-NOVERSION',
+        },
+        meta: { requestId: 'REQ-RCV-NOVERSION' },
+      },
+    ],
+  ])('fails closed for a versioned mutation with %s', async (_label, responseBody) => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () => Response.json(responseBody),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'warehouse',
+        operationId: 'recordMeasurement',
+        entityRef: 'RCV-S2505120004',
+        idempotencyKey: 'recordMeasurement:RCV-S2505120004:v7:test',
+        expectedVersion: 7,
+        payload: { actualWeightKg: 123.5 },
+      })
+    ).rejects.toMatchObject({ code: 'FULFILLMENT_RESOURCE_RECEIPT_INVALID' });
   });
 
   it('preserves the generated-client 412 as a typed domain error', async () => {

@@ -15,20 +15,32 @@ describe('fulfillment and finance workbench', () => {
   const audit = (auditId: string): FulfillmentFinanceCommandResult => ({
     evidence: { kind: 'audit', auditId },
   });
+  const auditFor = (
+    command: FulfillmentFinanceCommand,
+    auditId = `AUD-${command.operationId}`
+  ): FulfillmentFinanceCommandResult => ({
+    evidence: { kind: 'audit', auditId },
+    ...(command.expectedVersion === undefined
+      ? {}
+      : {
+          resource: {
+            id: command.entityRef,
+            version: command.expectedVersion + 1,
+          },
+        }),
+  });
   const successfulPort = (): FulfillmentFinanceCommandPort => ({
-    execute: vi.fn(async (command: FulfillmentFinanceCommand) =>
-      audit(`AUD-${command.operationId}`)
-    ),
+    execute: vi.fn(async (command: FulfillmentFinanceCommand) => auditFor(command)),
   });
 
   it('awaits the typed warehouse command before reporting success and auditing', async () => {
     let resolveCommand: ((value: FulfillmentFinanceCommandResult) => void) | undefined;
-    const execute = vi.fn(
-      () =>
-        new Promise<FulfillmentFinanceCommandResult>((resolve) => {
-          resolveCommand = resolve;
-        })
-    );
+    const execute = vi.fn((command: FulfillmentFinanceCommand) => {
+      void command;
+      return new Promise<FulfillmentFinanceCommandResult>((resolve) => {
+        resolveCommand = resolve;
+      });
+    });
     render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     expect(screen.getByRole('heading', { name: '收货扫描' })).toBeVisible();
@@ -47,7 +59,7 @@ describe('fulfillment and finance workbench', () => {
       })
     );
 
-    resolveCommand?.(audit('AUD-WH-0001'));
+    resolveCommand?.(auditFor(execute.mock.calls[0]![0], 'AUD-WH-0001'));
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent(
         '收货已确认，已进入待分货 · 审计 AUD-WH-0001'
@@ -87,9 +99,7 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('wires the remaining warehouse, last-mile and tracking P0 operations', async () => {
-    const execute = vi.fn(async (command: FulfillmentFinanceCommand) =>
-      audit(`AUD-${command.operationId}`)
-    );
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => auditFor(command));
     render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     for (const [label, operationId] of [
@@ -184,7 +194,9 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('dispatches dangerous unreview with reason, If-Match version and stable idempotency', async () => {
-    const execute = vi.fn(async () => audit('AUD-FIN-0098'));
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) =>
+      auditFor(command, 'AUD-FIN-0098')
+    );
     render(
       <FulfillmentFinanceWorkbench
         showScenarioControls
@@ -221,9 +233,7 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('executes WH-08, LM-05/06 and finance P0 workflows with visible resolved states', async () => {
-    const execute = vi.fn(async (command: FulfillmentFinanceCommand) =>
-      audit(`AUD-${command.operationId}`)
-    );
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => auditFor(command));
     render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打印交接单' }));
@@ -268,12 +278,12 @@ describe('fulfillment and finance workbench', () => {
 
   it('requires a second confirmation before F04 dispatch and audits the exact command', async () => {
     let resolveCommand: ((value: FulfillmentFinanceCommandResult) => void) | undefined;
-    const execute = vi.fn(
-      () =>
-        new Promise<FulfillmentFinanceCommandResult>((resolve) => {
-          resolveCommand = resolve;
-        })
-    );
+    const execute = vi.fn((command: FulfillmentFinanceCommand) => {
+      void command;
+      return new Promise<FulfillmentFinanceCommandResult>((resolve) => {
+        resolveCommand = resolve;
+      });
+    });
     render(
       <FulfillmentFinanceWorkbench
         showScenarioControls
@@ -304,7 +314,7 @@ describe('fulfillment and finance workbench', () => {
       expectedVersion: 4,
       payload: { confirmedIssues: 2, printedDocuments: 40 },
     });
-    resolveCommand?.(audit('AUD-F04-DISPATCH'));
+    resolveCommand?.(auditFor(execute.mock.calls[0]![0], 'AUD-F04-DISPATCH'));
     await waitFor(() =>
       expect(screen.getByRole('status')).toHaveTextContent('审计 AUD-F04-DISPATCH')
     );
@@ -312,7 +322,9 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('gates F04 release and produces a real downloadable failure report', async () => {
-    const execute = vi.fn(async () => audit('AUD-F04-APPROVAL'));
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) =>
+      auditFor(command, 'AUD-F04-APPROVAL')
+    );
     render(
       <FulfillmentFinanceWorkbench
         showScenarioControls
@@ -349,10 +361,14 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('executes F03 and F05 recovery through typed commands and preserves rejected state', async () => {
-    const execute = vi
-      .fn<(command: FulfillmentFinanceCommand) => Promise<FulfillmentFinanceCommandResult>>()
-      .mockResolvedValueOnce(audit('AUD-F03-MEDIA'))
-      .mockRejectedValueOnce(new Error('409 承运商版本冲突'));
+    const execute = vi.fn(
+      async (command: FulfillmentFinanceCommand): Promise<FulfillmentFinanceCommandResult> => {
+        if (command.operationId === 'attachReceiptMedia') {
+          return auditFor(command, 'AUD-F03-MEDIA');
+        }
+        throw new Error('409 承运商版本冲突');
+      }
+    );
     render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
@@ -386,7 +402,7 @@ describe('fulfillment and finance workbench', () => {
 
   it('routes partial notification retries for F03 and F05 through the audited notification command', async () => {
     const execute = vi.fn(async (command: FulfillmentFinanceCommand) =>
-      audit(`AUD-${command.entityRef}`)
+      auditFor(command, `AUD-${command.entityRef}`)
     );
     render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
     fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
@@ -422,9 +438,7 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('gates F06/F07 finance commands and resets state when switching flows', async () => {
-    const execute = vi.fn(async (command: FulfillmentFinanceCommand) =>
-      audit(`AUD-${command.operationId}`)
-    );
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => auditFor(command));
     render(
       <FulfillmentFinanceWorkbench
         showScenarioControls
@@ -474,7 +488,9 @@ describe('fulfillment and finance workbench', () => {
   });
 
   it('routes F06 danger unreview through an impact dialog and exact audited command', async () => {
-    const execute = vi.fn(async () => audit('AUD-F06-UNREVIEW'));
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) =>
+      auditFor(command, 'AUD-F06-UNREVIEW')
+    );
     render(
       <FulfillmentFinanceWorkbench
         showScenarioControls
@@ -506,12 +522,12 @@ describe('fulfillment and finance workbench', () => {
 
   it('prevents repeated danger submissions while pending and counts one server audit', async () => {
     let resolveCommand: ((value: FulfillmentFinanceCommandResult) => void) | undefined;
-    const execute = vi.fn(
-      () =>
-        new Promise<FulfillmentFinanceCommandResult>((resolve) => {
-          resolveCommand = resolve;
-        })
-    );
+    const execute = vi.fn((command: FulfillmentFinanceCommand) => {
+      void command;
+      return new Promise<FulfillmentFinanceCommandResult>((resolve) => {
+        resolveCommand = resolve;
+      });
+    });
     render(
       <FulfillmentFinanceWorkbench
         showScenarioControls
@@ -529,31 +545,72 @@ describe('fulfillment and finance workbench', () => {
     fireEvent.click(confirm);
     expect(execute).toHaveBeenCalledTimes(1);
     expect(confirm).toBeDisabled();
-    resolveCommand?.(audit('AUD-ONE'));
+    resolveCommand?.(auditFor(execute.mock.calls[0]![0], 'AUD-ONE'));
     await waitFor(() => expect(screen.getByText('审计事件').parentElement).toHaveTextContent('1'));
   });
 
   it('does not count an idempotent server replay as a second audit event', async () => {
-    const execute = vi.fn(async () => audit('AUD-confirmReceipt-REPLAY'));
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) =>
+      auditFor(command, 'AUD-createPrintJob-REPLAY')
+    );
     render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
-    const confirmReceipt = screen.getByRole('button', { name: '确认收货' });
+    const createPrintJob = screen.getByRole('button', { name: '打印交接单' });
 
-    fireEvent.click(confirmReceipt);
+    fireEvent.click(createPrintJob);
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
-    fireEvent.click(confirmReceipt);
+    fireEvent.click(createPrintJob);
     await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
 
     expect(screen.getByText('审计事件').parentElement).toHaveTextContent('1');
   });
 
   it('labels request evidence as tracking without incrementing the audit counter', async () => {
-    const execute = vi.fn(async () => ({
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
       evidence: { kind: 'trace' as const, requestId: 'REQ-WH-TRACE-1' },
+      resource: {
+        id: command.entityRef,
+        version: (command.expectedVersion ?? 0) + 1,
+      },
     }));
     render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
     fireEvent.click(screen.getByRole('button', { name: '确认收货' }));
     expect(await screen.findByRole('status')).toHaveTextContent('请求追踪 REQ-WH-TRACE-1');
+    expect(screen.getByText('审计事件').parentElement).toHaveTextContent('0');
+  });
+
+  it('keeps a dangerous confirmation unresolved when a versioned receipt has no resource', async () => {
+    const execute = vi.fn(async () => audit('AUD-MISSING-RESOURCE'));
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="linehaul"
+      />
+    );
+    fireEvent.change(screen.getByRole('combobox', { name: '流程状态' }), {
+      target: { value: 'danger-dispatch' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '进入二次确认' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '已核对未关闭问题与打印清单' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '确认出库并记录审计' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('资源回执');
+    expect(screen.getByRole('dialog', { name: '出仓危险确认' })).toBeVisible();
+    expect(screen.getByText('审计事件').parentElement).toHaveTextContent('0');
+  });
+
+  it('rejects a non-integer resource version before success and audit', async () => {
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => ({
+      evidence: { kind: 'audit' as const, auditId: 'AUD-FRACTIONAL-VERSION' },
+      resource: { id: command.entityRef, version: 7.5 },
+    }));
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '确认收货' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('资源回执');
     expect(screen.getByText('审计事件').parentElement).toHaveTextContent('0');
   });
 
@@ -565,7 +622,7 @@ describe('fulfillment and finance workbench', () => {
           resource: { id: next.entityRef, version: 8 },
         } as unknown as FulfillmentFinanceCommandResult;
       }
-      return audit(`AUD-${next.operationId}`);
+      return auditFor(next);
     });
     render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
 
@@ -584,19 +641,26 @@ describe('fulfillment and finance workbench', () => {
     });
   });
 
-  it('moves a real linehaul 412 into the F04 stale-load recovery state', async () => {
-    const execute = vi.fn(async () => {
-      throw Object.assign(new Error('装载单已推进到版本 8'), {
-        name: 'DomainApiError',
-        status: 412,
-        code: 'PRECONDITION_FAILED',
-        requestId: 'REQ-LOAD-412',
-      });
+  it('refreshes a real linehaul 412 and retries dispatch with the authoritative version', async () => {
+    const execute = vi.fn(async (command: FulfillmentFinanceCommand) => {
+      if (execute.mock.calls.length === 1) {
+        throw Object.assign(new Error('装载单已推进到版本 8'), {
+          name: 'DomainApiError',
+          status: 412,
+          code: 'PRECONDITION_FAILED',
+          requestId: 'REQ-LOAD-412',
+        });
+      }
+      return auditFor(command, 'AUD-LOAD-RETRY-9');
     });
+    const reloadResource = vi.fn(async () => ({
+      evidence: { kind: 'trace' as const, requestId: 'REQ-LOAD-REFRESH-8' },
+      resource: { id: 'CNT-SZX-260722-01', version: 8 },
+    }));
     render(
       <FulfillmentFinanceWorkbench
         showScenarioControls
-        commandPort={{ execute }}
+        commandPort={{ execute, reloadResource }}
         initialSection="linehaul"
       />
     );
@@ -607,6 +671,53 @@ describe('fulfillment and finance workbench', () => {
       expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('stale-load')
     );
     expect(screen.getByText('装载任务已被他人更新')).toBeVisible();
+    expect(screen.getByRole('button', { name: '确认出库' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '刷新装载单版本' }));
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('normal')
+    );
+    expect(reloadResource).toHaveBeenCalledWith('CNT-SZX-260722-01');
+    expect(screen.getByRole('button', { name: '确认出库' })).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: '确认出库' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({
+      operationId: 'dispatchLoadUnit',
+      entityRef: 'CNT-SZX-260722-01',
+      expectedVersion: 8,
+      idempotencyKey: expect.stringMatching(
+        /^dispatchLoadUnit:CNT-SZX-260722-01:v8:p[0-9a-f]{16}$/
+      ),
+    });
+    expect(await screen.findByRole('status')).toHaveTextContent('AUD-LOAD-RETRY-9');
+  });
+
+  it('keeps F04 stale when the authoritative refresh fails', async () => {
+    const execute = vi.fn(async () => {
+      throw Object.assign(new Error('装载单版本冲突'), {
+        name: 'DomainApiError',
+        status: 412,
+        code: 'PRECONDITION_FAILED',
+      });
+    });
+    const reloadResource = vi.fn(async () => {
+      throw new Error('刷新装载单失败');
+    });
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute, reloadResource }}
+        initialSection="linehaul"
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '确认出库' }));
+    await screen.findByText('装载任务已被他人更新');
+    fireEvent.click(screen.getByRole('button', { name: '刷新装载单版本' }));
+
+    expect(await screen.findByText(/刷新装载单失败/)).toBeVisible();
+    expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('stale-load');
     expect(screen.getByRole('button', { name: '确认出库' })).toBeDisabled();
   });
 

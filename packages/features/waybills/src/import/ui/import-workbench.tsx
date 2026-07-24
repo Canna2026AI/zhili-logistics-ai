@@ -50,6 +50,18 @@ export function ImportWorkbench({
   const [rollbackReason, setRollbackReason] = useState('');
   const pendingRef = useRef(false);
   const result = parseImportRows(csv);
+  const mappingReady =
+    Boolean(job) &&
+    (mappingApplied ||
+      localMappingApplied ||
+      job?.mappingStatus === 'NOT_REQUIRED' ||
+      job?.mappingStatus === 'APPLIED' ||
+      proposal?.status === 'APPLIED' ||
+      (proposal?.status === 'READY' && proposal.candidates.length === 0));
+  const proposalCanBeApplied =
+    proposal &&
+    ['READY', 'PARTIALLY_APPLIED'].includes(proposal.status) &&
+    proposal.candidates.length > 0;
 
   const setJob = (next: ImportJobRef) => {
     if (onJobChange) onJobChange(next);
@@ -115,7 +127,10 @@ export function ImportWorkbench({
               setLocalMappingApplied(false);
               setLocalProposal(null);
               setSelectedMappingIds([]);
-              if (typeof port.proposeMapping === 'function') {
+              if (
+                created.mappingStatus !== 'NOT_REQUIRED' &&
+                typeof port.proposeMapping === 'function'
+              ) {
                 const proposed = await run('propose', () =>
                   port.proposeMapping(created.id, created.version)
                 );
@@ -154,7 +169,7 @@ export function ImportWorkbench({
                   (mapping) => <span key={mapping}>{mapping}</span>
                 )}
           </div>
-          {step === 'mapping' && proposal && !mappingApplied && !localMappingApplied ? (
+          {step === 'mapping' && proposalCanBeApplied && !mappingReady ? (
             <Button
               disabled={!job || pending || readOnly || selectedMappingIds.length === 0}
               onClick={() =>
@@ -175,7 +190,7 @@ export function ImportWorkbench({
               应用字段映射
             </Button>
           ) : null}
-          {step === 'mapping' && (!proposal || mappingApplied || localMappingApplied) ? (
+          {step === 'mapping' && mappingReady ? (
             <Button
               disabled={!job || pending || readOnly}
               onClick={() =>

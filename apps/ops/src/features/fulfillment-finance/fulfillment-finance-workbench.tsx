@@ -10,7 +10,7 @@ import {
   type OpsFlowId,
   type OpsFlowSelection,
 } from '../interaction-states';
-import { createFulfillmentCommand } from './fulfillment-command';
+import { createFulfillmentCommand, requiresAuthoritativeResource } from './fulfillment-command';
 import './fulfillment-finance-workbench.css';
 
 export type FulfillmentSection = 'warehouse' | 'linehaul' | 'tracking' | 'finance';
@@ -110,8 +110,17 @@ export interface FulfillmentFinanceCommandResult {
   };
 }
 
+export interface FulfillmentFinanceResourceSnapshot {
+  evidence: FulfillmentFinanceCommandEvidence;
+  resource: {
+    id: string;
+    version: number;
+  };
+}
+
 export interface FulfillmentFinanceCommandPort {
   execute(command: FulfillmentFinanceCommand): Promise<FulfillmentFinanceCommandResult>;
+  reloadResource?(entityRef: string): Promise<FulfillmentFinanceResourceSnapshot>;
 }
 
 export interface FulfillmentFinanceWorkbenchProps {
@@ -616,7 +625,7 @@ function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
                   variant="secondary"
                   onClick={() =>
                     runCommand(
-                      command('warehouse', 'createPrintJob', 'S2505120004', 7, {
+                      command('warehouse', 'createPrintJob', 'S2505120004', undefined, {
                         documentType: 'HANDOVER',
                         copies: 1,
                       }),
@@ -1936,6 +1945,16 @@ export function FulfillmentFinanceWorkbench({
     executedCommand: FulfillmentFinanceCommand,
     result: FulfillmentFinanceCommandResult
   ) => {
+    if (
+      requiresAuthoritativeResource(executedCommand) &&
+      (!result.resource ||
+        result.resource.id !== executedCommand.entityRef ||
+        !Number.isInteger(result.resource.version))
+    ) {
+      throw new DomainApiError('服务端资源回执缺失或与当前命令不匹配', {
+        code: 'FULFILLMENT_RESOURCE_RECEIPT_INVALID',
+      });
+    }
     if (!result.resource || result.resource.id !== executedCommand.entityRef) return;
     if (
       executedCommand.expectedVersion !== undefined &&
@@ -2065,6 +2084,38 @@ export function FulfillmentFinanceWorkbench({
               'waybill,reason\nS2505120031,目的地不符\nS2505120042,危险品标签缺失\nS2505120050,订舱约束不匹配\n',
           },
         };
+      case 'reload-authoritative-load': {
+        const entityRef = 'CNT-SZX-260722-01';
+        if (!commandPort.reloadResource) {
+          throw new DomainApiError('当前命令端口不支持刷新装载单', {
+            code: 'FULFILLMENT_RELOAD_UNAVAILABLE',
+          });
+        }
+        const result = await commandPort.reloadResource(entityRef);
+        if (
+          result.resource.id !== entityRef ||
+          !Number.isInteger(result.resource.version) ||
+          result.resource.version < 1
+        ) {
+          throw new DomainApiError('服务端装载单刷新回执无效', {
+            code: 'FULFILLMENT_RELOAD_RECEIPT_INVALID',
+          });
+        }
+        authoritativeVersionsRef.current.set(entityRef, result.resource.version);
+        return {
+          message: `装载单已刷新到版本 ${result.resource.version}，可以安全重试`,
+          evidence: {
+            kind: 'server',
+            operationId: 'reloadLoadUnit',
+            ...(result.evidence.kind === 'audit'
+              ? { auditId: result.evidence.auditId }
+              : result.evidence.kind === 'trace'
+                ? { requestId: result.evidence.requestId }
+                : { resourceId: result.evidence.resourceId }),
+          },
+          recoverToStateId: 'normal',
+        };
+      }
       case 'request-release-approval':
         return executeScenarioCommand(
           command('tracking', 'requestShipmentHoldReleaseApproval', shipmentHoldId, 2, {

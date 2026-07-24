@@ -8,6 +8,7 @@ export interface ParsedImportRow {
 export interface ImportJobRef {
   id: string;
   version: number;
+  mappingStatus?: 'REQUIRED' | 'NOT_REQUIRED' | 'APPLIED';
   created?: number;
   failed?: number;
   status?: string;

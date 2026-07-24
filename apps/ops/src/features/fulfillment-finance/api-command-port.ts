@@ -4,8 +4,10 @@ import type {
   FulfillmentFinanceCommand,
   FulfillmentFinanceCommandEvidence,
   FulfillmentFinanceCommandPort,
+  FulfillmentFinanceResourceSnapshot,
   FulfillmentFinanceOperationId,
 } from './fulfillment-finance-workbench';
+import { requiresAuthoritativeResource } from './fulfillment-command';
 
 type ApiPath = keyof paths;
 
@@ -323,6 +325,38 @@ export function createApiFulfillmentFinanceCommandPort(
   const get = client.GET as unknown as ApiCall;
 
   return {
+    async reloadResource(entityRef: string): Promise<FulfillmentFinanceResourceSnapshot> {
+      const result = await get('/linehaul/load-units/{loadUnitId}', {
+        params: {
+          path: { loadUnitId: entityRef },
+          header: {},
+        },
+      });
+      if (result.error) throw toDomainApiError(result.error, result.response);
+      const evidence = serverEvidence(result.data, result.response);
+      const resource = serverResource(result.data);
+      if (
+        !evidence ||
+        !resource ||
+        resource.id !== entityRef ||
+        resource.version === undefined ||
+        !Number.isInteger(resource.version) ||
+        resource.version < 1
+      ) {
+        throw new DomainApiError('服务端装载单刷新回执无效', {
+          code: 'FULFILLMENT_RELOAD_RECEIPT_INVALID',
+          details: {
+            expectedResourceId: entityRef,
+            returnedResourceId: resource?.id,
+            returnedVersion: resource?.version,
+          },
+        });
+      }
+      return {
+        evidence,
+        resource: { id: resource.id, version: resource.version },
+      };
+    },
     async execute(command: FulfillmentFinanceCommand) {
       const route: ApiRoute = fulfillmentFinanceApiRoutes[command.operationId];
       const path = route.pathParam ? { [route.pathParam]: command.entityRef } : undefined;
@@ -348,9 +382,27 @@ export function createApiFulfillmentFinanceCommandPort(
       if (!evidence) throw new Error('API 响应缺少审计、请求追踪或资源证据');
       const resource = route.method === 'POST' ? serverResource(result.data) : undefined;
       if (
-        resource?.id === command.entityRef &&
+        requiresAuthoritativeResource(command) &&
+        (!resource ||
+          resource.id !== command.entityRef ||
+          resource.version === undefined ||
+          !Number.isInteger(resource.version))
+      ) {
+        throw new DomainApiError('服务端资源回执缺失或与当前命令不匹配', {
+          code: 'FULFILLMENT_RESOURCE_RECEIPT_INVALID',
+          details: {
+            expectedResourceId: command.entityRef,
+            returnedResourceId: resource?.id,
+            returnedVersion: resource?.version,
+          },
+        });
+      }
+      if (
+        requiresAuthoritativeResource(command) &&
+        resource &&
         command.expectedVersion !== undefined &&
-        (resource.version === undefined || resource.version <= command.expectedVersion)
+        resource.version !== undefined &&
+        resource.version <= command.expectedVersion
       ) {
         throw new DomainApiError('服务端资源版本未推进', {
           code: 'FULFILLMENT_VERSION_NOT_ADVANCED',

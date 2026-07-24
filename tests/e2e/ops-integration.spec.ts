@@ -5,6 +5,7 @@ const quoteId = '01JY8Z8F6ME4F0Y9QH2X6D4R7B';
 const optionId = '01JY8Z8F6ME4F0Y9QH2X6D4R7C';
 const productId = '01JY8Z8F6ME4F0Y9QH2X6D4R7D';
 const importId = '01JY8Z8F6ME4F0Y9QH2X6D4R7E';
+const importIdB = '01JY8Z8F6ME4F0Y9QH2X6D4R7J';
 const proposalId = '01JY8Z8F6ME4F0Y9QH2X6D4R7F';
 const candidateId = '01JY8Z8F6ME4F0Y9QH2X6D4R7G';
 const jobId = '01JY8Z8F6ME4F0Y9QH2X6D4R7H';
@@ -216,12 +217,133 @@ test('生产 AI 提案路由的 422 携带 proposal 进入人工映射', async (
   await expect(page.getByRole('option', { name: /province.*32%/ })).toHaveValue(candidateId);
 });
 
-test('生产履约 412 进入 F04 装载并发恢复态', async ({ page }) => {
-  let dispatchedRequest: import('@playwright/test').Request | undefined;
+test('生产 F10 第二批提案 500 时 fail closed 且不开放校验', async ({ page }) => {
+  let createCount = 0;
+  await page.route('**/api/v1/imports', async (route) => {
+    createCount += 1;
+    const id = createCount === 1 ? importId : importIdB;
+    await route.fulfill({
+      json: {
+        data: {
+          id,
+          status: 'UPLOADED',
+          totalRows: 1,
+          validRows: 0,
+          invalidRows: 0,
+          version: 1,
+        },
+        meta: { requestId: `REQ-IMPORT-${createCount}` },
+      },
+    });
+  });
+  await page.route(/\/api\/v1\/ai\/imports\/[^/]+\/mapping-proposals$/, async (route) => {
+    if (route.request().url().includes(importIdB)) {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          status: 500,
+          code: 'AI_MAPPING_UNAVAILABLE',
+          detail: '映射模型暂不可用',
+          requestId: 'REQ-AI-B-500',
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 202,
+      json: {
+        data: {
+          id: jobId,
+          type: 'AI_MAPPING_PROPOSAL',
+          status: 'SUCCEEDED',
+          progress: 1,
+          resultRef: proposalId,
+          createdAt: '2026-07-23T08:00:00+08:00',
+        },
+        meta: {},
+      },
+    });
+  });
+  await page.route(
+    `**/api/v1/ai/imports/${importId}/mapping-proposals/${proposalId}`,
+    async (route) => {
+      await route.fulfill({
+        json: {
+          data: {
+            id: proposalId,
+            importId,
+            model: 'Zhili-Map 2.1',
+            promptVersion: '2026.07',
+            status: 'READY',
+            version: 1,
+            candidates: [
+              {
+                id: candidateId,
+                sourceColumn: '客户',
+                targetField: 'customerName',
+                confidence: 0.96,
+                evidence: ['列名精确匹配'],
+                risk: 'LOW',
+                autoApplicable: true,
+              },
+            ],
+          },
+          meta: {},
+        },
+      });
+    }
+  );
+  await page.route(`**/api/v1/ai/imports/${importId}/mapping-proposals:apply`, async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          id: importId,
+          status: 'MAPPING',
+          totalRows: 1,
+          validRows: 0,
+          invalidRows: 0,
+          version: 2,
+        },
+        meta: { requestId: 'REQ-MAPPING-A-2' },
+      },
+    });
+  });
+
+  await page.goto('/operations/orders');
+  await page.getByRole('button', { name: '导入运单' }).click();
+  await page.getByLabel('导入 CSV').fill('客户,重量,目的地\n甲公司,12,US-LAX');
+  await page.getByRole('button', { name: '解析并映射' }).click();
+  await page.getByRole('button', { name: '应用字段映射' }).click();
+  await expect(page.getByRole('button', { name: '校验数据' })).toBeVisible();
+
+  await page.getByLabel('导入 CSV').fill('客户,重量,目的地\n乙公司,18,US-ONT');
+  await page.getByRole('button', { name: '解析并映射' }).click();
+
+  await expect(page.getByRole('alert')).toContainText('导入命令失败');
+  await expect(page.getByRole('button', { name: '校验数据' })).toHaveCount(0);
+  expect(createCount).toBe(2);
+});
+
+test('生产履约 412 刷新权威版本后按 v8 重试成功', async ({ page }) => {
+  const dispatchedRequests: import('@playwright/test').Request[] = [];
   await page.route(
     /\/api\/v1\/linehaul\/load-units\/CNT-SZX-260722-01:dispatch$/,
     async (route) => {
-      dispatchedRequest = route.request();
+      dispatchedRequests.push(route.request());
+      if (dispatchedRequests.length > 1) {
+        await route.fulfill({
+          json: {
+            data: {
+              id: 'CNT-SZX-260722-01',
+              status: 'DISPATCHED',
+              version: 9,
+            },
+            meta: { requestId: 'REQ-LOAD-DISPATCH-9' },
+          },
+        });
+        return;
+      }
       await route.fulfill({
         status: 412,
         contentType: 'application/problem+json',
@@ -235,14 +357,37 @@ test('生产履约 412 进入 F04 装载并发恢复态', async ({ page }) => {
       });
     }
   );
+  await page.route(/\/api\/v1\/linehaul\/load-units\/CNT-SZX-260722-01$/, async (route) => {
+    await route.fulfill({
+      json: {
+        data: {
+          id: 'CNT-SZX-260722-01',
+          status: 'SEALED',
+          version: 8,
+        },
+        meta: { requestId: 'REQ-LOAD-REFRESH-8' },
+      },
+    });
+  });
   await page.goto('/operations/fulfillment-finance/linehaul');
   await page.getByRole('button', { name: '确认出库' }).click();
 
   await expect(page.getByText('装载任务已被他人更新')).toBeVisible();
   await expect(page.getByRole('button', { name: '确认出库' })).toBeDisabled();
-  expect(dispatchedRequest?.headers()['if-match']).toBe('"4"');
-  expect(dispatchedRequest?.headers()['idempotency-key']).toMatch(
+  await page.getByRole('button', { name: '刷新装载单版本' }).click();
+  await expect(page.getByText('装载任务已被他人更新')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '确认出库' })).toBeEnabled();
+  await page.getByRole('button', { name: '确认出库' }).click();
+  await expect(page.getByRole('status')).toContainText('REQ-LOAD-DISPATCH-9');
+
+  expect(dispatchedRequests).toHaveLength(2);
+  expect(dispatchedRequests[0]?.headers()['if-match']).toBe('"4"');
+  expect(dispatchedRequests[0]?.headers()['idempotency-key']).toMatch(
     /^dispatchLoadUnit:CNT-SZX-260722-01:v4:p[0-9a-f]{16}$/
+  );
+  expect(dispatchedRequests[1]?.headers()['if-match']).toBe('"8"');
+  expect(dispatchedRequests[1]?.headers()['idempotency-key']).toMatch(
+    /^dispatchLoadUnit:CNT-SZX-260722-01:v8:p[0-9a-f]{16}$/
   );
   await expectNoSeriousAxe(page);
 });

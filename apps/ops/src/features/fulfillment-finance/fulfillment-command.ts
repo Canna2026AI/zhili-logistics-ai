@@ -28,15 +28,19 @@ export function createFulfillmentCommand(
   domain: FulfillmentSection,
   operationId: FulfillmentFinanceOperationId,
   entityRef: string,
-  expectedVersion = 1,
+  expectedVersion?: number,
   payload?: Record<string, unknown>
 ): FulfillmentFinanceCommand {
   return {
     domain,
     operationId,
     entityRef,
-    idempotencyKey: `${operationId}:${entityRef}:v${expectedVersion}:p${payloadDigest(payload)}`,
+    idempotencyKey: `${operationId}:${entityRef}:v${expectedVersion ?? 'none'}:p${payloadDigest(payload)}`,
     expectedVersion,
     payload,
   };
+}
+
+export function requiresAuthoritativeResource(command: FulfillmentFinanceCommand) {
+  return command.expectedVersion !== undefined && command.operationId !== 'getProfitTrace';
 }
