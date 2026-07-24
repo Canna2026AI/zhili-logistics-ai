@@ -993,7 +993,22 @@
 
 @media (max-width: 1180px) {
   .ff-workbench {
-    grid-template-columns: 56px minmax(1120px, 1fr);
+    grid-template-columns: 56px minmax(0, 1fr);
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .ff-main,
+  .ff-content,
+  .ff-domain,
+  .ff-panel {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .ff-panel {
+    overflow-x: auto;
   }
 
   .ff-nav header strong,
@@ -1007,5 +1022,37 @@
     grid-template-columns: 1fr;
     place-items: center;
     padding: 10px 7px;
+  }
+}
+
+@media (max-width: 600px) {
+  .ff-content {
+    padding: 10px;
+  }
+
+  .ff-toolbar,
+  .ff-section-heading,
+  .ff-filter-row,
+  .ff-inline-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ff-kpis,
+  .ff-metrics,
+  .ff-two-column,
+  .ff-three-column,
+  .ff-three-panels,
+  .ff-form-grid,
+  .ff-form-grid--wide,
+  .ff-danger-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ff-toast {
+    right: 8px;
+    bottom: 8px;
+    left: 64px;
+    width: auto;
   }
 }

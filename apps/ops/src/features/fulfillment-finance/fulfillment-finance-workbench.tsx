@@ -1,8 +1,16 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Button, DataTable, Dialog, Input, StatusTag, type DataTableColumn } from '@zhili/ui';
+import { DomainApiError, toDomainApiError } from '@zhili/api-client';
 import { buildDangerousFinanceCommand } from '../../../../../packages/features/finance/src';
 import { deriveMeasurement } from '../../../../../packages/features/warehouse/src';
-import { FlowStatePanel, type OpsFlowId } from '../interaction-states';
+import {
+  FlowStatePanel,
+  type FlowStateActionRequest,
+  type FlowStateActionResult,
+  type OpsFlowId,
+  type OpsFlowSelection,
+} from '../interaction-states';
+import { createFulfillmentCommand, requiresAuthoritativeResource } from './fulfillment-command';
 import './fulfillment-finance-workbench.css';
 
 export type FulfillmentSection = 'warehouse' | 'linehaul' | 'tracking' | 'finance';
@@ -48,6 +56,7 @@ export type FulfillmentFinanceOperationId =
   | 'settleClaim'
   | 'placeShipmentHold'
   | 'releaseShipmentHold'
+  | 'requestShipmentHoldReleaseApproval'
   | 'generateCharges'
   | 'reviewCharge'
   | 'unreviewCharge'
@@ -76,7 +85,8 @@ export type FulfillmentFinanceOperationId =
   | 'closePaymentOrder'
   | 'createPaymentRefund'
   | 'reconcilePayments'
-  | 'queryBusinessReport';
+  | 'queryBusinessReport'
+  | 'retryNotificationDelivery';
 
 export interface FulfillmentFinanceCommand {
   domain: FulfillmentSection;
@@ -87,8 +97,30 @@ export interface FulfillmentFinanceCommand {
   payload?: Record<string, unknown>;
 }
 
+export type FulfillmentFinanceCommandEvidence =
+  | { kind: 'audit'; auditId: string }
+  | { kind: 'trace'; requestId: string }
+  | { kind: 'resource'; resourceId: string };
+
+export interface FulfillmentFinanceCommandResult {
+  evidence: FulfillmentFinanceCommandEvidence;
+  resource?: {
+    id: string;
+    version: number;
+  };
+}
+
+export interface FulfillmentFinanceResourceSnapshot {
+  evidence: FulfillmentFinanceCommandEvidence;
+  resource: {
+    id: string;
+    version: number;
+  };
+}
+
 export interface FulfillmentFinanceCommandPort {
-  execute(command: FulfillmentFinanceCommand): Promise<{ auditId: string }>;
+  execute(command: FulfillmentFinanceCommand): Promise<FulfillmentFinanceCommandResult>;
+  reloadResource?(entityRef: string): Promise<FulfillmentFinanceResourceSnapshot>;
 }
 
 export interface FulfillmentFinanceWorkbenchProps {
@@ -96,6 +128,7 @@ export interface FulfillmentFinanceWorkbenchProps {
   initialViewState?: WorkbenchViewState;
   commandPort: FulfillmentFinanceCommandPort;
   onSectionChange?: (section: FulfillmentSection) => void;
+  showScenarioControls?: boolean;
 }
 
 type RunCommand = (
@@ -104,22 +137,7 @@ type RunCommand = (
   onResolved?: () => void
 ) => Promise<void>;
 
-function command(
-  domain: FulfillmentSection,
-  operationId: FulfillmentFinanceOperationId,
-  entityRef: string,
-  expectedVersion = 1,
-  payload?: Record<string, unknown>
-): FulfillmentFinanceCommand {
-  return {
-    domain,
-    operationId,
-    entityRef,
-    idempotencyKey: `${operationId}:${entityRef}:v${expectedVersion}`,
-    expectedVersion,
-    payload,
-  };
-}
+const command = createFulfillmentCommand;
 
 const measurement = deriveMeasurement({
   expectedWeightKg: 122,
@@ -129,6 +147,19 @@ const measurement = deriveMeasurement({
   heightCm: 60,
   volumeDivisor: 6000,
 });
+
+const shipmentHoldId = '01JY8Z8F6ME4F0Y9QH2X6D4R7K';
+
+function evidenceLabel(evidence: FulfillmentFinanceCommandEvidence) {
+  switch (evidence.kind) {
+    case 'audit':
+      return `审计 ${evidence.auditId}`;
+    case 'trace':
+      return `请求追踪 ${evidence.requestId}`;
+    case 'resource':
+      return `资源 ${evidence.resourceId}`;
+  }
+}
 
 const formatMoney = (cents: number) =>
   new Intl.NumberFormat('zh-CN', {
@@ -594,7 +625,7 @@ function WarehouseWorkbench({ runCommand }: { runCommand: RunCommand }) {
                   variant="secondary"
                   onClick={() =>
                     runCommand(
-                      command('warehouse', 'createPrintJob', 'S2505120004', 7, {
+                      command('warehouse', 'createPrintJob', 'S2505120004', undefined, {
                         documentType: 'HANDOVER',
                         copies: 1,
                       }),
@@ -706,7 +737,13 @@ const loadRows: LoadRow[] = [
   },
 ];
 
-function LinehaulWorkbench({ runCommand }: { runCommand: RunCommand }) {
+function LinehaulWorkbench({
+  runCommand,
+  scenario,
+}: {
+  runCommand: RunCommand;
+  scenario: OpsFlowSelection;
+}) {
   const [selected, setSelected] = useState<string[]>([]);
   const [partnerState, setPartnerState] = useState('等待同步');
   const columns: DataTableColumn<LoadRow>[] = [
@@ -834,6 +871,7 @@ function LinehaulWorkbench({ runCommand }: { runCommand: RunCommand }) {
             <li>交接单已打印</li>
           </ul>
           <Button
+            disabled={scenario.stateId !== 'normal'}
             onClick={() =>
               runCommand(
                 command('linehaul', 'dispatchLoadUnit', 'CNT-SZX-260722-01', 4),
@@ -1085,7 +1123,7 @@ function TrackingWorkbench({ runCommand }: { runCommand: RunCommand }) {
           <Button
             onClick={() =>
               runCommand(
-                command('tracking', 'releaseShipmentHold', 'HOLD-S2505120004', 2, {
+                command('tracking', 'releaseShipmentHold', shipmentHoldId, 2, {
                   reason: '审批通过',
                 }),
                 '扣货已解除，运单恢复履约',
@@ -1305,13 +1343,24 @@ const financeRows: FinanceRow[] = [
   },
 ];
 
-function FinanceWorkbench({ runCommand }: { runCommand: RunCommand }) {
+function FinanceWorkbench({
+  runCommand,
+  scenario,
+  commandPending,
+}: {
+  runCommand: RunCommand;
+  scenario: OpsFlowSelection;
+  commandPending: boolean;
+}) {
   const [selected, setSelected] = useState(['4']);
   const [dangerOpen, setDangerOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('全部');
   const [workflowState, setWorkflowState] = useState('选择流程并提交后显示服务端结果');
   const selectedCharge = financeRows.find((row) => row.id === '4')!;
+  const allocationBlocked =
+    scenario.flowId === 'F06' && ['stale-allocate', 'danger-unreview'].includes(scenario.stateId);
+  const paymentBlocked = scenario.flowId === 'F07' && scenario.stateId === 'forbidden-pay';
   const columns: DataTableColumn<FinanceRow>[] = [
     {
       key: 'waybill',
@@ -1458,6 +1507,7 @@ function FinanceWorkbench({ runCommand }: { runCommand: RunCommand }) {
                 </Button>
                 <Button
                   variant="secondary"
+                  disabled={allocationBlocked}
                   onClick={() =>
                     runCommand(
                       command('finance', 'allocateReceipt', 'RCT-20260722-03', 6, {
@@ -1561,7 +1611,11 @@ function FinanceWorkbench({ runCommand }: { runCommand: RunCommand }) {
             >
               审核通过
             </Button>
-            <Button variant="danger" onClick={() => setDangerOpen(true)}>
+            <Button
+              variant="danger"
+              disabled={scenario.flowId === 'F06' && scenario.stateId === 'danger-unreview'}
+              onClick={() => setDangerOpen(true)}
+            >
               反审核
             </Button>
           </div>
@@ -1730,6 +1784,13 @@ function FinanceWorkbench({ runCommand }: { runCommand: RunCommand }) {
           ).map(([label, operationId, entityRef, version, result]) => (
             <button
               key={operationId}
+              disabled={
+                (operationId === 'reverseAllocation' && allocationBlocked) ||
+                ((['createDisbursement', 'allocateDisbursement'] as string[]).includes(
+                  operationId
+                ) &&
+                  paymentBlocked)
+              }
               onClick={() =>
                 runCommand(
                   command('finance', operationId, entityRef, version, {
@@ -1757,12 +1818,16 @@ function FinanceWorkbench({ runCommand }: { runCommand: RunCommand }) {
         onOpenChange={setDangerOpen}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setDangerOpen(false)}>
+            <Button
+              variant="secondary"
+              disabled={commandPending}
+              onClick={() => setDangerOpen(false)}
+            >
               取消
             </Button>
             <Button
               variant="danger"
-              disabled={reason.trim().length < 5}
+              disabled={reason.trim().length < 5 || commandPending}
               onClick={() => {
                 const validated = buildDangerousFinanceCommand({
                   action: 'UNREVIEW_CHARGE',
@@ -1821,6 +1886,7 @@ export function FulfillmentFinanceWorkbench({
   initialViewState = 'normal',
   commandPort,
   onSectionChange,
+  showScenarioControls = false,
 }: FulfillmentFinanceWorkbenchProps) {
   const [section, setSection] = useState<FulfillmentSection>(initialSection);
   const [viewState, setViewState] = useState<WorkbenchViewState>(initialViewState);
@@ -1831,6 +1897,25 @@ export function FulfillmentFinanceWorkbench({
     | null
   >(null);
   const [auditCount, setAuditCount] = useState(0);
+  const [scenario, setScenario] = useState<OpsFlowSelection>(() => ({
+    flowId:
+      initialSection === 'warehouse'
+        ? 'F03'
+        : initialSection === 'linehaul'
+          ? 'F04'
+          : initialSection === 'tracking'
+            ? 'F05'
+            : 'F06',
+    stateId: 'normal',
+  }));
+  const [dispatchConfirmationOpen, setDispatchConfirmationOpen] = useState(false);
+  const [dispatchChecklistConfirmed, setDispatchChecklistConfirmed] = useState(false);
+  const [scenarioUnreviewOpen, setScenarioUnreviewOpen] = useState(false);
+  const [scenarioUnreviewReason, setScenarioUnreviewReason] = useState('');
+  const [commandPending, setCommandPending] = useState(false);
+  const commandPendingRef = useRef(false);
+  const auditedCommandKeysRef = useRef(new Set<string>());
+  const authoritativeVersionsRef = useRef(new Map<string, number>());
   const active = navItems.find((item) => item.id === section)!;
   const scenarioFlows: OpsFlowId[] =
     section === 'warehouse'
@@ -1841,28 +1926,269 @@ export function FulfillmentFinanceWorkbench({
           ? ['F05']
           : ['F06', 'F07'];
 
+  const prepareCommand = (nextCommand: FulfillmentFinanceCommand) => {
+    const expectedVersion =
+      authoritativeVersionsRef.current.get(nextCommand.entityRef) ?? nextCommand.expectedVersion;
+    if (expectedVersion === undefined || expectedVersion === nextCommand.expectedVersion) {
+      return nextCommand;
+    }
+    return createFulfillmentCommand(
+      nextCommand.domain,
+      nextCommand.operationId,
+      nextCommand.entityRef,
+      expectedVersion,
+      nextCommand.payload
+    );
+  };
+
+  const acceptAuthoritativeVersion = (
+    executedCommand: FulfillmentFinanceCommand,
+    result: FulfillmentFinanceCommandResult
+  ) => {
+    if (
+      requiresAuthoritativeResource(executedCommand) &&
+      (!result.resource ||
+        result.resource.id !== executedCommand.entityRef ||
+        !Number.isInteger(result.resource.version))
+    ) {
+      throw new DomainApiError('服务端资源回执缺失或与当前命令不匹配', {
+        code: 'FULFILLMENT_RESOURCE_RECEIPT_INVALID',
+      });
+    }
+    if (!result.resource || result.resource.id !== executedCommand.entityRef) return;
+    if (
+      executedCommand.expectedVersion !== undefined &&
+      result.resource.version <= executedCommand.expectedVersion
+    ) {
+      throw new DomainApiError('服务端资源版本未推进', {
+        code: 'FULFILLMENT_VERSION_NOT_ADVANCED',
+      });
+    }
+    authoritativeVersionsRef.current.set(result.resource.id, result.resource.version);
+  };
+
+  const normalizeCommandError = (error: unknown, failedCommand: FulfillmentFinanceCommand) => {
+    const domainError = toDomainApiError(error);
+    if (
+      domainError.status === 412 ||
+      domainError.code === 'PRECONDITION_FAILED' ||
+      domainError.code === 'STALE_VERSION'
+    ) {
+      if (failedCommand.domain === 'linehaul') {
+        setScenario({ flowId: 'F04', stateId: 'stale-load' });
+      } else {
+        setViewState('stale');
+      }
+    }
+    return domainError;
+  };
+
   const runCommand: RunCommand = async (nextCommand, successMessage, onResolved) => {
-    setFeedback({ kind: 'pending', message: `正在提交 ${nextCommand.operationId}` });
+    if (commandPendingRef.current) return;
+    const executedCommand = prepareCommand(nextCommand);
+    commandPendingRef.current = true;
+    setCommandPending(true);
+    setFeedback({ kind: 'pending', message: `正在提交 ${executedCommand.operationId}` });
     try {
-      const result = await commandPort.execute(nextCommand);
+      const result = await commandPort.execute(executedCommand);
+      acceptAuthoritativeVersion(executedCommand, result);
       onResolved?.();
-      setAuditCount((count) => count + 1);
+      if (
+        result.evidence.kind === 'audit' &&
+        !auditedCommandKeysRef.current.has(executedCommand.idempotencyKey)
+      ) {
+        auditedCommandKeysRef.current.add(executedCommand.idempotencyKey);
+        setAuditCount((count) => count + 1);
+      }
       setFeedback({
         kind: 'success',
-        message: `${successMessage} · 审计 ${result.auditId}`,
+        message: `${successMessage} · ${evidenceLabel(result.evidence)}`,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '命令执行失败';
-      setFeedback({ kind: 'error', message: `操作失败：${message}。输入与幂等键已保留，可重试。` });
+      const domainError = normalizeCommandError(error, executedCommand);
+      setFeedback({
+        kind: 'error',
+        message: `操作失败：${domainError.message}。输入与幂等键已保留，可重试。`,
+      });
+    } finally {
+      commandPendingRef.current = false;
+      setCommandPending(false);
+    }
+  };
+
+  const executeScenarioCommand = async (
+    nextCommand: FulfillmentFinanceCommand,
+    message: string
+  ): Promise<FlowStateActionResult> => {
+    if (commandPendingRef.current) throw new Error('已有命令正在执行，请等待完成');
+    const executedCommand = prepareCommand(nextCommand);
+    commandPendingRef.current = true;
+    setCommandPending(true);
+    try {
+      const result = await commandPort.execute(executedCommand);
+      acceptAuthoritativeVersion(executedCommand, result);
+      if (
+        result.evidence.kind === 'audit' &&
+        !auditedCommandKeysRef.current.has(executedCommand.idempotencyKey)
+      ) {
+        auditedCommandKeysRef.current.add(executedCommand.idempotencyKey);
+        setAuditCount((count) => count + 1);
+      }
+      return {
+        message,
+        evidence: {
+          kind: 'server',
+          operationId: executedCommand.operationId,
+          ...(result.evidence.kind === 'audit'
+            ? { auditId: result.evidence.auditId }
+            : result.evidence.kind === 'trace'
+              ? { requestId: result.evidence.requestId }
+              : { resourceId: result.evidence.resourceId }),
+        },
+      };
+    } catch (error) {
+      throw normalizeCommandError(error, executedCommand);
+    } finally {
+      commandPendingRef.current = false;
+      setCommandPending(false);
+    }
+  };
+
+  const runScenarioAction = async (
+    request: FlowStateActionRequest
+  ): Promise<FlowStateActionResult> => {
+    switch (request.actionId) {
+      case 'attach-receipt-evidence':
+        return executeScenarioCommand(
+          command('warehouse', 'attachReceiptMedia', 'RCV-S2505120004', 7, {
+            evidenceTypes: ['CARTON_FRONT', 'WEIGHT_READING'],
+            retry: true,
+          }),
+          '收货证据补拍任务已提交，可继续关闭问题件'
+        );
+      case 'retry-issue-notification':
+        return executeScenarioCommand(
+          command('tracking', 'retryNotificationDelivery', 'NTF-260723-92', 1, {
+            source: 'ISS-260723-019',
+          }),
+          '问题件通知已重新排队'
+        );
+      case 'download-load-report':
+        return {
+          message: 'clientAction 已生成装载兼容失败报告',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F04-REPORT' },
+          download: {
+            filename: 'load-compatibility-errors.csv',
+            mimeType: 'text/csv',
+            content:
+              'waybill,reason\nS2505120031,目的地不符\nS2505120042,危险品标签缺失\nS2505120050,订舱约束不匹配\n',
+          },
+        };
+      case 'reload-authoritative-load': {
+        const entityRef = 'CNT-SZX-260722-01';
+        if (!commandPort.reloadResource) {
+          throw new DomainApiError('当前命令端口不支持刷新装载单', {
+            code: 'FULFILLMENT_RELOAD_UNAVAILABLE',
+          });
+        }
+        const result = await commandPort.reloadResource(entityRef);
+        if (
+          result.resource.id !== entityRef ||
+          !Number.isInteger(result.resource.version) ||
+          result.resource.version < 1
+        ) {
+          throw new DomainApiError('服务端装载单刷新回执无效', {
+            code: 'FULFILLMENT_RELOAD_RECEIPT_INVALID',
+          });
+        }
+        authoritativeVersionsRef.current.set(entityRef, result.resource.version);
+        return {
+          message: `装载单已刷新到版本 ${result.resource.version}，可以安全重试`,
+          evidence: {
+            kind: 'server',
+            operationId: 'reloadLoadUnit',
+            ...(result.evidence.kind === 'audit'
+              ? { auditId: result.evidence.auditId }
+              : result.evidence.kind === 'trace'
+                ? { requestId: result.evidence.requestId }
+                : { resourceId: result.evidence.resourceId }),
+          },
+          recoverToStateId: 'normal',
+        };
+      }
+      case 'request-release-approval':
+        return executeScenarioCommand(
+          command('tracking', 'requestShipmentHoldReleaseApproval', shipmentHoldId, 2, {
+            reason: '信用扣货待财务放货审批',
+            requestedAction: 'RELEASE',
+          }),
+          '放货审批已提交财务复核'
+        );
+      case 'open-dispatch-confirmation':
+        setDispatchChecklistConfirmed(false);
+        setDispatchConfirmationOpen(true);
+        return {
+          message: 'clientAction 已打开出仓二次确认',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F04-DISPATCH-CHECK' },
+        };
+      case 'retry-carrier-sync':
+        return executeScenarioCommand(
+          command('tracking', 'syncLastMilePartner', 'DHL', 12, {
+            waybillNo: 'S2505120004',
+            retry: true,
+          }),
+          '承运商轨迹同步已重新提交'
+        );
+      case 'retry-customer-notification':
+        return executeScenarioCommand(
+          command('tracking', 'retryNotificationDelivery', 'NTF-260723-91', 1, {
+            source: 'S2505120004',
+          }),
+          '客户通知已重新排队'
+        );
+      case 'inspect-unreview-impact':
+        setScenarioUnreviewReason('');
+        setScenarioUnreviewOpen(true);
+        return {
+          message: 'clientAction 已加载反审核影响范围',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F06-UNREVIEW-IMPACT' },
+        };
+      case 'download-payable-report':
+        return {
+          message: 'clientAction 已生成应付导入错误报告',
+          evidence: { kind: 'local', evidenceId: 'CLIENT-F07-REPORT' },
+          download: {
+            filename: 'payable-import-errors.csv',
+            mimeType: 'text/csv',
+            content: 'sheet,row,column,error\n应付明细,183,F,费用编码缺失\n',
+          },
+        };
+      case 'retry-failed-payables':
+        return executeScenarioCommand(
+          command('finance', 'validatePayableImport', 'PIMP-20260722-08', 1, {
+            failedOnly: true,
+            rowIds: [99, 100],
+          }),
+          '失败应付行已重新校验，成功项未重复提交'
+        );
+      default:
+        throw new Error(`当前履约工作区不支持动作 ${request.actionId}`);
     }
   };
 
   const renderSection = () => {
     if (viewState !== 'normal') return viewStateEvidence[viewState];
     if (section === 'warehouse') return <WarehouseWorkbench runCommand={runCommand} />;
-    if (section === 'linehaul') return <LinehaulWorkbench runCommand={runCommand} />;
+    if (section === 'linehaul')
+      return <LinehaulWorkbench runCommand={runCommand} scenario={scenario} />;
     if (section === 'tracking') return <TrackingWorkbench runCommand={runCommand} />;
-    return <FinanceWorkbench runCommand={runCommand} />;
+    return (
+      <FinanceWorkbench
+        runCommand={runCommand}
+        scenario={scenario}
+        commandPending={commandPending}
+      />
+    );
   };
 
   return (
@@ -1875,10 +2201,25 @@ export function FulfillmentFinanceWorkbench({
         {navItems.map((item) => (
           <button
             key={item.id}
+            aria-label={item.label}
+            title={item.label}
             data-active={section === item.id}
             aria-current={section === item.id ? 'page' : undefined}
             onClick={() => {
               setSection(item.id);
+              setScenario({
+                flowId:
+                  item.id === 'warehouse'
+                    ? 'F03'
+                    : item.id === 'linehaul'
+                      ? 'F04'
+                      : item.id === 'tracking'
+                        ? 'F05'
+                        : 'F06',
+                stateId: 'normal',
+              });
+              setDispatchConfirmationOpen(false);
+              setScenarioUnreviewOpen(false);
               setFeedback(null);
               onSectionChange?.(item.id);
             }}
@@ -1901,31 +2242,42 @@ export function FulfillmentFinanceWorkbench({
             <span>运营工作台 / {active.label}</span>
             <strong>{active.description}</strong>
           </div>
-          <label>
-            验收状态
-            <select
-              aria-label="验收状态"
-              value={viewState}
-              onChange={(event) => setViewState(event.target.value as WorkbenchViewState)}
-            >
-              {[
-                ['normal', '正常'],
-                ['loading', '加载'],
-                ['empty', '空'],
-                ['failed', '失败'],
-                ['forbidden', '无权限'],
-                ['stale', '过期'],
-                ['partial', '部分成功'],
-              ].map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {showScenarioControls ? (
+            <label>
+              验收状态
+              <select
+                aria-label="验收状态"
+                value={viewState}
+                onChange={(event) => setViewState(event.target.value as WorkbenchViewState)}
+              >
+                {[
+                  ['normal', '正常'],
+                  ['loading', '加载'],
+                  ['empty', '空'],
+                  ['failed', '失败'],
+                  ['forbidden', '无权限'],
+                  ['stale', '过期'],
+                  ['partial', '部分成功'],
+                ].map(([value, label]) => (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
         </header>
         <div className="ff-content">
-          <FlowStatePanel key={section} flows={scenarioFlows} initialFlow={scenarioFlows[0]} />
+          {showScenarioControls || scenario.stateId !== 'normal' ? (
+            <FlowStatePanel
+              key={`${section}:${scenario.flowId}:${scenario.stateId}`}
+              flows={scenarioFlows as [OpsFlowId, ...OpsFlowId[]]}
+              value={scenario}
+              onChange={setScenario}
+              onAction={runScenarioAction}
+              controlsVisible={showScenarioControls}
+            />
+          ) : null}
           {renderSection()}
         </div>
         {feedback ? (
@@ -1948,6 +2300,113 @@ export function FulfillmentFinanceWorkbench({
           </div>
         ) : null}
       </main>
+      <Dialog
+        open={dispatchConfirmationOpen}
+        title="出仓危险确认"
+        description="确认后装载单封装并出仓，下游通知和不可变审计立即生效。"
+        onOpenChange={setDispatchConfirmationOpen}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              disabled={commandPending}
+              onClick={() => setDispatchConfirmationOpen(false)}
+            >
+              返回检查
+            </Button>
+            <Button
+              variant="danger"
+              disabled={!dispatchChecklistConfirmed || commandPending}
+              onClick={() =>
+                runCommand(
+                  command('linehaul', 'dispatchLoadUnit', 'CNT-SZX-260722-01', 4, {
+                    confirmedIssues: 2,
+                    printedDocuments: 40,
+                  }),
+                  '装载单 CNT-SZX-260722-01 已确认出库',
+                  () => {
+                    setScenario({ flowId: 'F04', stateId: 'normal' });
+                    setDispatchConfirmationOpen(false);
+                    setDispatchChecklistConfirmed(false);
+                  }
+                )
+              }
+            >
+              确认出库并记录审计
+            </Button>
+          </>
+        }
+      >
+        <div className="ff-danger-grid">
+          <div>
+            <strong>出仓影响</strong>
+            <p>42 票 / 5,187.20 kg；当前仍有 2 项未关闭问题。</p>
+          </div>
+          <div>
+            <strong>打印与交接</strong>
+            <p>打印完成 40 / 42；确认后必须在审计中说明差异。</p>
+          </div>
+          <label>
+            <input
+              type="checkbox"
+              checked={dispatchChecklistConfirmed}
+              onChange={(event) => setDispatchChecklistConfirmed(event.target.checked)}
+            />
+            已核对未关闭问题与打印清单
+          </label>
+        </div>
+      </Dialog>
+      <Dialog
+        open={scenarioUnreviewOpen}
+        title="反审核影响范围"
+        description="场景操作会解除费用锁定，并要求重新检查支付分配和期间。"
+        onOpenChange={setScenarioUnreviewOpen}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              disabled={commandPending}
+              onClick={() => setScenarioUnreviewOpen(false)}
+            >
+              取消
+            </Button>
+            <Button
+              variant="danger"
+              disabled={scenarioUnreviewReason.trim().length < 5 || commandPending}
+              onClick={() =>
+                runCommand(
+                  command('finance', 'unreviewCharge', 'CHG-S2505120004', 11, {
+                    reason: scenarioUnreviewReason.trim(),
+                    impact: '账单、支付分配与期间 2026-07 需要重算',
+                    auditDestination: 'audit://finance/charges/CHG-S2505120004',
+                  }),
+                  '场景反审核已提交',
+                  () => {
+                    setScenario({ flowId: 'F06', stateId: 'normal' });
+                    setScenarioUnreviewOpen(false);
+                    setScenarioUnreviewReason('');
+                  }
+                )
+              }
+            >
+              确认反审核并记录审计
+            </Button>
+          </>
+        }
+      >
+        <div className="ff-danger-grid">
+          <div>
+            <strong>影响范围</strong>
+            <p>账单 ST202605-0008 解锁；期间 2026-07 需要重算；已核销 CNY 3,000.00 需复核。</p>
+          </div>
+        </div>
+        <Input
+          label="场景反审核原因"
+          value={scenarioUnreviewReason}
+          onChange={(event) => setScenarioUnreviewReason(event.target.value)}
+          hint="至少填写 5 个字；提交后进入不可变审计。"
+        />
+      </Dialog>
     </div>
   );
 }

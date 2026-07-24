@@ -1,5 +1,29 @@
 export type OpsFlowId = 'F02' | 'F03' | 'F04' | 'F05' | 'F06' | 'F07' | 'F10';
 
+export type OpsFlowActionId =
+  | 'locate-quote-fields'
+  | 'compare-rate-rules'
+  | 'requote-current-rules'
+  | 'attach-receipt-evidence'
+  | 'retry-issue-notification'
+  | 'download-load-report'
+  | 'reload-authoritative-load'
+  | 'request-release-approval'
+  | 'open-dispatch-confirmation'
+  | 'retry-carrier-sync'
+  | 'retry-customer-notification'
+  | 'inspect-unreview-impact'
+  | 'download-payable-report'
+  | 'retry-failed-payables'
+  | 'open-manual-mapping'
+  | 'inspect-import-rollback';
+
+export interface OpsFlowActionDefinition {
+  id: OpsFlowActionId;
+  label: string;
+  kind: 'command' | 'clientAction';
+}
+
 export interface OpsFlowStateDefinition {
   id: string;
   label: string;
@@ -8,9 +32,7 @@ export interface OpsFlowStateDefinition {
   evidence: string[];
   tone: 'info' | 'warning' | 'danger';
   role: 'alert' | 'status';
-  primaryAction?: string;
-  actionFeedback?: string;
-  recoverOnPrimary?: boolean;
+  action?: OpsFlowActionDefinition;
 }
 
 export interface OpsFlowDefinition {
@@ -43,8 +65,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['缺失目的地邮编末段', '单件重量超过空运限制', '可切换洛杉矶替代仓'],
         tone: 'danger',
         role: 'alert',
-        primaryAction: '定位缺失字段',
-        actionFeedback: '已定位 3 个可修复字段',
+        action: { id: 'locate-quote-fields', label: '定位缺失字段', kind: 'clientAction' },
       },
       {
         id: 'stale-rate',
@@ -54,8 +75,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['当前快照 v18', '服务器价卡 v19', '预计销售价变化 +2.4%'],
         tone: 'warning',
         role: 'alert',
-        primaryAction: '比较规则 diff',
-        actionFeedback: '规则差异已展开',
+        action: { id: 'compare-rate-rules', label: '比较规则 diff', kind: 'clientAction' },
       },
       {
         id: 'masked-cost',
@@ -74,9 +94,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['原报价快照 QV-20260723-18', '原金额 CNY 5,320.00', '17:30 已过期'],
         tone: 'danger',
         role: 'alert',
-        primaryAction: '按当前规则重算',
-        actionFeedback: '已按当前规则生成新报价',
-        recoverOnPrimary: true,
+        action: { id: 'requote-current-rules', label: '按当前规则重算', kind: 'command' },
       },
     ],
   },
@@ -93,8 +111,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['缺少整箱正面照片', '缺少重量读数照片', '规则 EVIDENCE-06'],
         tone: 'danger',
         role: 'alert',
-        primaryAction: '补拍并重试',
-        actionFeedback: '补拍任务已创建',
+        action: { id: 'attach-receipt-evidence', label: '补拍并重试', kind: 'command' },
       },
       {
         id: 'stale',
@@ -122,8 +139,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['ISS-260723-019 = OPEN', 'Job NTF-260723-92 = FAILED'],
         tone: 'warning',
         role: 'status',
-        primaryAction: '重试通知',
-        actionFeedback: '通知 Job 已重新排队',
+        action: { id: 'retry-issue-notification', label: '重试通知', kind: 'command' },
       },
     ],
   },
@@ -140,8 +156,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['S2505120031：目的地不符', 'S2505120042：危险品标签缺失', '原装载单未改变'],
         tone: 'danger',
         role: 'alert',
-        primaryAction: '下载失败报告',
-        actionFeedback: '失败报告已生成',
+        action: { id: 'download-load-report', label: '下载失败报告', kind: 'clientAction' },
       },
       {
         id: 'stale-load',
@@ -151,6 +166,11 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['本地版本 7', '服务器版本 8', '陈敏已移除 1 票运单'],
         tone: 'warning',
         role: 'alert',
+        action: {
+          id: 'reload-authoritative-load',
+          label: '刷新装载单版本',
+          kind: 'command',
+        },
       },
       {
         id: 'forbidden-release',
@@ -160,8 +180,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['缺失动作 hold.release', '欠款 CNY 86,420', '需要财务复核'],
         tone: 'danger',
         role: 'alert',
-        primaryAction: '发起放货审批',
-        actionFeedback: '放货审批已创建',
+        action: { id: 'request-release-approval', label: '发起放货审批', kind: 'command' },
       },
       {
         id: 'danger-dispatch',
@@ -171,8 +190,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['42 票 / 5,187.20 kg', '未关闭问题 2 项', '打印完成 40 / 42'],
         tone: 'warning',
         role: 'alert',
-        primaryAction: '进入二次确认',
-        actionFeedback: '二次确认已打开',
+        action: { id: 'open-dispatch-confirmation', label: '进入二次确认', kind: 'clientAction' },
       },
     ],
   },
@@ -189,8 +207,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['GATEWAY_TIMEOUT', '最后同步 14:28', '下次重试 15:05'],
         tone: 'danger',
         role: 'alert',
-        primaryAction: '立即重试',
-        actionFeedback: '同步任务已重新排队',
+        action: { id: 'retry-carrier-sync', label: '立即重试', kind: 'command' },
       },
       {
         id: 'out-of-order',
@@ -218,8 +235,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['工单 CLOSED', 'SLA 已停止', '通知 NTF-260723-91 失败'],
         tone: 'warning',
         role: 'status',
-        primaryAction: '重试通知',
-        actionFeedback: '客户通知已重新排队',
+        action: { id: 'retry-customer-notification', label: '重试通知', kind: 'command' },
       },
     ],
   },
@@ -263,8 +279,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['解除分配 CNY 2,320.00', '期间 2026-07 需要重算'],
         tone: 'warning',
         role: 'alert',
-        primaryAction: '查看影响范围',
-        actionFeedback: '已展开账单与期间影响',
+        action: { id: 'inspect-unreview-impact', label: '查看影响范围', kind: 'clientAction' },
       },
     ],
   },
@@ -281,8 +296,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['Sheet 应付明细', 'Row 183 / Column F', '费用编码缺失'],
         tone: 'danger',
         role: 'alert',
-        primaryAction: '下载错误报告',
-        actionFeedback: '错误报告已生成',
+        action: { id: 'download-payable-report', label: '下载错误报告', kind: 'clientAction' },
       },
       {
         id: 'partial',
@@ -292,8 +306,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['成功清单 98 条', '失败清单 2 条', '回滚边界 BATCH-20260723-20'],
         tone: 'warning',
         role: 'status',
-        primaryAction: '只重试失败项',
-        actionFeedback: '失败清单已保留，等待重新校验',
+        action: { id: 'retry-failed-payables', label: '只重试失败项', kind: 'command' },
       },
       {
         id: 'stale-cost',
@@ -328,8 +341,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['模型 Zhili-Map 2.1', '提示版本 prompt-17', '最低置信度：收件州 42%'],
         tone: 'warning',
         role: 'alert',
-        primaryAction: '进入人工映射',
-        actionFeedback: '手工映射模式已开启',
+        action: { id: 'open-manual-mapping', label: '进入人工映射', kind: 'clientAction' },
       },
       {
         id: 'failed-model',
@@ -339,8 +351,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['MODEL_TIMEOUT', '原始文件已保留'],
         tone: 'danger',
         role: 'alert',
-        primaryAction: '进入手工映射',
-        actionFeedback: '手工映射模式已开启',
+        action: { id: 'open-manual-mapping', label: '进入手工映射', kind: 'clientAction' },
       },
       {
         id: 'forbidden',
@@ -359,8 +370,7 @@ export const opsFlowCatalog: Record<OpsFlowId, OpsFlowDefinition> = {
         evidence: ['可逆写入 1,238 条', '外部副作用 2 项', '审计永久保留'],
         tone: 'warning',
         role: 'alert',
-        primaryAction: '查看回滚边界',
-        actionFeedback: '已展开外部副作用与回滚清单',
+        action: { id: 'inspect-import-rollback', label: '查看回滚边界', kind: 'clientAction' },
       },
     ],
   },

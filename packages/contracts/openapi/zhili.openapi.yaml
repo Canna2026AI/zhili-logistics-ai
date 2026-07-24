@@ -3042,6 +3042,37 @@ paths:
           $ref: '#/components/responses/StaleVersion'
         '422':
           $ref: '#/components/responses/StateTransitionFailed'
+  /shipment-holds/{holdId}:request-release-approval:
+    parameters:
+      - name: holdId
+        in: path
+        required: true
+        schema: {$ref: '#/components/schemas/Ulid'}
+    post:
+      tags: [Orders]
+      operationId: requestShipmentHoldReleaseApproval
+      summary: Request approval to release a shipment hold
+      x-feature-id: CRM-02
+      x-permission: hold.release.request
+      x-audit-event: shipment.hold.release-approval-requested
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/IfMatch'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ShipmentHoldReleaseApprovalRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/CommandSucceeded'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/StaleVersion'
+        '422':
+          $ref: '#/components/responses/StateTransitionFailed'
   /rates/channel-products:upsert:
     post:
       tags: [Rates]
@@ -7336,8 +7367,9 @@ components:
     ApplyAiMappingsRequest:
       type: object
       additionalProperties: false
-      required: [proposalVersion, acceptedMappingIds]
+      required: [proposalId, proposalVersion, acceptedMappingIds]
       properties:
+        proposalId: {$ref: '#/components/schemas/Ulid'}
         proposalVersion: {type: integer, minimum: 1}
         acceptedMappingIds: {type: array, minItems: 1, items: {$ref: '#/components/schemas/Ulid'}}
         rejectedMappingIds: {type: array, items: {$ref: '#/components/schemas/Ulid'}}
@@ -8444,6 +8476,13 @@ components:
       description: Audited shipment hold or authorized release command.
       allOf:
         - $ref: '#/components/schemas/DomainRecord'
+    ShipmentHoldReleaseApprovalRequest:
+      type: object
+      additionalProperties: false
+      required: [reason, requestedAction]
+      properties:
+        reason: {type: string, minLength: 5, maxLength: 500}
+        requestedAction: {type: string, const: RELEASE}
     WarehouseScan:
       description: Idempotent warehouse scan event and matched forecast.
       allOf:

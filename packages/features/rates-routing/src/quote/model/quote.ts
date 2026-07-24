@@ -29,6 +29,9 @@ export interface CalculatedOption {
 export interface CalculatedQuote {
   id: string;
   quoteNo: string;
+  status?: 'DRAFT' | 'CALCULATED' | 'ACCEPTED' | 'EXPIRED';
+  acceptedOptionId?: string | null;
+  validUntil?: string;
   version: number;
   chargeableWeightKg: string;
   volumeWeightKg: string;
@@ -76,15 +79,33 @@ export interface QuoteActionResult {
 export interface QuotePort {
   create(request: QuoteWorkflowRequest): Promise<CalculatedQuote>;
   explain(snapshot: QuoteSnapshotRef): Promise<QuoteExplanationView>;
-  accept(quoteId: string, optionId: string, version: number): Promise<QuoteActionResult>;
+  accept(quoteId: string, optionId: string, version: number): Promise<CalculatedQuote>;
   saveDraft(request: QuoteWorkflowRequest): Promise<QuoteActionResult>;
   submitForecast(quoteId: string, optionId: string, version: number): Promise<QuoteActionResult>;
+}
+
+export type QuoteAcceptabilityCode =
+  'QUOTE_NOT_ACCEPTABLE' | 'QUOTE_EXPIRED' | 'QUOTE_OPTIONS_UNAVAILABLE';
+
+export function quoteAcceptabilityCode(
+  quote: CalculatedQuote,
+  now = Date.now()
+): QuoteAcceptabilityCode | undefined {
+  if (quote.status !== 'CALCULATED') return 'QUOTE_NOT_ACCEPTABLE';
+  const validUntil = Date.parse(quote.validUntil ?? '');
+  if (!Number.isFinite(validUntil) || validUntil <= now) return 'QUOTE_EXPIRED';
+  if (!quote.options.some((option) => option.available)) return 'QUOTE_OPTIONS_UNAVAILABLE';
+  return undefined;
+}
+
+export function isQuoteAcceptable(quote: CalculatedQuote, now = Date.now()) {
+  return quoteAcceptabilityCode(quote, now) === undefined;
 }
 
 export const quoteInputFixture: QuoteInputFixture = {
   volumeDivisor: 6000,
   request: {
-    customerId: 'customer-xinyuan',
+    customerId: '01JY8Z8F6ME4F0Y9QH2X6D4R7A',
     origin: {
       countryCode: 'CN',
       city: '深圳',
@@ -212,6 +233,8 @@ export function calculateQuote(input: QuoteInputFixture): CalculatedQuote {
   return {
     id: 'quote-2505120042',
     quoteNo: 'Q2505120042',
+    status: 'CALCULATED',
+    validUntil: '2099-12-31T23:59:59Z',
     version: 1,
     chargeableWeightKg: chargeableWeight.toFixed(2),
     volumeWeightKg: volumeWeight.toFixed(2),
@@ -284,7 +307,13 @@ export const memoryQuotePort: QuotePort = {
     };
   },
   async accept(_quoteId, optionId, version) {
-    return { acceptedOptionId: optionId, version: version + 1, message: '报价快照已接受' };
+    return {
+      ...calculateQuote(quoteInputFixture),
+      id: _quoteId,
+      status: 'ACCEPTED',
+      acceptedOptionId: optionId,
+      version: version + 1,
+    };
   },
   async saveDraft() {
     return { version: 1, message: '草稿 ORD-DRAFT-0268 已保存' };

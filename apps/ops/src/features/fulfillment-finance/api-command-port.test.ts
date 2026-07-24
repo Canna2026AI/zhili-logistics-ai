@@ -81,7 +81,10 @@ describe('API fulfillment finance command port', () => {
       reason: '承运商补传尾程费用',
       version: 11,
     });
-    expect(result.auditId).toBe('REQ-FIN-0098');
+    expect(result).toEqual({
+      evidence: { kind: 'trace', requestId: 'REQ-FIN-0098' },
+      resource: { id: 'CHG-S2505120004', version: 12 },
+    });
   });
 
   it('sends WH-08 print through the generated client instead of local success', async () => {
@@ -101,19 +104,18 @@ describe('API fulfillment finance command port', () => {
       domain: 'warehouse',
       operationId: 'createPrintJob',
       entityRef: 'S2505120004',
-      idempotencyKey: 'createPrintJob:S2505120004:v7',
-      expectedVersion: 7,
+      idempotencyKey: 'createPrintJob:S2505120004:vnone',
       payload: { documentType: 'HANDOVER', copies: 1 },
     });
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.url).toBe('https://api.zhili.test/v1/documents/print-jobs');
-    expect(requests[0]?.headers.get('Idempotency-Key')).toBe('createPrintJob:S2505120004:v7');
+    expect(requests[0]?.headers.get('Idempotency-Key')).toBe('createPrintJob:S2505120004:vnone');
     await expect(requests[0]?.json()).resolves.toMatchObject({
       documentType: 'HANDOVER',
       copies: 1,
     });
-    expect(result.auditId).toBe('REQ-PRINT-0001');
+    expect(result).toEqual({ evidence: { kind: 'trace', requestId: 'REQ-PRINT-0001' } });
   });
 
   it('returns a server-owned resource id for successful bare-resource responses', async () => {
@@ -135,7 +137,39 @@ describe('API fulfillment finance command port', () => {
         idempotencyKey: 'getProfitTrace:S2505120004:v11',
         expectedVersion: 11,
       })
-    ).resolves.toEqual({ auditId: 'TRACE-S2505120004' });
+    ).resolves.toEqual({
+      evidence: { kind: 'resource', resourceId: 'TRACE-S2505120004' },
+    });
+  });
+
+  it('marks only an explicit audit event identifier as audit evidence', async () => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json({
+          data: {
+            resourceId: 'CHG-S2505120004',
+            auditEventId: 'AUD-EVENT-0098',
+            status: 'DRAFT',
+            version: 12,
+          },
+          meta: { requestId: 'REQ-FIN-0098', timestamp: '2026-07-22T08:00:00Z' },
+        }),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'finance',
+        operationId: 'unreviewCharge',
+        entityRef: 'CHG-S2505120004',
+        idempotencyKey: 'unreviewCharge:CHG-S2505120004:v11',
+        expectedVersion: 11,
+        payload: { reason: '承运商补传尾程费用' },
+      })
+    ).resolves.toEqual({
+      evidence: { kind: 'audit', auditId: 'AUD-EVENT-0098' },
+      resource: { id: 'CHG-S2505120004', version: 12 },
+    });
   });
 
   it('rejects the server problem without fabricating an audit id', async () => {
@@ -164,5 +198,187 @@ describe('API fulfillment finance command port', () => {
         payload: { documentType: 'HANDOVER', copies: 1 },
       })
     ).rejects.toThrow('If-Match 7 已过期');
+  });
+
+  it('returns the authoritative resource version for a versioned mutation', async () => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json({
+          data: {
+            resourceId: 'RCV-S2505120004',
+            auditEventId: 'AUD-RCV-0008',
+            status: 'MEASURED',
+            version: 8,
+          },
+          meta: { requestId: 'REQ-RCV-0008', timestamp: '2026-07-22T08:00:00Z' },
+        }),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'warehouse',
+        operationId: 'recordMeasurement',
+        entityRef: 'RCV-S2505120004',
+        idempotencyKey: 'recordMeasurement:RCV-S2505120004:v7:test',
+        expectedVersion: 7,
+        payload: { actualWeightKg: 123.5 },
+      })
+    ).resolves.toEqual({
+      evidence: { kind: 'audit', auditId: 'AUD-RCV-0008' },
+      resource: { id: 'RCV-S2505120004', version: 8 },
+    });
+  });
+
+  it('reloads the authoritative load-unit version through the generated GET contract', async () => {
+    let request: Request | undefined;
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async (input) => {
+        request = new Request(input);
+        return Response.json({
+          data: {
+            id: 'CNT-SZX-260722-01',
+            status: 'SEALED',
+            version: 8,
+          },
+          meta: { requestId: 'REQ-LOAD-REFRESH-8', timestamp: '2026-07-22T08:00:00Z' },
+        });
+      },
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).reloadResource?.('CNT-SZX-260722-01')
+    ).resolves.toEqual({
+      evidence: { kind: 'trace', requestId: 'REQ-LOAD-REFRESH-8' },
+      resource: { id: 'CNT-SZX-260722-01', version: 8 },
+    });
+    expect(request?.method).toBe('GET');
+    expect(request?.url).toBe('https://api.zhili.test/v1/linehaul/load-units/CNT-SZX-260722-01');
+  });
+
+  it.each([
+    ['wrong resource id', { id: 'CNT-OTHER', version: 8 }],
+    ['missing resource version', { id: 'CNT-SZX-260722-01' }],
+  ])('rejects an invalid authoritative reload receipt: %s', async (_label, data) => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json({
+          data,
+          meta: { requestId: 'REQ-LOAD-INVALID', timestamp: '2026-07-22T08:00:00Z' },
+        }),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).reloadResource?.('CNT-SZX-260722-01')
+    ).rejects.toMatchObject({
+      code: 'FULFILLMENT_RELOAD_RECEIPT_INVALID',
+    });
+  });
+
+  it('fails closed when a versioned mutation does not advance the resource version', async () => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json({
+          data: {
+            resourceId: 'RCV-S2505120004',
+            status: 'MEASURED',
+            version: 7,
+          },
+          meta: { requestId: 'REQ-RCV-STALE', timestamp: '2026-07-22T08:00:00Z' },
+        }),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'warehouse',
+        operationId: 'recordMeasurement',
+        entityRef: 'RCV-S2505120004',
+        idempotencyKey: 'recordMeasurement:RCV-S2505120004:v7:test',
+        expectedVersion: 7,
+        payload: { actualWeightKg: 123.5 },
+      })
+    ).rejects.toMatchObject({ code: 'FULFILLMENT_VERSION_NOT_ADVANCED' });
+  });
+
+  it.each([
+    [
+      'missing resource',
+      {
+        data: { auditEventId: 'AUD-RCV-MISSING' },
+        meta: { requestId: 'REQ-RCV-MISSING' },
+      },
+    ],
+    [
+      'wrong resource id',
+      {
+        data: {
+          resourceId: 'RCV-OTHER',
+          auditEventId: 'AUD-RCV-WRONG',
+          version: 8,
+        },
+        meta: { requestId: 'REQ-RCV-WRONG' },
+      },
+    ],
+    [
+      'missing resource version',
+      {
+        data: {
+          resourceId: 'RCV-S2505120004',
+          auditEventId: 'AUD-RCV-NOVERSION',
+        },
+        meta: { requestId: 'REQ-RCV-NOVERSION' },
+      },
+    ],
+  ])('fails closed for a versioned mutation with %s', async (_label, responseBody) => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () => Response.json(responseBody),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'warehouse',
+        operationId: 'recordMeasurement',
+        entityRef: 'RCV-S2505120004',
+        idempotencyKey: 'recordMeasurement:RCV-S2505120004:v7:test',
+        expectedVersion: 7,
+        payload: { actualWeightKg: 123.5 },
+      })
+    ).rejects.toMatchObject({ code: 'FULFILLMENT_RESOURCE_RECEIPT_INVALID' });
+  });
+
+  it('preserves the generated-client 412 as a typed domain error', async () => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json(
+          {
+            status: 412,
+            code: 'PRECONDITION_FAILED',
+            detail: '装载单已推进到版本 8',
+            remediation: '刷新装载单后重试',
+            requestId: 'REQ-LOAD-412',
+          },
+          { status: 412 }
+        ),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'linehaul',
+        operationId: 'dispatchLoadUnit',
+        entityRef: 'CNT-SZX-260722-01',
+        idempotencyKey: 'dispatchLoadUnit:CNT-SZX-260722-01:v4:test',
+        expectedVersion: 4,
+      })
+    ).rejects.toMatchObject({
+      name: 'DomainApiError',
+      status: 412,
+      code: 'PRECONDITION_FAILED',
+      requestId: 'REQ-LOAD-412',
+    });
   });
 });

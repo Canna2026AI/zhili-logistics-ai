@@ -30,7 +30,8 @@ test('F1A 下单报价保留标准数据、查价解释与唯一主命令', asyn
   await page.setViewportSize({ width: 1585, height: 992 });
   await page.goto(`${storybook}?id=f1a-opsorders--order-quote&viewMode=story`);
   await expect(page.getByRole('heading', { name: '新建运单与报价说明' })).toBeVisible();
-  await expect(page.getByText('CNY 5,320.00')).toHaveCount(2);
+  await expect(page.getByText('尚未获取服务端报价')).toBeVisible();
+  await expect(page.getByRole('button', { name: '接受报价' })).toHaveCount(0);
   await page.getByLabel('实重 (kg)').fill('50.00');
   await page.getByLabel('长 (cm)').fill('200');
   await page.getByLabel('宽 (cm)').fill('200');
@@ -38,6 +39,7 @@ test('F1A 下单报价保留标准数据、查价解释与唯一主命令', asyn
   await page.getByRole('button', { name: '刷新报价' }).click();
   await expect(page.getByLabel('材积重 (kg)')).toHaveValue('1333.33');
   await expect(page.getByText('1333.33 kg')).toBeVisible();
+  await expect(page.getByRole('button', { name: '接受报价' })).toBeEnabled();
   await page.getByRole('radio', { name: /UPS Worldwide Saver/ }).click();
   await page.getByRole('button', { name: '查看解释' }).click();
   await expect(page.getByText(/RATE-UPS-CN-US-2026\.05-v5/)).toBeVisible();
@@ -82,4 +84,33 @@ test('F1A stories 没有严重或致命 axe 问题', async ({ page }) => {
     });
     expect(violations).toEqual([]);
   }
+});
+
+test('F1A 390px 报价结果置顶堆叠且无严重 axe 问题', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${storybook}?id=f1a-opsorders--order-quote&viewMode=story`);
+
+  const workbench = page.locator('.quote-workbench');
+  const form = page.locator('.quote-workbench__form');
+  const result = page.getByLabel('报价与限制');
+  const [workbenchBox, formBox, resultBox] = await Promise.all([
+    workbench.boundingBox(),
+    form.boundingBox(),
+    result.boundingBox(),
+  ]);
+  expect(workbenchBox?.width).toBeLessThanOrEqual(390);
+  expect(resultBox?.y ?? Number.POSITIVE_INFINITY).toBeLessThan(formBox?.y ?? 0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+  await page.addScriptTag({ content: axe.source });
+  const violations = await page.evaluate(async () => {
+    const runtime = (globalThis as typeof globalThis & { axe: typeof axe }).axe;
+    const axeResult = await runtime.run(document, {
+      runOnly: { type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21aa'] },
+    });
+    return axeResult.violations.filter(
+      (violation) => violation.impact === 'critical' || violation.impact === 'serious'
+    );
+  });
+  expect(violations).toEqual([]);
 });
