@@ -421,3 +421,79 @@ test('代入丢响应复用同意图 key，明确 422 后跨租户使用新 key'
   expect(starts[2]?.key).not.toBe(starts[1]?.key);
   expect(starts[2]?.tenantId).toBe('01JTENANT0000000000000002');
 });
+
+test('代入故障矩阵在 retryable 与畸形响应后保留 key，终局 422 后隔离新租户', async ({ page }) => {
+  const starts: Array<{ key?: string; tenantId?: string }> = [];
+  const failures: Array<number | 'malformed'> = [503, 408, 425, 429, 'malformed', 422];
+  await page.route('**/api/v1/platform/impersonations**', async (route) => {
+    const request = route.request();
+    const path = new URL(request.url()).pathname;
+    if (path.endsWith('/impersonations') && request.method() === 'POST') {
+      const body = request.postDataJSON() as { tenantId?: string; reason?: string };
+      starts.push({ key: request.headers()['idempotency-key'], tenantId: body.tenantId });
+      const failure = failures[starts.length - 1];
+      if (failure === 'malformed') {
+        await route.fulfill({
+          status: 201,
+          contentType: 'application/json',
+          body: '{"data":',
+        });
+        return;
+      }
+      if (typeof failure === 'number') {
+        await route.fulfill({
+          status: failure,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            code: failure === 422 ? 'INVALID_REASON' : `HTTP_${failure}`,
+            message: failure === 422 ? 'reason rejected' : 'retry later',
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: {
+            id: '01JIMPERSONATE000000000003',
+            tenantId: body.tenantId,
+            actorId: '01JADMIN000000000000000001',
+            reason: body.reason,
+            expiresAt: '2099-12-31T23:59:59.000Z',
+          },
+          meta: { requestId: 'req-impersonation-matrix', asOf: '2026-07-24T00:00:00.000Z' },
+        }),
+      });
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          sessionId: '01JIMPERSONATE000000000003',
+          status: 'ACTIVE',
+          permissionsVersion: 19,
+          eventId: 'ACL-19',
+        },
+      }),
+    });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: '代入 上海智立科技有限公司' }).click();
+  const submit = page.getByRole('button', { name: '以管理员身份进入' });
+  for (let attempt = 0; attempt < failures.length; attempt += 1) {
+    await submit.click();
+    await expect(submit).toBeEnabled();
+  }
+  await page.getByRole('button', { name: '取消' }).click();
+  await page.getByRole('button', { name: '代入 深圳海运通物流有限公司' }).click();
+  await page.getByRole('button', { name: '以管理员身份进入' }).click();
+
+  await expect(page.locator('.platform-session')).toContainText('深圳海运通物流有限公司');
+  expect(starts).toHaveLength(7);
+  expect(starts.slice(0, 6).every((start) => start.key === starts[0]?.key)).toBe(true);
+  expect(starts[6]?.key).not.toBe(starts[5]?.key);
+  expect(starts[6]?.tenantId).toBe('01JTENANT0000000000000002');
+});

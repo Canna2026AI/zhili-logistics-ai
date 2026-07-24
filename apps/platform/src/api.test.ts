@@ -175,6 +175,85 @@ describe('platform OpenAPI adapter', () => {
     ).rejects.toThrow('ROLE_POLICY_RESPONSE_MISMATCH');
   });
 
+  it('validates PolicyStatement keys and fieldPolicy values on role policy responses', async () => {
+    const createPlatformApi = (apiModule as unknown as { createPlatformApi?: PlatformApiFactory })
+      .createPlatformApi!;
+    const roleId = '01JROLE000000000000000001';
+    const base = {
+      effect: 'ALLOW',
+      resource: 'waybill',
+      actions: ['read'],
+      dataScope: 'TENANT',
+    };
+    const PUT = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { data: { roleId, statements: [{ ...base, unexpected: true }], version: 19 } },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            roleId,
+            statements: [{ ...base, fieldPolicy: { customerPhone: 7 } }],
+            version: 19,
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            roleId,
+            statements: [{ ...base, fieldPolicy: ['MASK'] }],
+            version: 19,
+          },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            roleId,
+            statements: [{ ...base, fieldPolicy: { customerPhone: 'MASK' } }],
+            version: 19,
+          },
+        },
+      });
+    const api = createPlatformApi({ PUT, POST: vi.fn(), DELETE: vi.fn() }, () => 'idem-statements');
+    const request = { statements: [], reason: '季度权限复核' };
+
+    await expect(api.updateRolePolicy(roleId, 18, request)).rejects.toThrow(
+      'ROLE_POLICY_RESPONSE_MISMATCH'
+    );
+    await expect(api.updateRolePolicy(roleId, 18, request)).rejects.toThrow(
+      'ROLE_POLICY_RESPONSE_MISMATCH'
+    );
+    await expect(api.updateRolePolicy(roleId, 18, request)).rejects.toThrow(
+      'ROLE_POLICY_RESPONSE_MISMATCH'
+    );
+    await expect(api.updateRolePolicy(roleId, 18, request)).resolves.toMatchObject({
+      statements: [{ fieldPolicy: { customerPhone: 'MASK' } }],
+    });
+  });
+
+  it('validates every effective permission statement returned by preview', async () => {
+    const createPlatformApi = (apiModule as unknown as { createPlatformApi?: PlatformApiFactory })
+      .createPlatformApi!;
+    const userId = '01JUSER000000000000000001';
+    const api = createPlatformApi(
+      {
+        POST: vi.fn().mockResolvedValue({
+          data: { data: { userId, effectiveStatements: [{}], differences: [] } },
+        }),
+        PUT: vi.fn(),
+        DELETE: vi.fn(),
+      },
+      () => 'idem-preview'
+    );
+
+    await expect(api.previewEffectivePermissions(userId, {})).rejects.toThrow(
+      'PERMISSION_PREVIEW_RESPONSE_MISMATCH'
+    );
+  });
+
   it('reuses an app-local command idempotency key after a lost response and rotates it after success', async () => {
     window.history.replaceState({}, '', '/');
     const fetchMock = vi
@@ -357,6 +436,55 @@ describe('platform OpenAPI adapter', () => {
     vi.unstubAllGlobals();
   });
 
+  it('clears a command key for malformed terminal 4xx but retains it for malformed retryable responses', async () => {
+    window.history.replaceState({}, '', '/');
+    const success = (operationId: string) =>
+      new Response(
+        JSON.stringify({
+          data: { operationId, status: 'SUCCEEDED', message: 'done' },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } }
+      );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response('{"code":', {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(success('OPS-AFTER-503'))
+      .mockResolvedValueOnce(
+        new Response('{"code":', {
+          status: 422,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(success('OPS-AFTER-422'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(apiModule.platformPort.executeOperation('系统健康')).rejects.toMatchObject({
+      status: 503,
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-AFTER-503',
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).rejects.toMatchObject({
+      status: 422,
+    });
+    await expect(apiModule.platformPort.executeOperation('系统健康')).resolves.toMatchObject({
+      operationId: 'OPS-AFTER-422',
+    });
+
+    const idempotencyKeys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get('Idempotency-Key')
+    );
+    expect(idempotencyKeys[1]).toBe(idempotencyKeys[0]);
+    expect(idempotencyKeys[2]).not.toBe(idempotencyKeys[1]);
+    expect(idempotencyKeys[3]).not.toBe(idempotencyKeys[2]);
+    vi.unstubAllGlobals();
+  });
+
   it('rejects a successful impersonation response for a different tenant', async () => {
     window.history.replaceState({}, '', '/');
     vi.stubGlobal(
@@ -404,6 +532,91 @@ describe('platform OpenAPI adapter', () => {
       code: 'IMPERSONATION_RESPONSE_INCOMPLETE',
       outcomeUncertain: true,
     });
+    vi.unstubAllGlobals();
+  });
+
+  it.each([500, 503, 408, 425, 429])(
+    'marks impersonation HTTP %s as an uncertain command outcome',
+    async (status) => {
+      window.history.replaceState({}, '', '/');
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify({ code: `HTTP_${status}`, message: 'retry later' }), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          })
+        )
+      );
+
+      await expect(
+        apiModule.platformPort.startImpersonation('01JTENANT0000000000000001', '排查')
+      ).rejects.toMatchObject({
+        status,
+        outcomeUncertain: true,
+      });
+      vi.unstubAllGlobals();
+    }
+  );
+
+  it('validates every role statement in a reloaded access policy baseline', async () => {
+    window.history.replaceState({}, '', '/');
+    const baseline = {
+      tenantId: '01JTENANT0000000000000001',
+      tenantVersion: 2,
+      role: {
+        id: '01JROLE000000000000000001',
+        name: '运营管理员',
+        version: 19,
+        memberCount: 12,
+        statements: [{}],
+      },
+      subjects: [{ id: '01JUSER000000000000000001', name: '李明' }],
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: baseline }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        })
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            data: {
+              ...baseline,
+              role: {
+                ...baseline.role,
+                statements: [
+                  {
+                    effect: 'ALLOW',
+                    resource: 'waybill',
+                    actions: ['read'],
+                    dataScope: 'TENANT',
+                  },
+                ],
+              },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )
+      );
+    vi.stubGlobal('fetch', fetchMock);
+    const args = [baseline.tenantId, 1, baseline.role.id, 18, baseline.subjects[0]!.id] as const;
+
+    await expect(apiModule.platformPort.reloadAccessPolicyBaseline(...args)).rejects.toMatchObject({
+      code: 'PLATFORM_RESPONSE_INCOMPLETE',
+    });
+    await expect(apiModule.platformPort.reloadAccessPolicyBaseline(...args)).resolves.toMatchObject(
+      {
+        role: { statements: [{ resource: 'waybill' }] },
+      }
+    );
+    const keys = fetchMock.mock.calls.map(([, init]) =>
+      new Headers(init?.headers).get('Idempotency-Key')
+    );
+    expect(keys[1]).toBe(keys[0]);
     vi.unstubAllGlobals();
   });
 

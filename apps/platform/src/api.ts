@@ -153,6 +153,10 @@ export type RuntimeDifference = { field: string; local: string; server: string }
 const revokedMockSessions = new Set<string>();
 const pendingPlatformCommandKeys = new Map<string, string>();
 const retryableClientStatuses = new Set([408, 425, 429]);
+const isRetryableHttpStatus = (status: number) =>
+  status >= 500 || retryableClientStatuses.has(status);
+const isTerminalClientStatus = (status: number) =>
+  status >= 400 && status < 500 && !retryableClientStatuses.has(status);
 
 /** App-local port for platform operations pending inclusion in shared OpenAPI. */
 const platformCommand = async <TResponse>(
@@ -257,25 +261,28 @@ const platformCommand = async <TResponse>(
   try {
     payload = response.status === 204 ? undefined : await response.json();
   } catch {
+    const terminal = isTerminalClientStatus(response.status);
+    if (terminal) pendingPlatformCommandKeys.delete(fingerprint);
     throw new PlatformApiError(
       response.status,
       'PLATFORM_RESPONSE_INCOMPLETE',
-      '平台命令响应不完整，已保留原幂等键供恢复。'
+      terminal
+        ? '平台命令被服务端明确拒绝，但错误响应无法解析。'
+        : '平台命令响应不完整，已保留原幂等键供恢复。',
+      undefined,
+      !terminal
     );
   }
   if (!response.ok) {
     const value = isRecord(payload) ? payload : {};
-    if (
-      response.status >= 400 &&
-      response.status < 500 &&
-      !retryableClientStatuses.has(response.status)
-    ) {
-      pendingPlatformCommandKeys.delete(fingerprint);
-    }
+    const outcomeUncertain = isRetryableHttpStatus(response.status);
+    if (!outcomeUncertain) pendingPlatformCommandKeys.delete(fingerprint);
     throw new PlatformApiError(
       response.status,
       String(value.code ?? 'PLATFORM_OPERATION_FAILED'),
-      String(value.message ?? `平台命令失败（${response.status}）`)
+      String(value.message ?? `平台命令失败（${response.status}）`),
+      typeof value.remediation === 'string' ? value.remediation : undefined,
+      outcomeUncertain
     );
   }
   const value: unknown = isRecord(payload) && 'data' in payload ? payload.data : payload;
@@ -331,6 +338,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 function isPositiveVersion(value: unknown): value is number {
   return Number.isInteger(value) && Number(value) >= 1;
 }
@@ -366,17 +379,20 @@ function isRolePolicy(
 }
 
 function isPolicyStatement(value: unknown): value is components['schemas']['PolicyStatement'] {
+  const allowedKeys = new Set(['effect', 'resource', 'actions', 'dataScope', 'fieldPolicy']);
   return (
-    isRecord(value) &&
+    isPlainRecord(value) &&
+    Object.keys(value).every((key) => allowedKeys.has(key)) &&
     typeof value.effect === 'string' &&
     ['ALLOW', 'DENY'].includes(value.effect) &&
     typeof value.resource === 'string' &&
-    value.resource.length > 0 &&
     Array.isArray(value.actions) &&
     value.actions.length > 0 &&
-    value.actions.every((action) => typeof action === 'string' && action.length > 0) &&
+    value.actions.every((action) => typeof action === 'string') &&
     typeof value.dataScope === 'string' &&
-    value.dataScope.length > 0
+    (value.fieldPolicy === undefined ||
+      (isPlainRecord(value.fieldPolicy) &&
+        Object.values(value.fieldPolicy).every((decision) => typeof decision === 'string')))
   );
 }
 
@@ -388,6 +404,7 @@ function isPermissionPreview(
     isRecord(value) &&
     value.userId === userId &&
     Array.isArray(value.effectiveStatements) &&
+    value.effectiveStatements.every(isPolicyStatement) &&
     isStringArray(value.differences)
   );
 }
@@ -541,6 +558,7 @@ function isAccessPolicyBaseline(
     Number.isSafeInteger(value.role.memberCount) &&
     Number(value.role.memberCount) >= 0 &&
     Array.isArray(value.role.statements) &&
+    value.role.statements.every(isPolicyStatement) &&
     Array.isArray(value.subjects) &&
     value.subjects.every(
       (subject) =>
@@ -733,6 +751,19 @@ export const platformPort = {
         'IMPERSONATION_RESPONSE_INCOMPLETE',
         '代入会话响应不完整，已保留原幂等键供恢复。',
         undefined,
+        true
+      );
+    }
+    const status = Number(response.response?.status ?? 0);
+    if (response.error && isRetryableHttpStatus(status)) {
+      const value = isRecord(response.error) ? response.error : {};
+      throw new PlatformApiError(
+        status,
+        typeof value.code === 'string' ? value.code : 'IMPERSONATION_RETRYABLE_FAILURE',
+        typeof value.message === 'string'
+          ? value.message
+          : '代入会话结果不确定，请使用原请求重试。',
+        typeof value.remediation === 'string' ? value.remediation : undefined,
         true
       );
     }

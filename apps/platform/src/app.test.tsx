@@ -933,9 +933,9 @@ describe('平台控制台', () => {
       .spyOn(platformPort, 'startImpersonation')
       .mockRejectedValueOnce(
         new PlatformApiError(
-          201,
-          'IMPERSONATION_RESPONSE_INCOMPLETE',
-          'response incomplete',
+          503,
+          'IMPERSONATION_RETRYABLE_FAILURE',
+          'upstream unavailable',
           undefined,
           true
         )
