@@ -1,8 +1,24 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Button, Dialog, Drawer, StatusTag } from '@zhili/ui';
-import { platformPort } from './api';
+import { PlatformApiError, platformPort } from './api';
+import { OperationsPage, type OperationsPageName } from './features/operations/operations-page';
+import { AccessWorkflow } from './features/policies/access-workflow';
+import {
+  createAccessPolicyCatalog,
+  type AccessPolicyBaselineRefresh,
+  type AccessPolicyCatalog,
+  type AccessPolicyDraft,
+} from './features/policies/access-policy';
+import { SessionOutcome, type SessionOutcomeKind } from './features/sessions/session-outcome';
 
-type Page = '租户管理' | '套餐与模块' | '配额与用量' | '平台公告' | '代入与审计' | '运行中心';
+type Page =
+  | '租户管理'
+  | '套餐与模块'
+  | '配额与用量'
+  | '平台公告'
+  | '代入与审计'
+  | '运行中心'
+  | OperationsPageName;
 type RuntimeState = 'normal' | 'loading' | 'empty' | 'failed' | 'forbidden' | 'stale' | 'partial';
 type Tenant = {
   id: string;
@@ -19,6 +35,8 @@ type Tenant = {
   version: number;
 };
 type Impersonation = {
+  id: string;
+  permissionsVersion: number;
   tenant: Tenant;
   reason: string;
   expiresAt: number;
@@ -126,7 +144,7 @@ const readSession = () => {
     const session = JSON.parse(
       localStorage.getItem('zhili.platform.impersonation') ?? ''
     ) as Impersonation;
-    return session.expiresAt > Date.now() ? session : null;
+    return session;
   } catch {
     return null;
   }
@@ -140,6 +158,7 @@ const pages: Page[] = [
   '代入与审计',
   '运行中心',
 ];
+const operationPages: OperationsPageName[] = ['系统健康', '任务与队列', '审计日志', '版本发布'];
 const modules = [
   '运单管理',
   '仓库扫描',
@@ -191,6 +210,18 @@ function pageAvailable(page: Page, impersonating: boolean) {
   return !impersonating || page === '代入与审计' || page === '运行中心';
 }
 
+const interactionKey = () => `platform-ui-${crypto.randomUUID?.() ?? Date.now()}`;
+const searchDomId = (value: string) => {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+  let hash = 0;
+  for (const character of value) hash = (hash * 31 + (character.codePointAt(0) ?? 0)) >>> 0;
+  return `platform-search-result-${slug || 'item'}-${hash.toString(36)}`;
+};
+
 function GlobalSearch({
   results,
   value,
@@ -231,9 +262,7 @@ function GlobalSearch({
         aria-controls="platform-global-search-results"
         aria-expanded={expanded}
         aria-activedescendant={
-          expanded && activeIndex >= 0
-            ? `platform-search-result-${results[activeIndex]?.id}`
-            : undefined
+          expanded && activeIndex >= 0 ? searchDomId(results[activeIndex]!.id) : undefined
         }
         placeholder="搜索租户、作业或审计记录"
         value={value}
@@ -271,7 +300,7 @@ function GlobalSearch({
             <div id="platform-global-search-results" role="listbox" aria-label="平台全局搜索结果">
               {results.map((result, index) => (
                 <button
-                  id={`platform-search-result-${result.id}`}
+                  id={searchDomId(result.id)}
                   key={result.id}
                   type="button"
                   role="option"
@@ -323,9 +352,11 @@ function Header({
 function TenantDetail({
   tenant,
   changeStatus,
+  onConfigure,
 }: {
   tenant: Tenant;
   changeStatus: (status: 'ACTIVE' | 'SUSPENDED') => void;
+  onConfigure: () => void;
 }) {
   return (
     <div className="platform-detail">
@@ -357,6 +388,7 @@ function TenantDetail({
       >
         {tenant.status === 'ACTIVE' ? '停用租户' : '恢复租户'}
       </Button>
+      <Button onClick={onConfigure}>配置授权与策略</Button>
       <section>
         <h3>模块授权</h3>
         {modules.map((module) => (
@@ -1068,18 +1100,48 @@ export function App() {
   const [globalSearch, setGlobalSearch] = useState('');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [detail, setDetail] = useState<Tenant | null>(null);
+  const [workflowTenant, setWorkflowTenant] = useState<Tenant | null>(null);
   const [impersonate, setImpersonate] = useState<Tenant | null>(null);
   const [reason, setReason] = useState('协助排查订单同步问题');
   const [auditReason, setAuditReason] = useState('');
   const [announcements, setAnnouncements] = useState<string[]>(readAnnouncements);
   const [toast, setToast] = useState('');
   const [session, setSession] = useState<Impersonation | null>(readSession);
+  const [sessionOutcome, setSessionOutcome] = useState<SessionOutcomeKind | null>(null);
+  const [sessionEvidence, setSessionEvidence] = useState<{
+    permissionsVersion?: number;
+    eventId?: string;
+  }>({});
   const [remainingSeconds, setRemainingSeconds] = useState(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [newTenantPlan, setNewTenantPlan] = useState('专业版');
   const [selectedTenantId, setSelectedTenantId] = useState('01JTENANT0000000000000001');
+  const [accessCatalogs, setAccessCatalogs] = useState<Record<string, AccessPolicyCatalog>>(() =>
+    Object.fromEntries(tenantSeed.map((tenant) => [tenant.id, createAccessPolicyCatalog()]))
+  );
+  const [impersonationBusy, setImpersonationBusy] = useState(false);
+  const impersonationPendingRef = useRef(false);
+  const impersonationIntentRef = useRef<
+    { fingerprint: string; idempotencyKey: string } | undefined
+  >(undefined);
+  const sessionRef = useRef(session);
+  const accessSaveProgress = useRef<
+    | {
+        key: string;
+        role?: {
+          roleId: string;
+          version: number;
+          statements: AccessPolicyDraft['statements'];
+        };
+        tenantVersion?: number;
+        roleKey: string;
+        tenantKey: string;
+      }
+    | undefined
+  >(undefined);
+  const mockMode = new URLSearchParams(window.location.search).get('mock') === '1';
   useEffect(
     () => localStorage.setItem('zhili.platform.tenants', JSON.stringify(tenantRows)),
     [tenantRows]
@@ -1091,6 +1153,9 @@ export function App() {
   useEffect(() => {
     if (session) localStorage.setItem('zhili.platform.impersonation', JSON.stringify(session));
     else localStorage.removeItem('zhili.platform.impersonation');
+  }, [session]);
+  useEffect(() => {
+    sessionRef.current = session;
   }, [session]);
   const filtered = useMemo(
     () =>
@@ -1116,6 +1181,13 @@ export function App() {
         label: item,
         type: '页面' as const,
         context: '平台导航',
+        page: item,
+      })),
+      ...operationPages.map((item) => ({
+        id: `page-${item}`,
+        label: item,
+        type: '页面' as const,
+        context: '系统运维',
         page: item,
       })),
       ...tenantRows.map((tenant) => ({
@@ -1166,20 +1238,64 @@ export function App() {
       )
       .slice(0, 8);
   }, [announcements, auditRecords, globalSearch, session, tenantRows]);
+  const sessionId = session?.id;
+  const sessionExpiresAt = session?.expiresAt;
   useEffect(() => {
-    if (!session) return;
+    if (!sessionId || !sessionExpiresAt) return;
+    let cancelled = false;
+    let checking = false;
+    const check = async () => {
+      const current = sessionRef.current;
+      if (!current || current.id !== sessionId || checking) return;
+      checking = true;
+      try {
+        const status = await platformPort.checkImpersonation(
+          current.id,
+          current.permissionsVersion
+        );
+        if (cancelled) return;
+        if (status.status === 'ACTIVE') {
+          if (status.permissionsVersion !== current.permissionsVersion) {
+            setSession((value) =>
+              value?.id === current.id
+                ? { ...value, permissionsVersion: status.permissionsVersion }
+                : value
+            );
+          }
+          return;
+        }
+        setSessionEvidence({
+          permissionsVersion: status.permissionsVersion,
+          eventId: status.eventId,
+        });
+        setSession(null);
+        setSessionOutcome(status.status === 'REVOKED' ? 'revoked' : 'expired');
+      } catch (error) {
+        if (!cancelled) setToast(error instanceof Error ? error.message : '代入会话检查失败');
+      } finally {
+        checking = false;
+      }
+    };
     const update = () => {
-      const remaining = Math.max(0, Math.ceil((session.expiresAt - Date.now()) / 1000));
+      const remaining = Math.max(0, Math.ceil((sessionExpiresAt - Date.now()) / 1000));
       setRemainingSeconds(remaining);
       if (remaining === 0) {
         setSession(null);
+        setSessionOutcome('expired');
         setToast('代入会话已过期，已安全返回平台上下文；未提交草稿已保留。');
       }
     };
     update();
-    const timer = window.setInterval(update, 1000);
-    return () => window.clearInterval(timer);
-  }, [session]);
+    void check();
+    const timer = window.setInterval(() => {
+      update();
+      void check();
+    }, 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [sessionExpiresAt, sessionId]);
   const createTenant = async () => {
     if (!newTenantName.trim() || !newTenantSlug.trim()) return;
     try {
@@ -1218,7 +1334,57 @@ export function App() {
   };
   const go = (next: Page) => {
     if (!pageAvailable(next, Boolean(session))) return;
+    setSessionOutcome(null);
     setPage(next);
+  };
+  const startSelectedImpersonation = async () => {
+    if (impersonationPendingRef.current || !impersonate || !reason.trim()) return;
+    impersonationPendingRef.current = true;
+    setImpersonationBusy(true);
+    const target = impersonate;
+    const why = reason.trim();
+    const fingerprint = JSON.stringify({ tenantId: target.id, reason: why, durationMinutes: 60 });
+    if (impersonationIntentRef.current?.fingerprint !== fingerprint) {
+      impersonationIntentRef.current = { fingerprint, idempotencyKey: interactionKey() };
+    }
+    const intent = impersonationIntentRef.current;
+    let created: Awaited<ReturnType<typeof platformPort.startImpersonation>> | undefined;
+    try {
+      created = await platformPort.startImpersonation(target.id, why, intent.idempotencyKey);
+      if (impersonationIntentRef.current === intent) impersonationIntentRef.current = undefined;
+      const checked = await platformPort.checkImpersonation(created.id, 0);
+      if (checked.status !== 'ACTIVE') {
+        await platformPort.endImpersonation().catch(() => undefined);
+        setSessionEvidence({
+          permissionsVersion: checked.permissionsVersion,
+          eventId: checked.eventId,
+        });
+        setSessionOutcome(checked.status === 'REVOKED' ? 'revoked' : 'expired');
+        setImpersonate(null);
+        return;
+      }
+      setAuditReason(why);
+      setRemainingSeconds(60 * 60);
+      setSession({
+        id: created.id,
+        permissionsVersion: checked.permissionsVersion,
+        tenant: target,
+        reason: why,
+        expiresAt: new Date(created.expiresAt).getTime(),
+      });
+      setImpersonate(null);
+    } catch (error) {
+      if (created) await platformPort.endImpersonation().catch(() => undefined);
+      const outcomeUncertain =
+        error instanceof TypeError || (error instanceof PlatformApiError && error.outcomeUncertain);
+      if (!outcomeUncertain && impersonationIntentRef.current === intent) {
+        impersonationIntentRef.current = undefined;
+      }
+      setToast(error instanceof Error ? error.message : '代入会话创建失败');
+    } finally {
+      impersonationPendingRef.current = false;
+      setImpersonationBusy(false);
+    }
   };
   const navigateFromSearch = (result: SearchResult) => {
     if (!pageAvailable(result.page, Boolean(session))) return;
@@ -1238,6 +1404,7 @@ export function App() {
         onCreate={() => setCreateOpen(true)}
         onDetail={setDetail}
         onImpersonate={(tenant) => {
+          impersonationIntentRef.current = undefined;
           setReason('协助排查订单同步问题');
           setImpersonate(tenant);
         }}
@@ -1306,6 +1473,14 @@ export function App() {
       />
     );
   else if (page === '代入与审计') content = <AuditPage records={auditRecords} />;
+  else if (operationPages.includes(page as OperationsPageName))
+    content = (
+      <OperationsPage
+        key={page}
+        page={page as OperationsPageName}
+        onExecute={platformPort.executeOperation}
+      />
+    );
   else content = <RuntimePage readOnly={Boolean(session)} />;
 
   return (
@@ -1341,6 +1516,17 @@ export function App() {
             <button
               key={item}
               disabled={Boolean(session) && item !== '代入与审计' && item !== '运行中心'}
+              data-active={page === item || undefined}
+              onClick={() => go(item)}
+            >
+              {item}
+            </button>
+          ))}
+          <h2>系统运维</h2>
+          {operationPages.map((item) => (
+            <button
+              key={item}
+              disabled={Boolean(session)}
               data-active={page === item || undefined}
               onClick={() => go(item)}
             >
@@ -1383,16 +1569,64 @@ export function App() {
               onClick={() =>
                 void platformPort
                   .endImpersonation()
-                  .then(() => setSession(null))
+                  .then(() => {
+                    setSession(null);
+                    setSessionOutcome('ended');
+                  })
                   .catch((error: Error) => setToast(error.message))
               }
             >
               立即退出
             </button>
+            {mockMode ? (
+              <>
+                <button
+                  onClick={() =>
+                    void platformPort
+                      .revokeMockImpersonation(session.id)
+                      .then(() =>
+                        platformPort.checkImpersonation(session.id, session.permissionsVersion)
+                      )
+                      .then((status) => {
+                        if (status.status !== 'REVOKED') return;
+                        setSessionEvidence({
+                          permissionsVersion: status.permissionsVersion,
+                          eventId: status.eventId,
+                        });
+                        setSession(null);
+                        setSessionOutcome('revoked');
+                        setPage('租户管理');
+                      })
+                      .catch((error: Error) => setToast(error.message))
+                  }
+                >
+                  模拟权限撤回
+                </button>
+                <button
+                  onClick={() => {
+                    setSession(null);
+                    setSessionOutcome('expired');
+                    setPage('租户管理');
+                  }}
+                >
+                  模拟会话过期
+                </button>
+              </>
+            ) : null}
           </div>
         ) : null}
         <main>
-          {session && page !== '代入与审计' && page !== '运行中心' ? (
+          {sessionOutcome ? (
+            <SessionOutcome
+              kind={sessionOutcome}
+              permissionsVersion={sessionEvidence.permissionsVersion}
+              eventId={sessionEvidence.eventId}
+              onRecover={() => {
+                setSessionOutcome(null);
+                setPage('租户管理');
+              }}
+            />
+          ) : session && page !== '代入与审计' && page !== '运行中心' ? (
             <section className="platform-panel" aria-label="代入租户上下文">
               <h1>{session.tenant.name} · 租户管理员视图</h1>
               <p>平台套餐、模块、配额、公告与租户生命周期写操作已隔离。</p>
@@ -1438,6 +1672,15 @@ export function App() {
         {detail ? (
           <TenantDetail
             tenant={detail}
+            onConfigure={() => {
+              setAccessCatalogs((current) =>
+                current[detail.id]
+                  ? current
+                  : { ...current, [detail.id]: createAccessPolicyCatalog() }
+              );
+              setWorkflowTenant(detail);
+              setDetail(null);
+            }}
             changeStatus={(status) =>
               void platformPort
                 .changeTenantStatus(detail, status)
@@ -1452,6 +1695,111 @@ export function App() {
           />
         ) : null}
       </Drawer>
+      {workflowTenant ? (
+        <AccessWorkflow
+          tenant={workflowTenant}
+          port={platformPort}
+          mockMode={mockMode}
+          catalog={accessCatalogs[workflowTenant.id] ?? createAccessPolicyCatalog()}
+          onBaselineReloaded={(baseline: AccessPolicyBaselineRefresh) => {
+            setTenantRows((rows) =>
+              rows.map((tenant) =>
+                tenant.id === baseline.tenantId
+                  ? { ...tenant, version: baseline.tenantVersion }
+                  : tenant
+              )
+            );
+            setAccessCatalogs((current) => {
+              const catalog = current[baseline.tenantId] ?? createAccessPolicyCatalog();
+              return {
+                ...current,
+                [baseline.tenantId]: {
+                  subjects: baseline.subjects,
+                  roles: catalog.roles.map((role) =>
+                    role.id === baseline.role.id ? baseline.role : role
+                  ),
+                },
+              };
+            });
+          }}
+          onClose={() => {
+            const tenantName = workflowTenant.name;
+            accessSaveProgress.current = undefined;
+            setWorkflowTenant(null);
+            queueMicrotask(() =>
+              document
+                .querySelector<HTMLButtonElement>(
+                  `[aria-label="查看租户 ${tenantName.replaceAll('"', '\\"')}"]`
+                )
+                ?.focus()
+            );
+          }}
+          onSave={async (draft: AccessPolicyDraft) => {
+            const progressKey = JSON.stringify(draft);
+            const progress =
+              accessSaveProgress.current?.key === progressKey
+                ? accessSaveProgress.current
+                : {
+                    key: progressKey,
+                    roleKey: interactionKey(),
+                    tenantKey: interactionKey(),
+                  };
+            accessSaveProgress.current = progress;
+            progress.role ??= await platformPort.updateRolePolicy(
+              draft.role.id,
+              draft.role.version,
+              { statements: draft.statements, reason: draft.reason },
+              progress.roleKey
+            );
+            progress.tenantVersion ??= await platformPort.saveEntitlements(
+              draft.tenant.id,
+              draft.tenant.version,
+              { modules: draft.modules },
+              progress.tenantKey
+            );
+            if (!progress.role || progress.tenantVersion === undefined)
+              throw new Error('ACCESS_POLICY_SAVE_RECEIPT_INCOMPLETE');
+            const role = progress.role;
+            const version = progress.tenantVersion;
+            setTenantRows((rows) =>
+              rows.map((tenant) =>
+                tenant.id === draft.tenant.id ? { ...tenant, version } : tenant
+              )
+            );
+            setAccessCatalogs((current) => {
+              const catalog = current[draft.tenant.id] ?? createAccessPolicyCatalog();
+              return {
+                ...current,
+                [draft.tenant.id]: {
+                  ...catalog,
+                  roles: catalog.roles.map((item) =>
+                    item.id === role.roleId
+                      ? {
+                          ...item,
+                          version: role.version,
+                          statements: role.statements.map((statement) => ({
+                            ...statement,
+                            actions: [...statement.actions],
+                          })),
+                        }
+                      : item
+                  ),
+                },
+              };
+            });
+            accessSaveProgress.current = undefined;
+            return {
+              tenantId: draft.tenant.id,
+              tenantVersion: version,
+              roleId: role.roleId,
+              roleVersion: role.version,
+              subjectId: draft.subject.id,
+              effectiveModuleCount: draft.modules.filter((item) => item.enabled).length,
+              savedAt: new Date().toISOString(),
+            };
+          }}
+        />
+      ) : null}
       <Dialog
         open={createOpen}
         title="新建租户"
@@ -1506,32 +1854,28 @@ export function App() {
         open={Boolean(impersonate)}
         title="代入租户"
         description={`将进入 ${impersonate?.name ?? ''}。所有操作都会审计，默认限时 60 分钟。`}
-        onOpenChange={(open) => !open && setImpersonate(null)}
+        onOpenChange={(open) => {
+          if (!open && !impersonationBusy) {
+            impersonationIntentRef.current = undefined;
+            setImpersonate(null);
+          }
+        }}
         footer={
           <>
-            <Button variant="secondary" onClick={() => setImpersonate(null)}>
+            <Button
+              variant="secondary"
+              disabled={impersonationBusy}
+              onClick={() => {
+                impersonationIntentRef.current = undefined;
+                setImpersonate(null);
+              }}
+            >
               取消
             </Button>
             <Button
-              disabled={!reason.trim()}
-              onClick={() => {
-                if (!impersonate || !reason.trim()) return;
-                const target = impersonate;
-                const why = reason.trim();
-                void platformPort
-                  .startImpersonation(target.id, why)
-                  .then((created) => {
-                    setAuditReason(why);
-                    setRemainingSeconds(60 * 60);
-                    setSession({
-                      tenant: target,
-                      reason: why,
-                      expiresAt: new Date(created.expiresAt).getTime(),
-                    });
-                    setImpersonate(null);
-                  })
-                  .catch((error: Error) => setToast(error.message));
-              }}
+              loading={impersonationBusy}
+              disabled={!reason.trim() || impersonationBusy}
+              onClick={() => void startSelectedImpersonation()}
             >
               以管理员身份进入
             </Button>
