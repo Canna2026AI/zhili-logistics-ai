@@ -1,0 +1,120 @@
+// @vitest-environment jsdom
+import '@testing-library/jest-dom/vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { DeviceTask } from '../domain/types';
+import { DEVICE_TASK_ACTIONS } from '../domain/task-actions';
+import { MemoryPdaPort } from '../ports/memory-pda-port';
+import type { LocalDeviceSession } from '../session/session-guard';
+import { TaskHome } from './task-home';
+
+const session: LocalDeviceSession = {
+  deviceId: '01JHOMEDEVICE0000000000001',
+  tenantId: '01JHOMETENANT0000000000001',
+  warehouseId: '01JHOMEWAREHOUSE0000000001',
+  subjectId: '01JHOMEUSER000000000000001',
+  timezone: 'Asia/Shanghai',
+  appVersion: '0.2.0',
+  expiresAt: '2099-12-31T23:59:59.000Z',
+  permissions: ['pda.use'],
+};
+
+describe('TaskHome', () => {
+  afterEach(cleanup);
+
+  it('renders the F09 today-task summary and starts the highest-priority task', async () => {
+    const selected: DeviceTask = {
+      id: '01JPDATASK0000000000000001',
+      type: 'RECEIVE',
+      reference: 'S2505120004',
+      status: 'READY',
+      priority: 'URGENT',
+      version: 7,
+    };
+    const onScan = vi.fn();
+    render(<TaskHome session={session} tasks={[selected]} onScan={onScan} />);
+
+    expect(screen.getByRole('heading', { name: '今日任务' })).toBeVisible();
+    expect(screen.getByText(/待收货 1/)).toBeVisible();
+    expect(screen.getByText('优先任务 · 扫码收货')).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: '开始任务' }));
+
+    expect(onScan).toHaveBeenCalledWith(selected);
+  });
+
+  it('passes the complete selected DeviceTask snapshot to the scanner', async () => {
+    const selected: DeviceTask = {
+      id: '01JPDATASK0000000000000002',
+      type: 'LAST_MILE_DELIVERY',
+      reference: 'LM-SECOND',
+      status: 'LOADED',
+      priority: 'HIGH',
+      version: 9,
+    };
+    const onScan = vi.fn();
+    render(<TaskHome session={session} tasks={[selected]} onScan={onScan} />);
+
+    await userEvent.click(screen.getByRole('button', { name: /LM-SECOND/ }));
+
+    expect(onScan).toHaveBeenCalledWith(selected);
+  });
+
+  it('renders the live network and queue state instead of a fixed demo status', () => {
+    render(
+      <TaskHome session={session} tasks={[]} onScan={vi.fn()} online={false} pendingCount={17} />
+    );
+
+    expect(screen.getByText('离线 · 队列 17/200')).toBeVisible();
+    expect(screen.queryByText(/上次同步/)).not.toBeInTheDocument();
+  });
+
+  it('derives device, warehouse, user and last sync from real session metadata', () => {
+    render(
+      <TaskHome
+        session={session}
+        tasks={[]}
+        onScan={vi.fn()}
+        lastSyncedAt="2026-07-23T01:40:00.000Z"
+      />
+    );
+
+    expect(screen.getByText(new RegExp(session.deviceId))).toBeVisible();
+    expect(screen.getByText(new RegExp(session.warehouseId))).toBeVisible();
+    expect(screen.getByText(new RegExp(session.subjectId))).toBeVisible();
+    expect(screen.getByText(/上次同步/)).toBeVisible();
+    expect(screen.queryByText(/PDA-SZX-03|深圳一号仓|张伟/)).not.toBeInTheDocument();
+  });
+
+  it('omits an invalid persisted sync timestamp instead of crashing the task home', () => {
+    render(
+      <TaskHome session={session} tasks={[]} onScan={vi.fn()} lastSyncedAt="corrupt-local-meta" />
+    );
+
+    expect(screen.getByRole('heading', { name: '任务首页' })).toBeVisible();
+    expect(screen.queryByText(/上次同步/)).not.toBeInTheDocument();
+  });
+
+  it('shows task-derived workflow titles and distinct copy for all 19 actions', async () => {
+    const port = new MemoryPdaPort();
+    await port.bindDevice(
+      session.deviceId,
+      {
+        warehouseId: session.warehouseId,
+        subjectId: session.subjectId,
+        deviceCode: 'PDA-HOME-01',
+      },
+      'bind-task-home'
+    );
+    const tasks = await port.getDeviceTasks(session.deviceId);
+    const { container } = render(<TaskHome session={session} tasks={tasks} onScan={vi.fn()} />);
+
+    for (const action of DEVICE_TASK_ACTIONS) {
+      expect(container).toHaveTextContent(action.label);
+    }
+    expect(container).not.toHaveTextContent('客户：ZHILI-DEMO');
+    expect(container).not.toHaveTextContent('SLA 剩余');
+    expect(container).toHaveTextContent('下一步：');
+  });
+});

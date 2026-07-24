@@ -1,0 +1,28 @@
+{
+  "name": "@zhili/storybook",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "storybook dev -p 6006 --no-open",
+    "build": "storybook build",
+    "lint": "eslint .storybook src",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@zhili/feature-identity-masterdata": "workspace:*",
+    "@zhili/feature-rates-routing": "workspace:*",
+    "@zhili/feature-waybills": "workspace:*",
+    "@zhili/ops": "workspace:*",
+    "@zhili/ui": "workspace:*",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@storybook/addon-a11y": "^10.5.3",
+    "@storybook/addon-docs": "^10.5.3",
+    "@storybook/react-vite": "^10.5.3",
+    "storybook": "^10.5.3"
+  }
+}

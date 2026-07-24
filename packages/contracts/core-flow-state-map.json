@@ -1,0 +1,255 @@
+{
+  "F01": {
+    "F01-NORMAL": { "source": "api", "action": "createOrderDraft" },
+    "F01-FAILED-LIMIT": {
+      "source": "api",
+      "action": "validateOrder",
+      "errorCode": "CHANNEL_RESTRICTION"
+    },
+    "F01-STALE": {
+      "source": "api",
+      "action": "confirmReceipt",
+      "errorCode": "STALE_VERSION"
+    },
+    "F01-FORBIDDEN": {
+      "source": "api",
+      "action": "submitWaybill",
+      "errorCode": "PERMISSION_DENIED"
+    },
+    "F01-OFFLINE": {
+      "source": "client",
+      "action": "clientAction:enqueueOfflineScan"
+    }
+  },
+  "F02": {
+    "F02-NORMAL": { "source": "api", "action": "createQuote" },
+    "F02-FAILED-NO-RATE": {
+      "source": "api",
+      "action": "createQuote",
+      "errorCode": "NO_APPLICABLE_RATE"
+    },
+    "F02-STALE-RATE": {
+      "source": "api",
+      "action": "acceptQuote",
+      "errorCode": "RATE_VERSION_CHANGED"
+    },
+    "F02-MASKED-COST": {
+      "source": "client",
+      "action": "clientAction:compareQuoteOptions"
+    },
+    "F02-EXPIRED": {
+      "source": "api",
+      "action": "acceptQuote",
+      "errorCode": "QUOTE_EXPIRED"
+    }
+  },
+  "F03": {
+    "F03-NORMAL": { "source": "api", "action": "resolveIssue" },
+    "F03-FAILED-MISSING-EVIDENCE": {
+      "source": "api",
+      "action": "resolveIssue",
+      "errorCode": "EVIDENCE_REQUIRED"
+    },
+    "F03-STALE": {
+      "source": "api",
+      "action": "resolveIssue",
+      "errorCode": "STALE_VERSION"
+    },
+    "F03-FORBIDDEN": {
+      "source": "api",
+      "action": "requestIssueMaterial",
+      "errorCode": "PERMISSION_DENIED"
+    },
+    "F03-PARTIAL-NOTIFY": {
+      "source": "api",
+      "action": "createIssue",
+      "errorCode": "NOTIFICATION_DELIVERY_PARTIAL"
+    }
+  },
+  "F04": {
+    "F04-NORMAL": { "source": "api", "action": "createBooking" },
+    "F04-FAILED-INCOMPATIBLE": {
+      "source": "api",
+      "action": "attachWaybills",
+      "errorCode": "LOAD_INCOMPATIBLE"
+    },
+    "F04-STALE-LOAD": {
+      "source": "api",
+      "action": "sealLoadUnit",
+      "errorCode": "STALE_VERSION"
+    },
+    "F04-FORBIDDEN-RELEASE": {
+      "source": "api",
+      "action": "dispatchLoadUnit",
+      "errorCode": "SHIPMENT_ON_HOLD"
+    },
+    "F04-DANGER-DISPATCH": {
+      "source": "api",
+      "action": "dispatchLoadUnit",
+      "errorCode": "DISPATCH_PREFLIGHT_FAILED"
+    }
+  },
+  "F05": {
+    "F05-NORMAL": { "source": "api", "action": "detectTrackingStall" },
+    "F05-FAILED-CARRIER": {
+      "source": "api",
+      "action": "ingestTrackingEvent",
+      "errorCode": "CARRIER_UNAVAILABLE"
+    },
+    "F05-OUT-OF-ORDER": {
+      "source": "api",
+      "action": "ingestTrackingEvent",
+      "errorCode": "TRACKING_EVENT_DUPLICATE"
+    },
+    "F05-FORBIDDEN-INTERNAL": {
+      "source": "api",
+      "action": "createIssue",
+      "errorCode": "PERMISSION_DENIED"
+    },
+    "F05-PARTIAL-NOTIFY": {
+      "source": "api",
+      "action": "notifyCustomer",
+      "errorCode": "NOTIFICATION_DELIVERY_PARTIAL"
+    }
+  },
+  "F06": {
+    "F06-NORMAL": { "source": "api", "action": "createStatement" },
+    "F06-FAILED-PAYMENT": {
+      "source": "api",
+      "action": "createStatementPaymentOrder",
+      "errorCode": "PAYMENT_FAILED"
+    },
+    "F06-IDEMPOTENT": {
+      "source": "api",
+      "action": "ingestWechatPaymentCallback",
+      "errorCode": "PAYMENT_CALLBACK_DUPLICATE"
+    },
+    "F06-STALE-ALLOCATE": {
+      "source": "api",
+      "action": "allocateReceipt",
+      "errorCode": "STALE_VERSION"
+    },
+    "F06-DANGER-UNREVIEW": {
+      "source": "api",
+      "action": "reviewCharge",
+      "errorCode": "DOWNSTREAM_DEPENDENCY_EXISTS"
+    }
+  },
+  "F07": {
+    "F07-NORMAL": { "source": "api", "action": "createPayableImport" },
+    "F07-FAILED-IMPORT": {
+      "source": "api",
+      "action": "validatePayableImport",
+      "errorCode": "IMPORT_VALIDATION_FAILED"
+    },
+    "F07-PARTIAL": {
+      "source": "api",
+      "action": "commitPayableImport",
+      "errorCode": "IMPORT_PARTIAL_FAILURE"
+    },
+    "F07-STALE-COST": {
+      "source": "api",
+      "action": "reconcilePayables",
+      "errorCode": "REVIEWED_CHARGE_IMMUTABLE"
+    },
+    "F07-FORBIDDEN-PAY": {
+      "source": "api",
+      "action": "createDisbursement",
+      "errorCode": "APPROVAL_REQUIRED"
+    }
+  },
+  "F08": {
+    "F08-NORMAL": { "source": "api", "action": "previewEffectivePermissions" },
+    "F08-FAILED-LOCKOUT": {
+      "source": "api",
+      "action": "updateRolePolicy",
+      "errorCode": "LAST_ADMIN_LOCKOUT"
+    },
+    "F08-STALE": {
+      "source": "api",
+      "action": "updateRolePolicy",
+      "errorCode": "STALE_VERSION"
+    },
+    "F08-FORBIDDEN": {
+      "source": "api",
+      "action": "startPermissionSimulation",
+      "errorCode": "PERMISSION_DENIED"
+    },
+    "F08-SESSION": {
+      "source": "api",
+      "action": "endPermissionSimulation",
+      "errorCode": "SESSION_REVOKED"
+    }
+  },
+  "F09": {
+    "F09-NORMAL": { "source": "api", "action": "syncDeviceEvents" },
+    "F09-MEDIA-RESERVATION": {
+      "source": "api",
+      "action": "uploadDeviceMedia"
+    },
+    "F09-LAST-MILE": {
+      "source": "api",
+      "action": "updateDeliveryTaskStatus"
+    },
+    "F09-POD": {
+      "source": "api",
+      "action": "captureProofOfDelivery"
+    },
+    "F09-DUPLICATE": {
+      "source": "api",
+      "action": "syncDeviceEvents",
+      "errorCode": "DEVICE_EVENT_DUPLICATE"
+    },
+    "F09-CONFLICT": {
+      "source": "api",
+      "action": "resolveDeviceConflict",
+      "errorCode": "DEVICE_SYNC_CONFLICT"
+    },
+    "F09-BLOCKED": {
+      "source": "client",
+      "action": "clientAction:blockQueueAtCapacity",
+      "errorCode": "DEVICE_QUEUE_FULL"
+    },
+    "F09-RESTART": {
+      "source": "client",
+      "action": "clientAction:resumeAfterRestart",
+      "errorCode": "WAREHOUSE_SWITCH_BLOCKED"
+    },
+    "F09-TAKEOVER-AUTH": {
+      "source": "api",
+      "action": "authorizeDeviceTakeoverExport"
+    },
+    "F09-TAKEOVER-UPLOAD": {
+      "source": "api",
+      "action": "uploadEncryptedDeviceTakeoverExport"
+    },
+    "F09-TAKEOVER-EXPIRED": {
+      "source": "api",
+      "action": "uploadEncryptedDeviceTakeoverExport",
+      "errorCode": "TAKEOVER_AUTHORIZATION_EXPIRED"
+    }
+  },
+  "F10": {
+    "F10-NORMAL": { "source": "api", "action": "proposeAiMapping" },
+    "F10-LOW-CONFIDENCE": {
+      "source": "api",
+      "action": "applyLowRiskMappings",
+      "errorCode": "AI_LOW_CONFIDENCE"
+    },
+    "F10-FAILED-MODEL": {
+      "source": "api",
+      "action": "proposeAiMapping",
+      "errorCode": "MODEL_UNAVAILABLE"
+    },
+    "F10-FORBIDDEN": {
+      "source": "api",
+      "action": "approveAiAction",
+      "errorCode": "PERMISSION_DENIED"
+    },
+    "F10-ROLLBACK": {
+      "source": "api",
+      "action": "rollbackAiAction",
+      "errorCode": "AI_ACTION_NOT_ROLLBACKABLE"
+    }
+  }
+}

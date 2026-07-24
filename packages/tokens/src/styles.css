@@ -1,0 +1,105 @@
+:root {
+  color-scheme: light;
+  --zl-color-white: #ffffff;
+  --zl-color-graphite-950: #111827;
+  --zl-color-graphite-900: #1f2937;
+  --zl-color-graphite-800: #273449;
+  --zl-color-graphite-700: #374151;
+  --zl-color-graphite-600: #4b5563;
+  --zl-color-graphite-500: #6b7280;
+  --zl-color-graphite-400: #9ca3af;
+  --zl-color-graphite-300: #d1d5db;
+  --zl-color-graphite-200: #e5e7eb;
+  --zl-color-graphite-100: #f3f4f6;
+  --zl-color-graphite-50: #f8fafc;
+  --zl-color-teal-900: #134e4a;
+  --zl-color-teal-800: #115e59;
+  --zl-color-teal-700: #0f766e;
+  --zl-color-teal-600: #0d9488;
+  --zl-color-teal-500: #14b8a6;
+  --zl-color-teal-100: #ccfbf1;
+  --zl-color-teal-50: #f0fdfa;
+  --zl-color-blue-600: #2563eb;
+  --zl-color-green-700: #15803d;
+  --zl-color-green-600: #16a34a;
+  --zl-color-amber-600: #d97706;
+  --zl-color-red-700: #b91c1c;
+  --zl-color-red-600: #dc2626;
+  --zl-color-page: #f8fafc;
+  --zl-color-surface: #ffffff;
+  --zl-color-nav: #1f2937;
+  --zl-color-text: #111827;
+  --zl-color-text-secondary: #4b5563;
+  --zl-color-text-muted: #6b7280;
+  --zl-color-border: #e5e7eb;
+  --zl-color-primary: #0f766e;
+  --zl-color-focus: #14b8a6;
+  --zl-font-sans:
+    'Noto Sans SC', Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --zl-font-data: Inter, 'Noto Sans SC', system-ui, sans-serif;
+  --zl-space-1: 2px;
+  --zl-space-2: 4px;
+  --zl-space-3: 6px;
+  --zl-space-4: 8px;
+  --zl-space-5: 12px;
+  --zl-space-6: 16px;
+  --zl-space-7: 20px;
+  --zl-space-8: 24px;
+  --zl-space-9: 32px;
+  --zl-radius-control: 4px;
+  --zl-radius-panel: 6px;
+  --zl-radius-large: 8px;
+  --zl-control-compact: 28px;
+  --zl-control-default: 32px;
+  --zl-control-large: 40px;
+  --zl-table-row: 32px;
+  --zl-table-header: 36px;
+  --zl-sidebar-width: 224px;
+  --zl-sidebar-collapsed-width: 56px;
+  --zl-topbar-height: 48px;
+  --zl-tabbar-height: 36px;
+  --zl-drawer-width: 480px;
+  --zl-drawer-wide-width: 640px;
+  --zl-shadow-popover: 0 8px 24px rgba(17, 24, 39, 0.12);
+  --zl-shadow-drawer: -8px 0 24px rgba(17, 24, 39, 0.1);
+  --zl-motion-fast: 120ms;
+  --zl-motion-drawer: 180ms;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: var(--zl-color-text);
+  background: var(--zl-color-page);
+  font-family: var(--zl-font-sans);
+  font-size: 14px;
+  line-height: 1.57;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+:where(button, input, select, textarea, a):focus-visible {
+  outline: 2px solid var(--zl-color-focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

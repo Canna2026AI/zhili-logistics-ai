@@ -1,0 +1,101 @@
+.orders-permission {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 34px;
+  margin: -10px -12px 10px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--zl-color-border);
+  color: var(--zl-color-text-muted);
+  background: #fff;
+  font-size: 12px;
+}
+.orders-permission--active {
+  color: #9a5b06;
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+.orders-permission > div {
+  display: grid;
+  gap: 1px;
+}
+.orders-dashboard > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.orders-dashboard h1 {
+  margin: 0;
+  font-size: 24px;
+}
+.orders-dashboard header p {
+  margin: 2px 0 0;
+  color: var(--zl-color-text-muted);
+  font-size: 12px;
+}
+.orders-dashboard__metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  margin: 14px 0;
+  border: 1px solid var(--zl-color-border);
+  background: #fff;
+}
+.orders-dashboard__metrics button {
+  display: grid;
+  gap: 3px;
+  padding: 14px 16px;
+  text-align: left;
+  border: 0;
+  border-right: 1px solid var(--zl-color-border);
+  background: transparent;
+}
+.orders-dashboard__metrics button:last-child {
+  border-right: 0;
+}
+.orders-dashboard__metrics button:hover {
+  background: var(--zl-color-teal-50);
+}
+.orders-dashboard__metrics strong {
+  font-size: 24px;
+  font-variant-numeric: tabular-nums;
+}
+.orders-dashboard__metrics span {
+  color: var(--zl-color-text-secondary);
+  font-size: 12px;
+}
+.orders-dashboard__lanes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.orders-dashboard__lanes section {
+  border: 1px solid var(--zl-color-border);
+  border-radius: 6px;
+  background: #fff;
+}
+.orders-dashboard__lanes h2 {
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--zl-color-border);
+  font-size: 15px;
+}
+.orders-dashboard__lanes ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.orders-dashboard__lanes li {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--zl-color-border);
+  font-size: 12px;
+}
+.orders-dashboard__lanes li:last-child {
+  border-bottom: 0;
+}
+.orders-dashboard__lanes li > span {
+  color: var(--zl-color-text-secondary);
+}

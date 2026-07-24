@@ -1,0 +1,20 @@
+* @Canna2026AI
+
+# 五个可独立协作的产品端
+/apps/ops/ @Canna2026AI
+/apps/customer-portal/ @Canna2026AI
+/apps/pda/ @Canna2026AI
+/apps/platform/ @Canna2026AI
+/apps/website/ @Canna2026AI
+
+# 后端运行入口
+/apps/api/ @Canna2026AI
+/apps/worker/ @Canna2026AI
+
+# 共享边界必须由仓库 owner 复核
+/packages/contracts/ @Canna2026AI
+/packages/api-client/ @Canna2026AI
+/packages/tokens/ @Canna2026AI
+/packages/ui/ @Canna2026AI
+/packages/features/ @Canna2026AI
+/infra/ @Canna2026AI
