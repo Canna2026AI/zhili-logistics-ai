@@ -18,6 +18,7 @@ export interface ImportWorkbenchProps {
   job?: ImportJobRef | null;
   proposal?: AiMappingProposalRef | null;
   mappingApplied?: boolean;
+  onBatchCreated?: (job: ImportJobRef) => void;
   onJobChange?: (job: ImportJobRef) => void;
   onProposalChange?: (proposal: AiMappingProposalRef) => void;
   onError?: (error: DomainApiError, operation: ImportOperation) => void;
@@ -29,6 +30,7 @@ export function ImportWorkbench({
   job: controlledJob,
   proposal: controlledProposal,
   mappingApplied = false,
+  onBatchCreated,
   onJobChange,
   onProposalChange,
   onError,
@@ -107,9 +109,12 @@ export function ImportWorkbench({
             void (async () => {
               const created = await run('create', () => port.create(`inline-csv:${csv.length}`));
               if (!created) return;
-              setJob(created);
+              if (onBatchCreated) onBatchCreated(created);
+              else setJob(created);
               setStep('mapping');
               setLocalMappingApplied(false);
+              setLocalProposal(null);
+              setSelectedMappingIds([]);
               if (typeof port.proposeMapping === 'function') {
                 const proposed = await run('propose', () =>
                   port.proposeMapping(created.id, created.version)

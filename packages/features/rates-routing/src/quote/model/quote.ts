@@ -84,6 +84,24 @@ export interface QuotePort {
   submitForecast(quoteId: string, optionId: string, version: number): Promise<QuoteActionResult>;
 }
 
+export type QuoteAcceptabilityCode =
+  'QUOTE_NOT_ACCEPTABLE' | 'QUOTE_EXPIRED' | 'QUOTE_OPTIONS_UNAVAILABLE';
+
+export function quoteAcceptabilityCode(
+  quote: CalculatedQuote,
+  now = Date.now()
+): QuoteAcceptabilityCode | undefined {
+  if (quote.status !== 'CALCULATED') return 'QUOTE_NOT_ACCEPTABLE';
+  const validUntil = Date.parse(quote.validUntil ?? '');
+  if (!Number.isFinite(validUntil) || validUntil <= now) return 'QUOTE_EXPIRED';
+  if (!quote.options.some((option) => option.available)) return 'QUOTE_OPTIONS_UNAVAILABLE';
+  return undefined;
+}
+
+export function isQuoteAcceptable(quote: CalculatedQuote, now = Date.now()) {
+  return quoteAcceptabilityCode(quote, now) === undefined;
+}
+
 export const quoteInputFixture: QuoteInputFixture = {
   volumeDivisor: 6000,
   request: {
@@ -215,6 +233,8 @@ export function calculateQuote(input: QuoteInputFixture): CalculatedQuote {
   return {
     id: 'quote-2505120042',
     quoteNo: 'Q2505120042',
+    status: 'CALCULATED',
+    validUntil: '2099-12-31T23:59:59Z',
     version: 1,
     chargeableWeightKg: chargeableWeight.toFixed(2),
     volumeWeightKg: volumeWeight.toFixed(2),

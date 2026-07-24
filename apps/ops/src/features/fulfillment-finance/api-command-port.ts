@@ -1,4 +1,4 @@
-import type { ZhiliApiClient } from '@zhili/api-client';
+import { DomainApiError, toDomainApiError, type ZhiliApiClient } from '@zhili/api-client';
 import type { paths } from '../../../../../packages/contracts/src';
 import type {
   FulfillmentFinanceCommand,
@@ -254,15 +254,24 @@ interface ApiCallOptions {
 
 type ApiCall = (path: ApiPath, options: ApiCallOptions) => Promise<ApiCallResult>;
 
-function errorMessage(error: unknown): string {
-  if (typeof error === 'object' && error && 'detail' in error) return String(error.detail);
-  if (typeof error === 'object' && error && 'title' in error) return String(error.title);
-  return 'API 命令执行失败';
-}
-
 function recordString(record: Record<string, unknown>, key: string) {
   const value = record[key];
   return typeof value === 'string' && value.trim() ? value : undefined;
+}
+
+function serverResource(data: unknown): { id: string; version?: number } | undefined {
+  if (typeof data !== 'object' || !data) return undefined;
+  const envelope = data as Record<string, unknown>;
+  const nested = envelope.data;
+  const source =
+    typeof nested === 'object' && nested ? (nested as Record<string, unknown>) : envelope;
+  const id = recordString(source, 'resourceId') ?? recordString(source, 'id');
+  if (!id) return undefined;
+  const version = source.version;
+  return {
+    id,
+    ...(typeof version === 'number' && Number.isInteger(version) ? { version } : {}),
+  };
 }
 
 function serverEvidence(
@@ -334,10 +343,30 @@ export function createApiFulfillmentFinanceCommandPort(
                   : (command.payload ?? {}),
             });
 
-      if (result.error) throw new Error(errorMessage(result.error));
+      if (result.error) throw toDomainApiError(result.error, result.response);
       const evidence = serverEvidence(result.data, result.response);
       if (!evidence) throw new Error('API 响应缺少审计、请求追踪或资源证据');
-      return { evidence };
+      const resource = route.method === 'POST' ? serverResource(result.data) : undefined;
+      if (
+        resource?.id === command.entityRef &&
+        command.expectedVersion !== undefined &&
+        (resource.version === undefined || resource.version <= command.expectedVersion)
+      ) {
+        throw new DomainApiError('服务端资源版本未推进', {
+          code: 'FULFILLMENT_VERSION_NOT_ADVANCED',
+          details: {
+            resourceId: resource.id,
+            previousVersion: command.expectedVersion,
+            returnedVersion: resource.version,
+          },
+        });
+      }
+      return {
+        evidence,
+        ...(resource?.id === command.entityRef && resource.version !== undefined
+          ? { resource: { id: resource.id, version: resource.version } }
+          : {}),
+      };
     },
   };
 }

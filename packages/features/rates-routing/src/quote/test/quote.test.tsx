@@ -7,6 +7,24 @@ import { createQuoteApi } from '../adapters/api/quote-api';
 describe('multi-channel quote', () => {
   const quoteId = '01JY8Z8F6ME4F0Y9QH2X6D4R7B';
   const optionId = '01JY8Z8F6ME4F0Y9QH2X6D4R7C';
+  const authoritativeQuote = (overrides: Record<string, unknown> = {}) => ({
+    id: quoteId,
+    quoteNo: 'Q-SERVER-GUARD',
+    status: 'CALCULATED',
+    validUntil: '2099-07-23T10:00:00+08:00',
+    version: 6,
+    options: [
+      {
+        id: optionId,
+        channelProductId: '01JY8Z8F6ME4F0Y9QH2X6D4R7D',
+        chargeableWeightKg: '88.00',
+        lines: [],
+        total: { amount: '999.99', currency: 'CNY' },
+        available: true,
+      },
+    ],
+    ...overrides,
+  });
 
   it('derives chargeable weight and canonical amount from line formulas', () => {
     const quote = calculateQuote(quoteInputFixture);
@@ -82,6 +100,53 @@ describe('multi-channel quote', () => {
     );
   });
 
+  it.each([
+    ['EXPIRED status', { status: 'EXPIRED' }, 'QUOTE_NOT_ACCEPTABLE'],
+    ['past validUntil', { validUntil: '2020-01-01T00:00:00Z' }, 'QUOTE_EXPIRED'],
+    [
+      'no available option',
+      { options: [{ ...authoritativeQuote().options[0], available: false }] },
+      'QUOTE_OPTIONS_UNAVAILABLE',
+    ],
+  ])('rejects an authoritative quote with %s', async (_label, overrides, expectedCode) => {
+    const POST = vi.fn().mockResolvedValue({
+      data: { data: authoritativeQuote(overrides), meta: {} },
+      response: new Response(null),
+    });
+    const adapter = createQuoteApi({ POST, GET: vi.fn() } as never, () => 'guard-intent');
+
+    await expect(
+      adapter.create({
+        quote: quoteInputFixture.request,
+        orderContext: { orderType: 'STANDARD' },
+      })
+    ).rejects.toMatchObject({ code: expectedCode });
+  });
+
+  it.each([
+    ['EXPIRED status', { status: 'EXPIRED' as const, validUntil: '2099-01-01T00:00:00Z' }],
+    ['past validUntil', { status: 'CALCULATED' as const, validUntil: '2020-01-01T00:00:00Z' }],
+    [
+      'all unavailable options',
+      {
+        status: 'CALCULATED' as const,
+        validUntil: '2099-01-01T00:00:00Z',
+        options: calculateQuote(quoteInputFixture).options.map((option) => ({
+          ...option,
+          available: false,
+        })),
+      },
+    ],
+  ])('does not expose accept or select an unavailable fallback for %s', (_label, overrides) => {
+    const snapshot = { ...calculateQuote(quoteInputFixture), ...overrides };
+    render(<QuoteWorkbench snapshot={snapshot} />);
+
+    expect(screen.queryByRole('button', { name: '接受报价' })).not.toBeInTheDocument();
+    if (snapshot.options.every((option) => !option.available)) {
+      expect(screen.queryByRole('radio', { checked: true })).not.toBeInTheDocument();
+    }
+  });
+
   it('returns the identity-checked authoritative accepted quote snapshot', async () => {
     const request = {
       quote: { ...quoteInputFixture.request, customerId: '01JY8Z8F6ME4F0Y9QH2X6D4R7A' },
@@ -91,7 +156,7 @@ describe('multi-channel quote', () => {
       id: quoteId,
       quoteNo: 'Q-SERVER-1',
       status: 'CALCULATED',
-      validUntil: '2026-07-23T10:00:00+08:00',
+      validUntil: '2099-07-23T10:00:00+08:00',
       version: 6,
       options: [
         {
@@ -129,7 +194,7 @@ describe('multi-channel quote', () => {
       id: quoteId,
       quoteNo: 'Q-SERVER-LOST-1',
       status: 'CALCULATED',
-      validUntil: '2026-07-23T10:00:00+08:00',
+      validUntil: '2099-07-23T10:00:00+08:00',
       version: 6,
       options: [
         {
@@ -168,7 +233,7 @@ describe('multi-channel quote', () => {
           id: quoteId,
           quoteNo: 'Q-1',
           status: 'CALCULATED',
-          validUntil: '2026-07-23T10:00:00+08:00',
+          validUntil: '2099-07-23T10:00:00+08:00',
           version: 1,
           options: [
             {
@@ -212,7 +277,7 @@ describe('multi-channel quote', () => {
           id: quoteId,
           quoteNo: 'Q-SERVER-1',
           status: 'CALCULATED',
-          validUntil: '2026-07-23T10:00:00+08:00',
+          validUntil: '2099-07-23T10:00:00+08:00',
           version: 6,
           options: [
             {

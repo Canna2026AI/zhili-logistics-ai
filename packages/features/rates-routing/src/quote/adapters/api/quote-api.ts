@@ -1,10 +1,11 @@
 import { DomainApiError, toDomainApiError, type ZhiliApiClient } from '@zhili/api-client';
 import type { components } from '@zhili/contracts';
-import type {
-  CalculatedOption,
-  CalculatedQuote,
-  QuotePort,
-  QuoteWorkflowRequest,
+import {
+  quoteAcceptabilityCode,
+  type CalculatedOption,
+  type CalculatedQuote,
+  type QuotePort,
+  type QuoteWorkflowRequest,
 } from '../../model/quote';
 
 function volumeWeight(request: QuoteWorkflowRequest['quote']) {
@@ -155,6 +156,10 @@ export function createQuoteApi(
         throw new DomainApiError('QUOTE_RESPONSE_EMPTY', { code: 'QUOTE_RESPONSE_EMPTY' });
       assertRemoteQuote(remote);
       const quote = mapRemoteQuote(remote, request);
+      const acceptabilityCode = quoteAcceptabilityCode(quote);
+      if (acceptabilityCode) {
+        throw new DomainApiError(acceptabilityCode, { code: acceptabilityCode });
+      }
       quoteRequests.set(quote.id, request);
       pendingIntentKeys.delete(intent);
       return quote;

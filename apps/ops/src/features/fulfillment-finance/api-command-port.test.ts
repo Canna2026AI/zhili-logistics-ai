@@ -81,7 +81,10 @@ describe('API fulfillment finance command port', () => {
       reason: '承运商补传尾程费用',
       version: 11,
     });
-    expect(result).toEqual({ evidence: { kind: 'trace', requestId: 'REQ-FIN-0098' } });
+    expect(result).toEqual({
+      evidence: { kind: 'trace', requestId: 'REQ-FIN-0098' },
+      resource: { id: 'CHG-S2505120004', version: 12 },
+    });
   });
 
   it('sends WH-08 print through the generated client instead of local success', async () => {
@@ -166,6 +169,7 @@ describe('API fulfillment finance command port', () => {
       })
     ).resolves.toEqual({
       evidence: { kind: 'audit', auditId: 'AUD-EVENT-0098' },
+      resource: { id: 'CHG-S2505120004', version: 12 },
     });
   });
 
@@ -195,5 +199,93 @@ describe('API fulfillment finance command port', () => {
         payload: { documentType: 'HANDOVER', copies: 1 },
       })
     ).rejects.toThrow('If-Match 7 已过期');
+  });
+
+  it('returns the authoritative resource version for a versioned mutation', async () => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json({
+          data: {
+            resourceId: 'RCV-S2505120004',
+            auditEventId: 'AUD-RCV-0008',
+            status: 'MEASURED',
+            version: 8,
+          },
+          meta: { requestId: 'REQ-RCV-0008', timestamp: '2026-07-22T08:00:00Z' },
+        }),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'warehouse',
+        operationId: 'recordMeasurement',
+        entityRef: 'RCV-S2505120004',
+        idempotencyKey: 'recordMeasurement:RCV-S2505120004:v7:test',
+        expectedVersion: 7,
+        payload: { actualWeightKg: 123.5 },
+      })
+    ).resolves.toEqual({
+      evidence: { kind: 'audit', auditId: 'AUD-RCV-0008' },
+      resource: { id: 'RCV-S2505120004', version: 8 },
+    });
+  });
+
+  it('fails closed when a versioned mutation does not advance the resource version', async () => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json({
+          data: {
+            resourceId: 'RCV-S2505120004',
+            status: 'MEASURED',
+            version: 7,
+          },
+          meta: { requestId: 'REQ-RCV-STALE', timestamp: '2026-07-22T08:00:00Z' },
+        }),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'warehouse',
+        operationId: 'recordMeasurement',
+        entityRef: 'RCV-S2505120004',
+        idempotencyKey: 'recordMeasurement:RCV-S2505120004:v7:test',
+        expectedVersion: 7,
+        payload: { actualWeightKg: 123.5 },
+      })
+    ).rejects.toMatchObject({ code: 'FULFILLMENT_VERSION_NOT_ADVANCED' });
+  });
+
+  it('preserves the generated-client 412 as a typed domain error', async () => {
+    const client = createZhiliClient({
+      baseUrl: 'https://api.zhili.test/v1',
+      fetch: async () =>
+        Response.json(
+          {
+            status: 412,
+            code: 'PRECONDITION_FAILED',
+            detail: '装载单已推进到版本 8',
+            remediation: '刷新装载单后重试',
+            requestId: 'REQ-LOAD-412',
+          },
+          { status: 412 }
+        ),
+    });
+
+    await expect(
+      createApiFulfillmentFinanceCommandPort(client).execute({
+        domain: 'linehaul',
+        operationId: 'dispatchLoadUnit',
+        entityRef: 'CNT-SZX-260722-01',
+        idempotencyKey: 'dispatchLoadUnit:CNT-SZX-260722-01:v4:test',
+        expectedVersion: 4,
+      })
+    ).rejects.toMatchObject({
+      name: 'DomainApiError',
+      status: 412,
+      code: 'PRECONDITION_FAILED',
+      requestId: 'REQ-LOAD-412',
+    });
   });
 });

@@ -13,7 +13,7 @@ const calculatedQuote = {
   id: quoteId,
   quoteNo: 'Q-SERVER-20260723',
   status: 'CALCULATED',
-  validUntil: '2026-07-23T18:00:00+08:00',
+  validUntil: '2099-07-23T18:00:00+08:00',
   version: 6,
   options: [
     {
@@ -46,6 +46,17 @@ async function expectNoSeriousAxe(page: import('@playwright/test').Page) {
     );
   });
   expect(violations).toEqual([]);
+}
+
+async function gridTrackCount(
+  locator: import('@playwright/test').Locator,
+  property: 'gridTemplateColumns' | 'gridTemplateRows' = 'gridTemplateColumns'
+) {
+  return locator.evaluate(
+    (element, computedProperty) =>
+      getComputedStyle(element)[computedProperty].trim().split(/\s+/).filter(Boolean).length,
+    property
+  );
 }
 
 test('运营总入口在订单、履约与财务之间保持真实路由', async ({ page }) => {
@@ -205,14 +216,68 @@ test('生产 AI 提案路由的 422 携带 proposal 进入人工映射', async (
   await expect(page.getByRole('option', { name: /province.*32%/ })).toHaveValue(candidateId);
 });
 
+test('生产履约 412 进入 F04 装载并发恢复态', async ({ page }) => {
+  let dispatchedRequest: import('@playwright/test').Request | undefined;
+  await page.route(
+    /\/api\/v1\/linehaul\/load-units\/CNT-SZX-260722-01:dispatch$/,
+    async (route) => {
+      dispatchedRequest = route.request();
+      await route.fulfill({
+        status: 412,
+        contentType: 'application/problem+json',
+        body: JSON.stringify({
+          status: 412,
+          code: 'PRECONDITION_FAILED',
+          detail: '装载单已推进到版本 8',
+          remediation: '刷新装载单后重试',
+          requestId: 'REQ-LOAD-412',
+        }),
+      });
+    }
+  );
+  await page.goto('/operations/fulfillment-finance/linehaul');
+  await page.getByRole('button', { name: '确认出库' }).click();
+
+  await expect(page.getByText('装载任务已被他人更新')).toBeVisible();
+  await expect(page.getByRole('button', { name: '确认出库' })).toBeDisabled();
+  expect(dispatchedRequest?.headers()['if-match']).toBe('"4"');
+  expect(dispatchedRequest?.headers()['idempotency-key']).toMatch(
+    /^dispatchLoadUnit:CNT-SZX-260722-01:v4:p[0-9a-f]{16}$/
+  );
+  await expectNoSeriousAxe(page);
+});
+
 test('生产 390px 报价页无横向画布且 axe serious critical 为 0', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/operations/orders');
   await page.getByRole('button', { name: '报价管理' }).click();
-  await expect(page.locator('.quote-workbench')).toHaveCSS(
-    'grid-template-columns',
-    /370px|[0-9.]+px/
-  );
+  expect(await gridTrackCount(page.locator('.quote-workbench'))).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await expectNoSeriousAxe(page);
+});
+
+test('390px F10 映射为单列且无横向画布', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/operations/orders?mock=1');
+  await page.getByRole('button', { name: '导入运单' }).click();
+  await page.getByLabel('导入 CSV').fill('客户,重量,目的地\n深圳鑫源贸易有限公司,122,US-LAX');
+  await page.getByRole('button', { name: '解析并映射' }).click();
+  await expect(page.getByRole('button', { name: '应用字段映射' })).toBeVisible();
+
+  expect(await gridTrackCount(page.locator('.order-row'))).toBe(1);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await expectNoSeriousAxe(page);
+});
+
+test('390px F04 卡片为单列且主工作区不越界', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/operations/fulfillment-finance/linehaul?mock=1');
+  await expect(page.getByRole('heading', { name: '干线与尾程履约' })).toBeVisible();
+
+  expect(await gridTrackCount(page.locator('.ff-three-panels'))).toBe(1);
+  expect(
+    await page.locator('.ff-workbench').evaluate((element) => element.getBoundingClientRect().right)
+  ).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expectNoSeriousAxe(page);
 });

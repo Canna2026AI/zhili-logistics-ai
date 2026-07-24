@@ -1,5 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { Button, DataTable, Dialog, Input, StatusTag, type DataTableColumn } from '@zhili/ui';
+import { DomainApiError, toDomainApiError } from '@zhili/api-client';
 import { buildDangerousFinanceCommand } from '../../../../../packages/features/finance/src';
 import { deriveMeasurement } from '../../../../../packages/features/warehouse/src';
 import {
@@ -9,6 +10,7 @@ import {
   type OpsFlowId,
   type OpsFlowSelection,
 } from '../interaction-states';
+import { createFulfillmentCommand } from './fulfillment-command';
 import './fulfillment-finance-workbench.css';
 
 export type FulfillmentSection = 'warehouse' | 'linehaul' | 'tracking' | 'finance';
@@ -102,6 +104,10 @@ export type FulfillmentFinanceCommandEvidence =
 
 export interface FulfillmentFinanceCommandResult {
   evidence: FulfillmentFinanceCommandEvidence;
+  resource?: {
+    id: string;
+    version: number;
+  };
 }
 
 export interface FulfillmentFinanceCommandPort {
@@ -122,22 +128,7 @@ type RunCommand = (
   onResolved?: () => void
 ) => Promise<void>;
 
-function command(
-  domain: FulfillmentSection,
-  operationId: FulfillmentFinanceOperationId,
-  entityRef: string,
-  expectedVersion = 1,
-  payload?: Record<string, unknown>
-): FulfillmentFinanceCommand {
-  return {
-    domain,
-    operationId,
-    entityRef,
-    idempotencyKey: `${operationId}:${entityRef}:v${expectedVersion}`,
-    expectedVersion,
-    payload,
-  };
-}
+const command = createFulfillmentCommand;
 
 const measurement = deriveMeasurement({
   expectedWeightKg: 122,
@@ -1915,6 +1906,7 @@ export function FulfillmentFinanceWorkbench({
   const [commandPending, setCommandPending] = useState(false);
   const commandPendingRef = useRef(false);
   const auditedCommandKeysRef = useRef(new Set<string>());
+  const authoritativeVersionsRef = useRef(new Map<string, number>());
   const active = navItems.find((item) => item.id === section)!;
   const scenarioFlows: OpsFlowId[] =
     section === 'warehouse'
@@ -1925,19 +1917,68 @@ export function FulfillmentFinanceWorkbench({
           ? ['F05']
           : ['F06', 'F07'];
 
+  const prepareCommand = (nextCommand: FulfillmentFinanceCommand) => {
+    const expectedVersion =
+      authoritativeVersionsRef.current.get(nextCommand.entityRef) ?? nextCommand.expectedVersion;
+    if (expectedVersion === undefined || expectedVersion === nextCommand.expectedVersion) {
+      return nextCommand;
+    }
+    return createFulfillmentCommand(
+      nextCommand.domain,
+      nextCommand.operationId,
+      nextCommand.entityRef,
+      expectedVersion,
+      nextCommand.payload
+    );
+  };
+
+  const acceptAuthoritativeVersion = (
+    executedCommand: FulfillmentFinanceCommand,
+    result: FulfillmentFinanceCommandResult
+  ) => {
+    if (!result.resource || result.resource.id !== executedCommand.entityRef) return;
+    if (
+      executedCommand.expectedVersion !== undefined &&
+      result.resource.version <= executedCommand.expectedVersion
+    ) {
+      throw new DomainApiError('服务端资源版本未推进', {
+        code: 'FULFILLMENT_VERSION_NOT_ADVANCED',
+      });
+    }
+    authoritativeVersionsRef.current.set(result.resource.id, result.resource.version);
+  };
+
+  const normalizeCommandError = (error: unknown, failedCommand: FulfillmentFinanceCommand) => {
+    const domainError = toDomainApiError(error);
+    if (
+      domainError.status === 412 ||
+      domainError.code === 'PRECONDITION_FAILED' ||
+      domainError.code === 'STALE_VERSION'
+    ) {
+      if (failedCommand.domain === 'linehaul') {
+        setScenario({ flowId: 'F04', stateId: 'stale-load' });
+      } else {
+        setViewState('stale');
+      }
+    }
+    return domainError;
+  };
+
   const runCommand: RunCommand = async (nextCommand, successMessage, onResolved) => {
     if (commandPendingRef.current) return;
+    const executedCommand = prepareCommand(nextCommand);
     commandPendingRef.current = true;
     setCommandPending(true);
-    setFeedback({ kind: 'pending', message: `正在提交 ${nextCommand.operationId}` });
+    setFeedback({ kind: 'pending', message: `正在提交 ${executedCommand.operationId}` });
     try {
-      const result = await commandPort.execute(nextCommand);
+      const result = await commandPort.execute(executedCommand);
+      acceptAuthoritativeVersion(executedCommand, result);
       onResolved?.();
       if (
         result.evidence.kind === 'audit' &&
-        !auditedCommandKeysRef.current.has(nextCommand.idempotencyKey)
+        !auditedCommandKeysRef.current.has(executedCommand.idempotencyKey)
       ) {
-        auditedCommandKeysRef.current.add(nextCommand.idempotencyKey);
+        auditedCommandKeysRef.current.add(executedCommand.idempotencyKey);
         setAuditCount((count) => count + 1);
       }
       setFeedback({
@@ -1945,8 +1986,11 @@ export function FulfillmentFinanceWorkbench({
         message: `${successMessage} · ${evidenceLabel(result.evidence)}`,
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : '命令执行失败';
-      setFeedback({ kind: 'error', message: `操作失败：${message}。输入与幂等键已保留，可重试。` });
+      const domainError = normalizeCommandError(error, executedCommand);
+      setFeedback({
+        kind: 'error',
+        message: `操作失败：${domainError.message}。输入与幂等键已保留，可重试。`,
+      });
     } finally {
       commandPendingRef.current = false;
       setCommandPending(false);
@@ -1958,22 +2002,24 @@ export function FulfillmentFinanceWorkbench({
     message: string
   ): Promise<FlowStateActionResult> => {
     if (commandPendingRef.current) throw new Error('已有命令正在执行，请等待完成');
+    const executedCommand = prepareCommand(nextCommand);
     commandPendingRef.current = true;
     setCommandPending(true);
     try {
-      const result = await commandPort.execute(nextCommand);
+      const result = await commandPort.execute(executedCommand);
+      acceptAuthoritativeVersion(executedCommand, result);
       if (
         result.evidence.kind === 'audit' &&
-        !auditedCommandKeysRef.current.has(nextCommand.idempotencyKey)
+        !auditedCommandKeysRef.current.has(executedCommand.idempotencyKey)
       ) {
-        auditedCommandKeysRef.current.add(nextCommand.idempotencyKey);
+        auditedCommandKeysRef.current.add(executedCommand.idempotencyKey);
         setAuditCount((count) => count + 1);
       }
       return {
         message,
         evidence: {
           kind: 'server',
-          operationId: nextCommand.operationId,
+          operationId: executedCommand.operationId,
           ...(result.evidence.kind === 'audit'
             ? { auditId: result.evidence.auditId }
             : result.evidence.kind === 'trace'
@@ -1981,6 +2027,8 @@ export function FulfillmentFinanceWorkbench({
               : { resourceId: result.evidence.resourceId }),
         },
       };
+    } catch (error) {
+      throw normalizeCommandError(error, executedCommand);
     } finally {
       commandPendingRef.current = false;
       setCommandPending(false);
@@ -2102,6 +2150,8 @@ export function FulfillmentFinanceWorkbench({
         {navItems.map((item) => (
           <button
             key={item.id}
+            aria-label={item.label}
+            title={item.label}
             data-active={section === item.id}
             aria-current={section === item.id ? 'page' : undefined}
             onClick={() => {

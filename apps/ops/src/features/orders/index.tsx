@@ -479,6 +479,16 @@ export function OpsOrdersWorkspace({
           job={importJob}
           proposal={importProposal}
           mappingApplied={mappingApplied}
+          onBatchCreated={(job) => {
+            setImportJob(job);
+            setManualMappingJob(job);
+            setImportProposal(null);
+            setMappingApplied(false);
+            setMappingReceipt(null);
+            setManualMappingOpen(false);
+            setMappingError('');
+            setImportFlow({ flowId: 'F10', stateId: 'normal' });
+          }}
           onJobChange={(job) => {
             setImportJob(job);
             setManualMappingJob(job);

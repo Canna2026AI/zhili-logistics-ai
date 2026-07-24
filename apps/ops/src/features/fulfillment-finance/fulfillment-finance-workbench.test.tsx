@@ -42,7 +42,7 @@ describe('fulfillment and finance workbench', () => {
         domain: 'warehouse',
         operationId: 'confirmReceipt',
         entityRef: 'RCV-S2505120004',
-        idempotencyKey: 'confirmReceipt:RCV-S2505120004:v7',
+        idempotencyKey: expect.stringMatching(/^confirmReceipt:RCV-S2505120004:v7:p[0-9a-f]{16}$/),
         expectedVersion: 7,
       })
     );
@@ -209,7 +209,7 @@ describe('fulfillment and finance workbench', () => {
       domain: 'finance',
       operationId: 'unreviewCharge',
       entityRef: 'CHG-S2505120004',
-      idempotencyKey: 'unreviewCharge:CHG-S2505120004:v11',
+      idempotencyKey: expect.stringMatching(/^unreviewCharge:CHG-S2505120004:v11:p[0-9a-f]{16}$/),
       expectedVersion: 11,
       payload: {
         reason: '承运商补传尾程费用',
@@ -298,7 +298,9 @@ describe('fulfillment and finance workbench', () => {
       domain: 'linehaul',
       operationId: 'dispatchLoadUnit',
       entityRef: 'CNT-SZX-260722-01',
-      idempotencyKey: 'dispatchLoadUnit:CNT-SZX-260722-01:v4',
+      idempotencyKey: expect.stringMatching(
+        /^dispatchLoadUnit:CNT-SZX-260722-01:v4:p[0-9a-f]{16}$/
+      ),
       expectedVersion: 4,
       payload: { confirmedIssues: 2, printedDocuments: 40 },
     });
@@ -338,7 +340,9 @@ describe('fulfillment and finance workbench', () => {
         domain: 'tracking',
         operationId: 'requestShipmentHoldReleaseApproval',
         entityRef: '01JY8Z8F6ME4F0Y9QH2X6D4R7K',
-        idempotencyKey: 'requestShipmentHoldReleaseApproval:01JY8Z8F6ME4F0Y9QH2X6D4R7K:v2',
+        idempotencyKey: expect.stringMatching(
+          /^requestShipmentHoldReleaseApproval:01JY8Z8F6ME4F0Y9QH2X6D4R7K:v2:p[0-9a-f]{16}$/
+        ),
       })
     );
     expect(screen.getByRole('status')).toHaveTextContent('AUD-F04-APPROVAL');
@@ -360,7 +364,9 @@ describe('fulfillment and finance workbench', () => {
       domain: 'warehouse',
       operationId: 'attachReceiptMedia',
       entityRef: 'RCV-S2505120004',
-      idempotencyKey: 'attachReceiptMedia:RCV-S2505120004:v7',
+      idempotencyKey: expect.stringMatching(
+        /^attachReceiptMedia:RCV-S2505120004:v7:p[0-9a-f]{16}$/
+      ),
       expectedVersion: 7,
       payload: { evidenceTypes: ['CARTON_FRONT', 'WEIGHT_READING'], retry: true },
     });
@@ -392,7 +398,9 @@ describe('fulfillment and finance workbench', () => {
       expect.objectContaining({
         operationId: 'retryNotificationDelivery',
         entityRef: 'NTF-260723-92',
-        idempotencyKey: 'retryNotificationDelivery:NTF-260723-92:v1',
+        idempotencyKey: expect.stringMatching(
+          /^retryNotificationDelivery:NTF-260723-92:v1:p[0-9a-f]{16}$/
+        ),
       })
     );
 
@@ -406,7 +414,9 @@ describe('fulfillment and finance workbench', () => {
       expect.objectContaining({
         operationId: 'retryNotificationDelivery',
         entityRef: 'NTF-260723-91',
-        idempotencyKey: 'retryNotificationDelivery:NTF-260723-91:v1',
+        idempotencyKey: expect.stringMatching(
+          /^retryNotificationDelivery:NTF-260723-91:v1:p[0-9a-f]{16}$/
+        ),
       })
     );
   });
@@ -448,7 +458,9 @@ describe('fulfillment and finance workbench', () => {
       expect(execute).toHaveBeenCalledWith(
         expect.objectContaining({
           operationId: 'validatePayableImport',
-          idempotencyKey: 'validatePayableImport:PIMP-20260722-08:v1',
+          idempotencyKey: expect.stringMatching(
+            /^validatePayableImport:PIMP-20260722-08:v1:p[0-9a-f]{16}$/
+          ),
           payload: { failedOnly: true, rowIds: [99, 100] },
         })
       )
@@ -485,7 +497,7 @@ describe('fulfillment and finance workbench', () => {
     expect(execute).toHaveBeenCalledWith(
       expect.objectContaining({
         operationId: 'unreviewCharge',
-        idempotencyKey: 'unreviewCharge:CHG-S2505120004:v11',
+        idempotencyKey: expect.stringMatching(/^unreviewCharge:CHG-S2505120004:v11:p[0-9a-f]{16}$/),
         payload: expect.objectContaining({ reason: '承运商补传费用后重算' }),
       })
     );
@@ -543,5 +555,91 @@ describe('fulfillment and finance workbench', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认收货' }));
     expect(await screen.findByRole('status')).toHaveTextContent('请求追踪 REQ-WH-TRACE-1');
     expect(screen.getByText('审计事件').parentElement).toHaveTextContent('0');
+  });
+
+  it('uses an authoritative advanced receipt version for the next sequential command', async () => {
+    const execute = vi.fn(async (next: FulfillmentFinanceCommand) => {
+      if (next.operationId === 'recordMeasurement') {
+        return {
+          evidence: { kind: 'audit' as const, auditId: 'AUD-RCV-V8' },
+          resource: { id: next.entityRef, version: 8 },
+        } as unknown as FulfillmentFinanceCommandResult;
+      }
+      return audit(`AUD-${next.operationId}`);
+    });
+    render(<FulfillmentFinanceWorkbench showScenarioControls commandPort={{ execute }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '记录测量' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '确认收货' }));
+    await waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
+
+    expect(execute.mock.calls[0]?.[0]).toMatchObject({
+      entityRef: 'RCV-S2505120004',
+      expectedVersion: 7,
+    });
+    expect(execute.mock.calls[1]?.[0]).toMatchObject({
+      entityRef: 'RCV-S2505120004',
+      expectedVersion: 8,
+    });
+  });
+
+  it('moves a real linehaul 412 into the F04 stale-load recovery state', async () => {
+    const execute = vi.fn(async () => {
+      throw Object.assign(new Error('装载单已推进到版本 8'), {
+        name: 'DomainApiError',
+        status: 412,
+        code: 'PRECONDITION_FAILED',
+        requestId: 'REQ-LOAD-412',
+      });
+    });
+    render(
+      <FulfillmentFinanceWorkbench
+        showScenarioControls
+        commandPort={{ execute }}
+        initialSection="linehaul"
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '确认出库' }));
+
+    await waitFor(() =>
+      expect(screen.getByRole('combobox', { name: '流程状态' })).toHaveValue('stale-load')
+    );
+    expect(screen.getByText('装载任务已被他人更新')).toBeVisible();
+    expect(screen.getByRole('button', { name: '确认出库' })).toBeDisabled();
+  });
+
+  it('binds idempotency keys to canonical payload intent', async () => {
+    const module = await import('./fulfillment-command');
+    const createFulfillmentCommand = (
+      module as unknown as {
+        createFulfillmentCommand?: (
+          domain: 'warehouse',
+          operationId: 'routeWaybill',
+          entityRef: string,
+          expectedVersion: number,
+          payload: Record<string, unknown>
+        ) => FulfillmentFinanceCommand;
+      }
+    ).createFulfillmentCommand;
+    expect(createFulfillmentCommand).toBeTypeOf('function');
+    if (!createFulfillmentCommand) return;
+
+    const first = createFulfillmentCommand('warehouse', 'routeWaybill', 'S2505120004', 7, {
+      route: 'COSCO AQUARIUS 085W',
+      context: { lane: 'US-LAX', priority: 1 },
+    });
+    const sameIntent = createFulfillmentCommand('warehouse', 'routeWaybill', 'S2505120004', 7, {
+      context: { priority: 1, lane: 'US-LAX' },
+      route: 'COSCO AQUARIUS 085W',
+    });
+    const differentRoute = createFulfillmentCommand('warehouse', 'routeWaybill', 'S2505120004', 7, {
+      route: 'EMC OAKLAND 082W',
+      context: { lane: 'US-LAX', priority: 1 },
+    });
+
+    expect(first.idempotencyKey).toBe(sameIntent.idempotencyKey);
+    expect(first.idempotencyKey).not.toBe(differentRoute.idempotencyKey);
   });
 });

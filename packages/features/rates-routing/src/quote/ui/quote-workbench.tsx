@@ -4,6 +4,7 @@ import { useMemo, useRef, useState } from 'react';
 import {
   calculateQuote,
   formatMoney,
+  isQuoteAcceptable,
   memoryQuotePort,
   quoteInputFixture,
   type QuoteExplanationView,
@@ -188,6 +189,7 @@ export function QuoteWorkbench({
     [request.quote]
   );
   const quoteKey = quote ? `${quote.id}:v${quote.version}` : 'UNQUOTED';
+  const quoteAcceptable = quote ? isQuoteAcceptable(quote) : false;
   const [dirtySnapshotKey, setDirtySnapshotKey] = useState<string | null>(null);
   const quoteDirty = dirtySnapshotKey === quoteKey;
   const [selectedId, setSelectedId] = useState('dhl-express');
@@ -198,13 +200,11 @@ export function QuoteWorkbench({
   const [actionStatus, setActionStatus] = useState('');
   const commodityCount = 1;
   const effectiveSelectedId = quote
-    ? quote.options.some((option) => option.id === selectedId)
+    ? quote.options.some((option) => option.id === selectedId && option.available)
       ? selectedId
-      : (quote.options.find((option) => option.available)?.id ?? quote.options[0]?.id ?? '')
+      : (quote.options.find((option) => option.available)?.id ?? '')
     : '';
-  const selected = quote
-    ? (quote.options.find((option) => option.id === effectiveSelectedId) ?? quote.options[0])
-    : undefined;
+  const selected = quote?.options.find((option) => option.id === effectiveSelectedId);
 
   const updateForm = (update: (current: QuoteFormState) => QuoteFormState) => {
     const next = update(form);
@@ -677,7 +677,9 @@ export function QuoteWorkbench({
             {pending === 'save' ? '保存中…' : '保存草稿'}
           </Button>
           <Button
-            disabled={readOnly || !quote || !selected || quoteDirty || pending !== null}
+            disabled={
+              readOnly || !quote || !selected || !quoteAcceptable || quoteDirty || pending !== null
+            }
             onClick={() =>
               void run('submit', () => {
                 if (!quote || !selected) throw new Error('QUOTE_SNAPSHOT_REQUIRED');
@@ -802,7 +804,7 @@ export function QuoteWorkbench({
               >
                 {pending === 'explain' ? '加载解释…' : explanation ? '收起解释' : '查看解释'}
               </Button>
-              {state !== 'expired' && state !== 'stale' && state !== 'failed' ? (
+              {quoteAcceptable && state !== 'expired' && state !== 'stale' && state !== 'failed' ? (
                 <Button
                   size="compact"
                   disabled={readOnly || quoteDirty || pending !== null}

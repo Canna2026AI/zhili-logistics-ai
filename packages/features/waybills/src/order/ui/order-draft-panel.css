@@ -67,3 +67,20 @@
   justify-content: center;
   gap: 8px;
 }
+
+@media (max-width: 600px) {
+  .order-draft > header {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .order-fba,
+  .order-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .order-draft textarea {
+    box-sizing: border-box;
+    max-width: 100%;
+  }
+}

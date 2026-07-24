@@ -365,4 +365,88 @@ describe('ops orders workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '校验数据' }));
     await waitFor(() => expect(validate).toHaveBeenCalledWith(importId, 5));
   });
+
+  it('atomically clears mapping state when a second import batch is created', async () => {
+    const batchA = '01JY8Z8F6ME4F0Y9QH2X6D4R7E';
+    const batchB = '01JY8Z8F6ME4F0Y9QH2X6D4R7M';
+    const proposalA = {
+      id: '01JY8Z8F6ME4F0Y9QH2X6D4R7F',
+      importId: batchA,
+      model: 'Zhili-Map 2.1',
+      promptVersion: '2026.07',
+      status: 'READY' as const,
+      version: 3,
+      candidates: [
+        {
+          id: '01JY8Z8F6ME4F0Y9QH2X6D4R7G',
+          sourceColumn: 'province',
+          targetField: 'receiverState',
+          confidence: 0.32,
+          evidence: ['列名相似'],
+          risk: 'MEDIUM' as const,
+        },
+      ],
+    };
+    const proposalB = {
+      ...proposalA,
+      id: '01JY8Z8F6ME4F0Y9QH2X6D4R7N',
+      importId: batchB,
+      version: 1,
+      candidates: [
+        {
+          ...proposalA.candidates[0]!,
+          id: '01JY8Z8F6ME4F0Y9QH2X6D4R7P',
+          sourceColumn: 'state_code',
+          confidence: 0.96,
+          autoApplicable: true,
+        },
+      ],
+    };
+    const create = vi
+      .fn()
+      .mockResolvedValueOnce({ id: batchA, version: 4, status: 'UPLOADED' })
+      .mockResolvedValueOnce({ id: batchB, version: 1, status: 'UPLOADED' });
+    const proposeMapping = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error('AI 置信度不足'), {
+          name: 'DomainApiError',
+          status: 422,
+          code: 'AI_LOW_CONFIDENCE',
+          context: { proposal: proposalA },
+        })
+      )
+      .mockResolvedValueOnce(proposalB);
+    const applyMapping = vi.fn(async () => ({
+      id: batchA,
+      version: 5,
+      status: 'MAPPING',
+      evidence: { kind: 'audit' as const, auditId: 'AUD-BATCH-A-MAPPING' },
+    }));
+    render(
+      <OpsOrdersWorkspace
+        initialPage="imports"
+        ports={{ imports: { ...memoryImportPort, create, proposeMapping, applyMapping } }}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('导入 CSV'), {
+      target: { value: '客户,重量,目的地\n批次A,122,US-LAX' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '解析并映射' }));
+    await screen.findByText('4 个字段置信度不足');
+    fireEvent.click(screen.getByRole('button', { name: '进入人工映射' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认人工映射' }));
+    await screen.findByText(/AUD-BATCH-A-MAPPING/);
+
+    fireEvent.change(screen.getByLabelText('导入 CSV'), {
+      target: { value: '客户,重量,目的地\n批次B,88,US-ONT' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '解析并映射' }));
+
+    expect(await screen.findByText(/state_code.*receiverState/)).toBeVisible();
+    expect(screen.getByRole('button', { name: '应用字段映射' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: '校验数据' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/AUD-BATCH-A-MAPPING/)).not.toBeInTheDocument();
+  });
 });
