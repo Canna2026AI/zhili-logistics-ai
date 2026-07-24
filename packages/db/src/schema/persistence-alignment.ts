@@ -18,13 +18,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 
-import {
-  organizations,
-  sessions,
-  tenants,
-  users,
-  warehouses,
-} from './identity';
+import { organizations, sessions, tenants, users, warehouses } from './identity';
 import { partners } from './identity-contracts';
 import { idempotencyRecords } from './platform';
 import {
@@ -56,16 +50,11 @@ const tenantPolicy = (name: string) =>
 
 const versionCheck = (name: string) => check(name, sql`version >= 1`);
 const timestampsCheck = (name: string) => check(name, sql`updated_at >= created_at`);
-const tenantIdentityChecks = (
-  name: string,
-  table: { id: AnyPgColumn; tenantId: AnyPgColumn }
-) => [
-  check(`${name}_id_ulid_check`, sql`${table.id} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
-  check(
-    `${name}_tenant_id_ulid_check`,
-    sql`${table.tenantId} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`
-  ),
-] as const;
+const tenantIdentityChecks = (name: string, table: { id: AnyPgColumn; tenantId: AnyPgColumn }) =>
+  [
+    check(`${name}_id_ulid_check`, sql`${table.id} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
+    check(`${name}_tenant_id_ulid_check`, sql`${table.tenantId} ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
+  ] as const;
 
 export const userOrganizationMemberships = pgTable(
   'user_organization_memberships',
@@ -150,10 +139,7 @@ export const partnerContacts = pgTable(
       .where(sql`is_primary`),
     ...tenantIdentityChecks('partner_contacts', table),
     tenantPolicy('partner_contacts_tenant_isolation'),
-    check(
-      'partner_contacts_name_check',
-      sql`length(btrim(contact_name)) BETWEEN 1 AND 160`
-    ),
+    check('partner_contacts_name_check', sql`length(btrim(contact_name)) BETWEEN 1 AND 160`),
     check(
       'partner_contacts_channel_check',
       sql`contact_phone IS NOT NULL OR contact_email IS NOT NULL`
@@ -227,7 +213,10 @@ export const loginThrottleBuckets = pgTable(
     id: text().primaryKey().notNull(),
     tenantId: text('tenant_id'),
     loginKeyHash: text('login_key_hash').notNull(),
-    windowStartedAt: timestamp('window_started_at', { withTimezone: true, mode: 'string' }).notNull(),
+    windowStartedAt: timestamp('window_started_at', {
+      withTimezone: true,
+      mode: 'string',
+    }).notNull(),
     failureCount: integer('failure_count').default(0).notNull(),
     blockedUntil: timestamp('blocked_until', { withTimezone: true, mode: 'string' }),
     version: bigint({ mode: 'number' }).default(1).notNull(),
@@ -421,11 +410,7 @@ export const acceptedQuoteOrderLinks = pgTable(
     }).onDelete('restrict'),
     foreignKey({
       columns: [table.tenantId, table.quoteId, table.acceptedQuoteVersion],
-      foreignColumns: [
-        quoteVersions.tenantId,
-        quoteVersions.quoteId,
-        quoteVersions.versionNumber,
-      ],
+      foreignColumns: [quoteVersions.tenantId, quoteVersions.quoteId, quoteVersions.versionNumber],
       name: 'accepted_quote_order_links_version_number_fk',
     }).onDelete('restrict'),
     foreignKey({
@@ -710,10 +695,7 @@ export const transactionCommandContexts = pgTable(
       table.tenantId,
       table.idempotencyRecordId
     ),
-    unique('transaction_command_contexts_key_unique').on(
-      table.tenantId,
-      table.idempotencyKey
-    ),
+    unique('transaction_command_contexts_key_unique').on(table.tenantId, table.idempotencyKey),
     ...tenantIdentityChecks('transaction_command_contexts', table),
     tenantPolicy('transaction_command_contexts_tenant_isolation'),
     check('transaction_command_contexts_hash_check', sql`request_hash ~ '^[0-9a-f]{64}$'`),
@@ -907,11 +889,7 @@ export const warehouseStocktakeItems = pgTable(
       table.stocktakeId,
       table.itemSequence
     ),
-    unique('warehouse_stocktake_items_sku_unique').on(
-      table.tenantId,
-      table.stocktakeId,
-      table.sku
-    ),
+    unique('warehouse_stocktake_items_sku_unique').on(table.tenantId, table.stocktakeId, table.sku),
     ...tenantIdentityChecks('warehouse_stocktake_items', table),
     tenantPolicy('warehouse_stocktake_items_tenant_isolation'),
     check(
@@ -1059,10 +1037,7 @@ export const fbaShipmentLinks = pgTable(
     unique('fba_shipment_links_amazon_unique').on(table.tenantId, table.amazonShipmentId),
     ...tenantIdentityChecks('fba_shipment_links', table),
     tenantPolicy('fba_shipment_links_tenant_isolation'),
-    check(
-      'fba_shipment_links_status_check',
-      sql`status IN ('LINKED', 'CONFIRMED', 'CANCELLED')`
-    ),
+    check('fba_shipment_links_status_check', sql`status IN ('LINKED', 'CONFIRMED', 'CANCELLED')`),
     versionCheck('fba_shipment_links_version_check'),
     timestampsCheck('fba_shipment_links_timestamps_check'),
   ]
@@ -1151,10 +1126,7 @@ export const lastMileIntakes = pgTable(
     tenantPolicy('last_mile_intakes_tenant_isolation'),
     check('last_mile_intakes_source_check', sql`source_type IN ('LINEHAUL', 'PARTNER')`),
     check('last_mile_intakes_status_check', sql`status IN ('OPEN', 'RECONCILING', 'CLOSED')`),
-    check(
-      'last_mile_intakes_count_check',
-      sql`expected_count >= 0 AND scanned_count >= 0`
-    ),
+    check('last_mile_intakes_count_check', sql`expected_count >= 0 AND scanned_count >= 0`),
     versionCheck('last_mile_intakes_version_check'),
     timestampsCheck('last_mile_intakes_timestamps_check'),
   ]
@@ -1463,10 +1435,7 @@ export const partnerEventReplayAttempts = pgTable(
       table.partnerEventReceiptId,
       table.attemptNumber
     ),
-    unique('partner_event_replay_attempts_outbox_unique').on(
-      table.tenantId,
-      table.outboxDedupeKey
-    ),
+    unique('partner_event_replay_attempts_outbox_unique').on(table.tenantId, table.outboxDedupeKey),
     ...tenantIdentityChecks('partner_event_replay_attempts', table),
     tenantPolicy('partner_event_replay_attempts_tenant_isolation'),
     check('partner_event_replay_attempts_number_check', sql`attempt_number >= 1`),
@@ -1511,10 +1480,7 @@ export const lastMileChargeGenerations = pgTable(
     }).onDelete('cascade'),
     unique('last_mile_charge_generations_identity_unique').on(table.tenantId, table.id),
     unique('last_mile_charge_generations_request_unique').on(table.tenantId, table.requestHash),
-    unique('last_mile_charge_generations_outbox_unique').on(
-      table.tenantId,
-      table.outboxDedupeKey
-    ),
+    unique('last_mile_charge_generations_outbox_unique').on(table.tenantId, table.outboxDedupeKey),
     ...tenantIdentityChecks('last_mile_charge_generations', table),
     tenantPolicy('last_mile_charge_generations_tenant_isolation'),
     check('last_mile_charge_generations_currency_check', sql`currency ~ '^[A-Z]{3}$'`),

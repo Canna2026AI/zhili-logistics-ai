@@ -827,10 +827,7 @@ export const billsOfLading = pgTable(
       'bills_of_lading_status_check',
       sql`status = ANY (ARRAY['DRAFT'::text, 'CONFIRMED'::text, 'DEPARTED'::text, 'CLOSED'::text, 'ISSUED'::text, 'VOID'::text])`
     ),
-    check(
-      'bills_of_lading_type_check',
-      sql`bill_type IS NULL OR bill_type IN ('MASTER', 'HOUSE')`
-    ),
+    check('bills_of_lading_type_check', sql`bill_type IS NULL OR bill_type IN ('MASTER', 'HOUSE')`),
     check(
       'bills_of_lading_parent_check',
       sql`parent_bill_of_lading_id IS NULL OR parent_bill_of_lading_id <> id`
@@ -1424,11 +1421,7 @@ export const deviceMediaReservations = pgTable(
       .notNull(),
   },
   (table) => [
-    index('device_media_reservations_expiry_idx').on(
-      table.tenantId,
-      table.status,
-      table.expiresAt
-    ),
+    index('device_media_reservations_expiry_idx').on(table.tenantId, table.status, table.expiresAt),
     foreignKey({
       columns: [table.tenantId],
       foreignColumns: [tenants.id],
@@ -1468,10 +1461,7 @@ export const deviceMediaReservations = pgTable(
       withCheck: sql`(tenant_id = NULLIF(current_setting('app.tenant_id'::text, true), ''::text))`,
     }),
     check('device_media_reservations_hash_check', sql`content_hash ~ '^[0-9a-f]{64}$'`),
-    check(
-      'device_media_reservations_id_ulid_check',
-      sql`id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`
-    ),
+    check('device_media_reservations_id_ulid_check', sql`id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`),
     check(
       'device_media_reservations_tenant_id_ulid_check',
       sql`tenant_id ~ '^[0-7][0-9A-HJKMNP-TV-Z]{25}$'`

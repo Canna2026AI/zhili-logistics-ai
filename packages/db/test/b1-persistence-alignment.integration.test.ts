@@ -330,9 +330,7 @@ describe('B1 persistence alignment behavior', () => {
   });
 
   it('atomically replaces tenant entitlements with CAS and idempotent replay', async () => {
-    await admin.unsafe(
-      "ALTER ROLE zhili_control_plane WITH LOGIN PASSWORD 'alignment-control'"
-    );
+    await admin.unsafe("ALTER ROLE zhili_control_plane WITH LOGIN PASSWORD 'alignment-control'");
     const controlUrl = new URL(container.getConnectionUri());
     controlUrl.username = 'zhili_control_plane';
     controlUrl.password = 'alignment-control';
@@ -377,9 +375,7 @@ describe('B1 persistence alignment behavior', () => {
         control`
           SELECT * FROM control_plane_replace_entitlements(
             ${tenantA}, ${userA}, ${tenantB}, 1,
-            ${control.json([
-              { ...modules[0], id: '01J2000000000000000000081B' },
-            ])}::jsonb,
+            ${control.json([{ ...modules[0], id: '01J2000000000000000000081B' }])}::jsonb,
             ${staleOperationA}, 'replace-entitlements-stale', ${'d'.repeat(64)}
           )
         `

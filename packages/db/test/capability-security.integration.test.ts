@@ -27,7 +27,12 @@ const rollbackEntitlementOperationId = '01J3000000000000000000054A';
 const realPasswordHash =
   '$argon2id$v=19$m=65536,t=3,p=1$emhpbGktYXV0aC1zZWN1cmU$MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY';
 
-function databaseUrl(baseUri: string, database: string, username: string, password: string): string {
+function databaseUrl(
+  baseUri: string,
+  database: string,
+  username: string,
+  password: string
+): string {
   const url = new URL(baseUri);
   url.pathname = `/${database}`;
   url.username = username;
@@ -133,12 +138,7 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
       `
     ).toEqual([{ can_create: true, can_use: true }]);
     attacker = postgres(
-      databaseUrl(
-        baseUri,
-        'b1_capability_security',
-        'b1_legacy_attacker',
-        'attacker-secret'
-      ),
+      databaseUrl(baseUri, 'b1_capability_security', 'b1_legacy_attacker', 'attacker-secret'),
       { max: 1 }
     );
     await attacker.unsafe(`
@@ -312,9 +312,9 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
       ) AS public_can_create
     `;
     expect(schemaAcl).toEqual({ public_can_create: false });
-    await expect(attacker`CREATE TABLE public.post_migration_shadow(id integer)`).rejects.toMatchObject(
-      { code: '42501' }
-    );
+    await expect(
+      attacker`CREATE TABLE public.post_migration_shadow(id integer)`
+    ).rejects.toMatchObject({ code: '42501' });
 
     await databaseAdmin`
       INSERT INTO tenants (id, slug, display_name) VALUES
@@ -436,9 +436,9 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
       await expect(control`SELECT id FROM public.tenants LIMIT 1`).rejects.toMatchObject({
         code: '42501',
       });
-      await expect(
-        control.unsafe('SET ROLE zhili_control_capability_owner')
-      ).rejects.toMatchObject({ code: '42501' });
+      await expect(control.unsafe('SET ROLE zhili_control_capability_owner')).rejects.toMatchObject(
+        { code: '42501' }
+      );
 
       // Down-only is a supported operating state: the restored 0001 functions remain
       // shadow-safe and can read/write through rollback-scoped policies for this offline owner.
@@ -501,9 +501,7 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
             ${'b'.repeat(64)}
           )
         `
-      ).toEqual([
-        { tenant_id: rollbackTenantId, status: 'ACTIVE', version: '1', replayed: false },
-      ]);
+      ).toEqual([{ tenant_id: rollbackTenantId, status: 'ACTIVE', version: '1', replayed: false }]);
       expect(
         await control`
           SELECT tenant_id, status, version::text, replayed
@@ -512,9 +510,7 @@ it('hardens every capability against owner RLS bypass, public shadowing, and sen
             ${rollbackStatusOperationId}, 'rollback-status', ${'c'.repeat(64)}
           )
         `
-      ).toEqual([
-        { tenant_id: targetTenantId, status: 'ACTIVE', version: '3', replayed: false },
-      ]);
+      ).toEqual([{ tenant_id: targetTenantId, status: 'ACTIVE', version: '3', replayed: false }]);
       expect(
         await control`
           SELECT tenant_id, module_code, entitlement_version,
@@ -633,10 +629,9 @@ it('rejects 0001-incompatible data before mutating the complete 0002 capability 
       )
     `;
     await databaseAdmin.unsafe("ALTER ROLE zhili_auth WITH LOGIN PASSWORD 'auth-secret'");
-    auth = postgres(
-      databaseUrl(baseUri, 'b1_rollback_preflight', 'zhili_auth', 'auth-secret'),
-      { max: 1 }
-    );
+    auth = postgres(databaseUrl(baseUri, 'b1_rollback_preflight', 'zhili_auth', 'auth-secret'), {
+      max: 1,
+    });
 
     let rollbackError: unknown;
     try {
@@ -650,9 +645,7 @@ it('rejects 0001-incompatible data before mutating the complete 0002 capability 
     });
     const rollbackDetail = (rollbackError as { detail?: string }).detail;
     expect(rollbackDetail).toContain('"table": "organizations"');
-    expect(rollbackDetail).toContain(
-      '"field_or_constraint": "organization_type 0001 check"'
-    );
+    expect(rollbackDetail).toContain('"field_or_constraint": "organization_type 0001 check"');
     expect(rollbackDetail).toContain('"violating_count": 1');
 
     expect(await capabilityFunctions(databaseAdmin)).toEqual(functionsBeforeRejectedDown);
@@ -702,17 +695,10 @@ it('targets down-only policies at the non-super schema owner when a superuser ru
       CREATE ROLE b1_external_schema_owner
         LOGIN PASSWORD 'owner-secret' NOSUPERUSER CREATEDB CREATEROLE NOINHERIT NOBYPASSRLS;
     `);
-    await clusterAdmin.unsafe(
-      'CREATE DATABASE b1_super_down OWNER b1_external_schema_owner'
-    );
+    await clusterAdmin.unsafe('CREATE DATABASE b1_super_down OWNER b1_external_schema_owner');
     const containerAdminUrl = new URL(baseUri);
     databaseAdmin = postgres(
-      databaseUrl(
-        baseUri,
-        'b1_super_down',
-        containerAdminUrl.username,
-        containerAdminUrl.password
-      ),
+      databaseUrl(baseUri, 'b1_super_down', containerAdminUrl.username, containerAdminUrl.password),
       { max: 1 }
     );
     schemaOwner = postgres(

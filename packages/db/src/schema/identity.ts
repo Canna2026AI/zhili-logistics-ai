@@ -58,8 +58,14 @@ export const tenants = pgTable(
       sql`status = ANY (ARRAY['ACTIVE'::text, 'SUSPENDED'::text, 'EXPIRED'::text])`
     ),
     check('tenants_version_check', sql`version >= 1`),
-    check('tenants_timezone_check', sql`default_timezone IS NULL OR length(btrim(default_timezone)) BETWEEN 1 AND 64`),
-    check('tenants_currency_check', sql`default_currency IS NULL OR default_currency ~ '^[A-Z]{3}$'::text`),
+    check(
+      'tenants_timezone_check',
+      sql`default_timezone IS NULL OR length(btrim(default_timezone)) BETWEEN 1 AND 64`
+    ),
+    check(
+      'tenants_currency_check',
+      sql`default_currency IS NULL OR default_currency ~ '^[A-Z]{3}$'::text`
+    ),
     check('tenants_reserved_sentinel_check', sql`id <> '00000000000000000000000000'::text`),
     check('tenants_timestamps_check', sql`updated_at >= created_at`),
   ]
@@ -294,10 +300,7 @@ export const users = pgTable(
       'users_display_name_check',
       sql`(length(btrim(display_name)) >= 1) AND (length(btrim(display_name)) <= 160)`
     ),
-    check(
-      'users_mobile_check',
-      sql`mobile IS NULL OR length(btrim(mobile)) BETWEEN 3 AND 32`
-    ),
+    check('users_mobile_check', sql`mobile IS NULL OR length(btrim(mobile)) BETWEEN 3 AND 32`),
     check(
       'users_password_hash_check',
       sql`(password_hash IS NULL) OR (password_hash ~~ '$argon2id$%'::text)`
@@ -369,7 +372,10 @@ export const customers = pgTable(
       sql`status = ANY (ARRAY['ACTIVE'::text, 'ON_HOLD'::text, 'INACTIVE'::text])`
     ),
     check('customers_version_check', sql`version >= 1`),
-    check('customers_settlement_currency_check', sql`settlement_currency IS NULL OR settlement_currency ~ '^[A-Z]{3}$'::text`),
+    check(
+      'customers_settlement_currency_check',
+      sql`settlement_currency IS NULL OR settlement_currency ~ '^[A-Z]{3}$'::text`
+    ),
     check('customers_timestamps_check', sql`updated_at >= created_at`),
   ]
 ).enableRLS();

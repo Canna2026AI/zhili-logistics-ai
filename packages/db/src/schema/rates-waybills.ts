@@ -382,7 +382,10 @@ export const rateRules = pgTable(
       'rate_rules_semantic_metadata_check',
       sql`(rule_code IS NULL OR length(btrim(rule_code)) BETWEEN 1 AND 64) AND (charge_code IS NULL OR length(btrim(charge_code)) BETWEEN 1 AND 64) AND (price_type IS NULL OR price_type IN ('COST', 'AGENT', 'CUSTOMER', 'SPECIAL')) AND (zone_code IS NULL OR length(btrim(zone_code)) BETWEEN 1 AND 64) AND (effective_until IS NULL OR effective_from IS NULL OR effective_until > effective_from)`
     ),
-    check('rate_rules_state_check', sql`state = ANY (ARRAY['DRAFT'::text, 'ACTIVE'::text, 'INACTIVE'::text])`),
+    check(
+      'rate_rules_state_check',
+      sql`state = ANY (ARRAY['DRAFT'::text, 'ACTIVE'::text, 'INACTIVE'::text])`
+    ),
     check('rate_rules_version_check', sql`version >= 1`),
     check('rate_rules_timestamps_check', sql`updated_at >= created_at`),
   ]
@@ -1401,7 +1404,10 @@ export const customsDeclarations = pgTable(
       'customs_declarations_number_check',
       sql`declaration_number IS NULL OR length(btrim(declaration_number)) BETWEEN 1 AND 100`
     ),
-    check('customs_declarations_incoterm_check', sql`incoterm IS NULL OR incoterm ~ '^[A-Z]{3}$'::text`),
+    check(
+      'customs_declarations_incoterm_check',
+      sql`incoterm IS NULL OR incoterm ~ '^[A-Z]{3}$'::text`
+    ),
     check(
       'customs_declarations_money_check',
       sql`(currency ~ '^[A-Z]{3}$'::text) AND (total_value_minor >= 0)`
@@ -1479,8 +1485,14 @@ export const declarationItems = pgTable(
       'declaration_items_description_check',
       sql`(length(btrim(description)) >= 1) AND (length(btrim(description)) <= 500)`
     ),
-    check('declaration_items_hs_code_check', sql`hs_code IS NULL OR hs_code ~ '^[0-9]{6,12}$'::text`),
-    check('declaration_items_origin_check', sql`origin_country_code IS NULL OR origin_country_code ~ '^[A-Z]{2}$'::text`),
+    check(
+      'declaration_items_hs_code_check',
+      sql`hs_code IS NULL OR hs_code ~ '^[0-9]{6,12}$'::text`
+    ),
+    check(
+      'declaration_items_origin_check',
+      sql`origin_country_code IS NULL OR origin_country_code ~ '^[A-Z]{2}$'::text`
+    ),
     check('declaration_items_quantity_check', sql`quantity > 0`),
     check(
       'declaration_items_money_check',
