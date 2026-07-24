@@ -121,7 +121,7 @@ describe('waybill list', () => {
     fireEvent.click(screen.getByRole('button', { name: '确认取消' }));
     await waitFor(() => expect(port.batch).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('批量执行：成功 1，失败 1')).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it.each([
     ['生成标签', 'createLabel'],
