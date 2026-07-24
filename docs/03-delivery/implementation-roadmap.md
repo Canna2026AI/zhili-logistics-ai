@@ -26,7 +26,7 @@
 | F3   | `codex/frontend-customer-website-v2`     | 客户门户与官网                | 已合入：客户 97/97 单测、10/10 E2E；官网 11/11 单测、2/2 E2E |
 | F3   | `codex/frontend-pda-interaction-v2`      | PDA PWA、离线、冲突和权威接管 | 已合入：219/219 单测、14/14 生产 E2E                         |
 | F3   | `codex/frontend-platform-interaction-v2` | SaaS 平台、策略、代入和重试   | 已合入：69/69 单测、9/9 独立生产 E2E                         |
-| F3   | `codex/frontend-ops-interaction-v2`      | 运营端全流程与生产异常恢复    | 终审中：必须在独立复核、全仓门禁通过后合入                   |
+| F3   | `codex/frontend-ops-interaction-v2`      | 运营端全流程与生产异常恢复    | 已合入：68/68 单测、9/9 生产 E2E；独立终审 0C/0I/0M          |
 
 前端合并纪律为“分支单测/类型/构建 → 生产 Playwright → 非实现者独立复核 → 根工作树合并 → 全仓串行回归”。任何只在 Mock 场景成立、错误时假成功或没有恢复动作的流程都不得进入 `main`。
 

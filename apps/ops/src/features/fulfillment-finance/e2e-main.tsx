@@ -9,6 +9,9 @@ if (!root) throw new Error('Missing #root');
 
 createRoot(root).render(
   <StrictMode>
-    <FulfillmentFinanceApplication commandPort={createInMemoryFulfillmentFinanceCommandPort()} />
+    <FulfillmentFinanceApplication
+      commandPort={createInMemoryFulfillmentFinanceCommandPort()}
+      showScenarioControls
+    />
   </StrictMode>
 );

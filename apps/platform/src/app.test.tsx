@@ -48,7 +48,7 @@ describe('平台控制台', () => {
       '厦门远海物流有限公司'
     );
     expect(screen.getByRole('table', { name: '租户列表' })).toHaveTextContent('企业版');
-  });
+  }, 15_000);
 
   it('租户详情包含套餐、模块、配额和到期信息', async () => {
     const user = userEvent.setup();

@@ -4,7 +4,7 @@
 
 当前仓库以 `reports/` 中的竞品研究为需求证据，按“架构与文档 → UI/交互冻结 → 前端 → 后端 → 集成验收”的顺序建设。产品对齐 T6 的业务心智、状态流程和操作效率，但使用独立的智立品牌、设计系统、源码与文案。
 
-UI0 已建立可运行的 React/Vite 五端入口、共享设计令牌与组件、OpenAPI 3.1 契约、强类型客户端、MSW 异常场景、Storybook 和 Playwright 浏览器验收。业务功能将按 `packages/features/<domain>/<feature>` 拆分，并通过 Git 工作树并行实现。
+UI/交互与统一前端阶段已经完成：五端 React/Vite 入口、共享设计令牌与组件、OpenAPI 3.1 契约、强类型客户端、MSW 异常场景、Storybook、离线恢复与生产 Playwright 验收均已合入 `main`。业务功能按 `packages/features/<domain>/<feature>` 拆分，运营端、客户门户、PDA、SaaS 平台端和官网均可独立协作。真实后端仍处于 B1 领域实现阶段；在后端总门槛关闭前，前四端使用显式 `?mock=1` 体验完整交互。
 
 ## 交付端
 
