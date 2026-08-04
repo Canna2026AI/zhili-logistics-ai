@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@zhili/contracts": "workspace:*",
-    "openapi-fetch": "^0.14.0"
+    "openapi-fetch": "^0.17.0"
   },
   "devDependencies": {
     "msw": "^2.15.0"
